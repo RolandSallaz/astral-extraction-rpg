@@ -5,23 +5,33 @@ import { PlayerEntity } from '../players/entities/player.entity';
 import { JoinPartyDto } from './dto/join-party.dto';
 import { AckPendingRaidDto } from './dto/ack-pending-raid.dto';
 import { SetReadyDto } from './dto/set-ready.dto';
-import { PartiesService } from './parties.service';
+import { AckPendingRaidUseCase } from './use-cases/ack-pending-raid.use-case';
+import { CreatePartyUseCase } from './use-cases/create-party.use-case';
+import { GetMyPartyQuery } from './use-cases/get-my-party.query';
+import { JoinPartyUseCase } from './use-cases/join-party.use-case';
+import { LeavePartyUseCase } from './use-cases/leave-party.use-case';
+import { SetPartyReadyUseCase } from './use-cases/set-party-ready.use-case';
 
 @UseGuards(AuthGuard)
 @Controller('parties')
 export class PartiesController {
   constructor(
-    private readonly partiesService: PartiesService,
+    private readonly getMyPartyQuery: GetMyPartyQuery,
+    private readonly createPartyUseCase: CreatePartyUseCase,
+    private readonly joinPartyUseCase: JoinPartyUseCase,
+    private readonly setPartyReadyUseCase: SetPartyReadyUseCase,
+    private readonly leavePartyUseCase: LeavePartyUseCase,
+    private readonly ackPendingRaidUseCase: AckPendingRaidUseCase,
   ) {}
 
   @Get('me')
   getMyParty(@CurrentPlayer() player: PlayerEntity) {
-    return this.partiesService.getPartyForPlayer(player);
+    return this.getMyPartyQuery.execute(player);
   }
 
   @Post()
   createParty(@CurrentPlayer() player: PlayerEntity) {
-    return this.partiesService.createParty(player);
+    return this.createPartyUseCase.execute(player);
   }
 
   @Post('join')
@@ -29,7 +39,7 @@ export class PartiesController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: JoinPartyDto,
   ) {
-    return this.partiesService.joinParty(player, body);
+    return this.joinPartyUseCase.execute(player, body);
   }
 
   @Post('ready')
@@ -37,12 +47,12 @@ export class PartiesController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: SetReadyDto,
   ) {
-    return this.partiesService.setReady(player, body.ready);
+    return this.setPartyReadyUseCase.execute(player, body.ready);
   }
 
   @Post('leave')
   leaveParty(@CurrentPlayer() player: PlayerEntity) {
-    return this.partiesService.leaveParty(player);
+    return this.leavePartyUseCase.execute(player);
   }
 
   @Post('ack-raid')
@@ -50,6 +60,6 @@ export class PartiesController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: AckPendingRaidDto,
   ) {
-    return this.partiesService.ackPendingRaid(player, body.raidRunId);
+    return this.ackPendingRaidUseCase.execute(player, body.raidRunId);
   }
 }

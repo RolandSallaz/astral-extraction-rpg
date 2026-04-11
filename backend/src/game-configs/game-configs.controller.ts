@@ -6,32 +6,34 @@ import { UpdateMobBalanceDto } from './dto/update-mob-balance.dto';
 import { UpdateMobVisualsDto } from './dto/update-mob-visuals.dto';
 import { UpdateSkillBalanceDto } from './dto/update-skill-balance.dto';
 import type { ItemBalanceEntry } from './item-balance.defaults';
-import { GameConfigsService } from './game-configs.service';
+import { GetGameConfigsQuery } from './use-cases/get-game-configs.query';
+import { UpdateGameConfigsUseCase } from './use-cases/update-game-configs.use-case';
 
 @Controller('game-configs')
 export class GameConfigsController {
   constructor(
-    private readonly gameConfigsService: GameConfigsService,
+    private readonly getGameConfigsQuery: GetGameConfigsQuery,
+    private readonly updateGameConfigsUseCase: UpdateGameConfigsUseCase,
   ) {}
 
   @Get('skill-balance')
   getSkillBalance() {
-    return this.gameConfigsService.getSkillBalance();
+    return this.getGameConfigsQuery.skillBalance();
   }
 
   @Get('mob-balance')
   getMobBalance() {
-    return this.gameConfigsService.getMobBalance();
+    return this.getGameConfigsQuery.mobBalance();
   }
 
   @Get('item-balance')
   getItemBalance() {
-    return this.gameConfigsService.getItemBalance();
+    return this.getGameConfigsQuery.itemBalance();
   }
 
   @Get('mob-visuals')
   getMobVisuals() {
-    return this.gameConfigsService.getMobVisuals();
+    return this.getGameConfigsQuery.mobVisuals();
   }
 
   @UseGuards(AuthGuard)
@@ -40,7 +42,7 @@ export class GameConfigsController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: UpdateSkillBalanceDto,
   ) {
-    return this.gameConfigsService.updateSkillBalance(player, body);
+    return this.updateGameConfigsUseCase.skillBalance(player, body);
   }
 
   @UseGuards(AuthGuard)
@@ -49,7 +51,7 @@ export class GameConfigsController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: UpdateMobBalanceDto,
   ) {
-    return this.gameConfigsService.updateMobBalance(player, body);
+    return this.updateGameConfigsUseCase.mobBalance(player, body);
   }
 
   @UseGuards(AuthGuard)
@@ -58,7 +60,7 @@ export class GameConfigsController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: Record<string, Partial<ItemBalanceEntry>>,
   ) {
-    return this.gameConfigsService.updateItemBalance(player, body);
+    return this.updateGameConfigsUseCase.itemBalance(player, body);
   }
 
   @UseGuards(AuthGuard)
@@ -67,6 +69,6 @@ export class GameConfigsController {
     @CurrentPlayer() player: PlayerEntity,
     @Body() body: UpdateMobVisualsDto,
   ) {
-    return this.gameConfigsService.updateMobVisuals(player, body);
+    return this.updateGameConfigsUseCase.mobVisuals(player, body);
   }
 }
