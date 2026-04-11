@@ -36,6 +36,16 @@ export class GameConfigsController {
     return this.getGameConfigsQuery.mobVisuals();
   }
 
+  @Get('content-version')
+  getContentVersion() {
+    return this.getGameConfigsQuery.contentVersion();
+  }
+
+  @Get('content-snapshot')
+  getContentSnapshot() {
+    return this.getGameConfigsQuery.contentSnapshot();
+  }
+
   @UseGuards(AuthGuard)
   @Patch('skill-balance')
   updateSkillBalance(

@@ -74,7 +74,7 @@ import {
 import { BurnService } from "./services/BurnService.js";
 import { HealingService } from "./services/HealingService.js";
 import { SpatialGrid } from "./services/SpatialGrid.js";
-import { BalancePoller } from "./services/BalancePoller.js";
+import { ContentSnapshotPoller } from "./services/ContentSnapshotPoller.js";
 import { canCastSkill, type SkillId } from "@mmorpg/shared/skills/registry";
 import {
   applyRoomProjectileLifesteal,
@@ -120,6 +120,7 @@ import type { ChestState } from "./schema/ChestState.js";
 import { GroundEffectState } from "./schema/GroundEffectState.js";
 import type { ProjectileState } from "./schema/ProjectileState.js";
 import { applyDamageToPlayer as applyDamageToPlayerService } from "./services/CombatService.js";
+import { SharedCombatTickSystem } from "./systems/RoomTickSystems.js";
 
 // Re-export types subclasses need
 export type { DamageType } from "./projectileSkills.js";
@@ -205,12 +206,35 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected readonly mobSpatialGrid = new SpatialGrid<MobState>(64);
   protected readonly playerSpatialOrder = new Map<string, number>();
   protected readonly mobSpatialOrder = new Map<string, number>();
-  protected readonly balancePoller = new BalancePoller({
-    onSkillBalance: (data) => this.applyBackendSkillBalance(data),
-    onMobBalance: (data) => this.applyBackendMobBalance(data),
-    onItemBalance: (data) => this.applyBackendItemBalance(data),
+  protected readonly contentSnapshotPoller = new ContentSnapshotPoller({
+    onSnapshot: (snapshot) => {
+      this.applyBackendSkillBalance(snapshot.skillBalance);
+      this.applyBackendMobBalance(snapshot.mobBalance);
+      this.applyBackendItemBalance(snapshot.itemBalance);
+    },
   });
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
+  protected readonly sharedCombatTickSystem = new SharedCombatTickSystem({
+    updatePendingCasts: (now) => this.updatePendingCasts(now),
+    updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
+    updatePendingAftershocks: (now) => this.updatePendingAftershocks(now),
+    updateBurningTargets: (now) => this.updateBurningTargets(now),
+    updateHealingTargets: (now) => this.updateHealingTargets(now),
+    updateGroundEffects: (now) => this.updateGroundEffects(now),
+    updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
+  });
+  protected readonly sharedRaidCombatTickSystem = new SharedCombatTickSystem(
+    {
+      updatePendingCasts: (now) => this.updatePendingCasts(now),
+      updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
+      updatePendingAftershocks: (now) => this.updatePendingAftershocks(now),
+      updateBurningTargets: (now) => this.updateBurningTargets(now),
+      updateHealingTargets: (now) => this.updateHealingTargets(now),
+      updateGroundEffects: (now) => this.updateGroundEffects(now),
+      updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
+      updateBurningMobs: (now) => this.updateBurningMobs(now),
+    },
+  );
 
   // ── Auth (identical in both rooms) ───────────────────────────────
   protected async verifyAuth(options?: Record<string, unknown>) {
@@ -227,7 +251,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
   // ── Dispose (identical in both rooms) ────────────────────────────
   protected disposeShared() {
-    this.balancePoller.stop();
+    this.contentSnapshotPoller.stop();
     this.playerBurns.clear();
     this.mobBurns.clear();
     this.playerHealing.clear();

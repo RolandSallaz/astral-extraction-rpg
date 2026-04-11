@@ -1,26 +1,15 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { PartiesService } from '../parties/parties.service';
-import { PlayerEntity } from '../players/entities/player.entity';
-import {
-  getIntroductionQuestProgress,
-  hasStartedIntroductionQuest,
-} from '../players/player-quest.types';
-import { generateRaidLayoutForTemplate } from './raid-procgen';
-import { StartRaidDto } from './dto/start-raid.dto';
 import { RaidRunEntity } from './entities/raid-run.entity';
 import type { RaidTemplateDefinition } from '@mmorpg/shared/raids/templates';
 import { RaidTemplateFiles } from './raid-template-files';
-
-const RECENT_RAID_REUSE_WINDOW_MS = 60_000;
 
 @Injectable()
 export class RaidsService {
   constructor(
     @InjectRepository(RaidRunEntity)
     private readonly raidRunsRepository: Repository<RaidRunEntity>,
-    private readonly partiesService: PartiesService,
     private readonly raidTemplateFiles: RaidTemplateFiles,
   ) {}
 
@@ -29,80 +18,6 @@ export class RaidsService {
     return templates
       .filter((template) => template.isActive)
       .map((template) => this.serializeTemplate(template));
-  }
-
-  async startRaid(player: PlayerEntity, input: StartRaidDto) {
-    const template = await this.requireActiveTemplate(input.templateCode);
-
-    if (template.code === 'crypt_small') {
-      const introductionQuest = getIntroductionQuestProgress(player.quests);
-      if (!hasStartedIntroductionQuest(player.quests)) {
-        throw new BadRequestException('Start the introduction quest with the Old Mage first.');
-      }
-
-      if (introductionQuest.status === 'ready' || introductionQuest.status === 'completed') {
-        throw new BadRequestException('The first crypt can only be completed once.');
-      }
-    }
-
-    const party = await this.partiesService.requirePartyLeader(player).catch(() => null);
-    const playerCount = party ? party.members.length : 1;
-
-    if (playerCount < template.minPlayers || playerCount > template.maxPlayers) {
-      throw new BadRequestException('Party size does not match raid template.');
-    }
-
-    const reusedRun = await this.findRecentJoinableRun(template, playerCount);
-    if (reusedRun) {
-      reusedRun.playerCount += playerCount;
-      const savedRun = await this.raidRunsRepository.save(reusedRun);
-      return {
-        ...this.serializeRun(savedRun),
-        joinedExisting: true,
-        realtimeRoom: this.createRealtimeRoom(savedRun),
-      };
-    }
-
-    const seed = `${template.code}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const layout = generateRaidLayoutForTemplate(
-      template.code,
-      seed,
-      template.width,
-      template.height,
-    );
-    const run = this.raidRunsRepository.create({
-      seed,
-      status: 'ready',
-      playerCount,
-      generatedLayout: layout,
-      startedAt: new Date(),
-      finishedAt: null,
-      templateCode: template.code,
-      templateName: template.name,
-      biome: template.biome,
-      minPlayers: template.minPlayers,
-      maxPlayers: template.maxPlayers,
-      width: template.width,
-      height: template.height,
-      party: party ?? null,
-    });
-
-    const savedRun = await this.raidRunsRepository.save(run);
-    const realtimeRoom = this.createRealtimeRoom(savedRun);
-
-    if (party) {
-      await this.partiesService.markPendingRaidForParty(party.id, {
-        raidRunId: savedRun.id,
-        startedAt: savedRun.startedAt?.toISOString() ?? null,
-        realtimeRoom,
-      });
-    }
-
-    return {
-      ...this.serializeRun(savedRun),
-      joinedExisting: false,
-      realtimeRoom,
-    };
   }
 
   async getRun(id: string) {
@@ -115,19 +30,6 @@ export class RaidsService {
     }
 
     return this.serializeRun(run);
-  }
-
-  private async requireActiveTemplate(templateCode: string) {
-    const templates = await this.raidTemplateFiles.listTemplates();
-    const template = templates.find(
-      (candidate) => candidate.code === templateCode && candidate.isActive,
-    );
-
-    if (!template) {
-      throw new NotFoundException('Raid template not found.');
-    }
-
-    return template;
   }
 
   private serializeTemplate(template: RaidTemplateDefinition) {
@@ -171,38 +73,4 @@ export class RaidsService {
     };
   }
 
-  private createRealtimeRoom(run: RaidRunEntity) {
-    return {
-      roomName: 'raid',
-      options: {
-        raidRunId: run.id,
-        templateCode: run.templateCode,
-        templateName: run.templateName,
-        biome: run.biome,
-        seed: run.seed,
-        width: run.width,
-        height: run.height,
-      },
-    } as const;
-  }
-
-  private async findRecentJoinableRun(
-    template: RaidTemplateDefinition,
-    requestedPlayerCount: number,
-  ) {
-    const cutoff = new Date(Date.now() - RECENT_RAID_REUSE_WINDOW_MS);
-    const maxJoinedPlayerCount = Math.max(0, template.maxPlayers - requestedPlayerCount);
-
-    return this.raidRunsRepository
-      .createQueryBuilder('run')
-      .leftJoinAndSelect('run.party', 'party')
-      .where('run.templateCode = :templateCode', { templateCode: template.code })
-      .andWhere('run.status = :status', { status: 'ready' })
-      .andWhere('run.finishedAt IS NULL')
-      .andWhere('run.startedAt IS NOT NULL')
-      .andWhere('run.startedAt >= :cutoff', { cutoff })
-      .andWhere('run.playerCount <= :maxJoinedPlayerCount', { maxJoinedPlayerCount })
-      .orderBy('run.startedAt', 'DESC')
-      .getOne();
-  }
 }

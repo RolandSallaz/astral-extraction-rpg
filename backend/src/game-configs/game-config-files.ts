@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import {
   getItemBalancePath,
   getMobBalancePath,
@@ -111,5 +113,32 @@ export class GameConfigFiles {
   async writeMobVisuals(config: MobVisualConfig) {
     await writeJsonFile(this.mobVisualsPath, config);
     return config;
+  }
+
+  async readContentVersion() {
+    await Promise.all([
+      ensureJsonFile(this.skillBalancePath, cloneSkillBalanceConfig(DEFAULT_SKILL_BALANCE_CONFIG)),
+      ensureJsonFile(this.mobBalancePath, cloneMobBalanceConfig(DEFAULT_MOB_BALANCE_CONFIG)),
+      ensureJsonFile(this.itemBalancePath, createDefaultItemBalanceConfig()),
+      ensureJsonFile(this.mobVisualsPath, createDefaultMobVisualConfig()),
+    ]);
+
+    const files = [
+      this.skillBalancePath,
+      this.mobBalancePath,
+      this.itemBalancePath,
+      this.mobVisualsPath,
+    ];
+    const hash = createHash('sha1');
+
+    for (const filePath of files) {
+      const content = await readFile(filePath);
+      hash.update(path.basename(filePath));
+      hash.update(':');
+      hash.update(content);
+      hash.update(';');
+    }
+
+    return hash.digest('hex');
   }
 }

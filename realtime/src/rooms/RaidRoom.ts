@@ -191,7 +191,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   onCreate(options: RaidRoomJoinOptions = {}) {
     this.autoDispose = false;
-    this.balancePoller.start();
+    this.contentSnapshotPoller.start();
     this.registerSharedMessageHandlers();
     const seed = options.seed || `raid-${Date.now().toString(36)}`;
     const templateCode = options.templateCode ?? "crypt_small";
@@ -379,14 +379,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       const deltaSeconds = deltaTime / 1000;
       this.updatePlayers(deltaSeconds);
       this.updateMobs(deltaSeconds, tickNow);
-      this.updatePendingCasts(tickNow);
-      this.updatePendingBurstSpawns(tickNow);
-      this.updatePendingAftershocks(tickNow);
-      this.updateBurningTargets(tickNow);
-      this.updateHealingTargets(tickNow);
-      this.updateGroundEffects(tickNow);
-      this.updateBurningMobs(tickNow);
-      this.updateProjectilesShared(deltaSeconds, tickNow);
+      this.sharedRaidCombatTickSystem.update(deltaSeconds, tickNow);
     }, 1000 / SERVER_TICK_RATE);
   }
 

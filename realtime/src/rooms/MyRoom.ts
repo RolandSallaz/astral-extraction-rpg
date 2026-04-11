@@ -193,7 +193,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
   }
 
   onCreate() {
-    this.balancePoller.start();
+    this.contentSnapshotPoller.start();
     this.createStaticChests();
     if (this.shouldSpawnStaticMobs()) {
       this.createStaticMobs();
@@ -538,14 +538,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       }
     }
 
-    this.updatePendingCasts(tickNow);
-    this.updatePendingBurstSpawns(tickNow);
-    this.updatePendingAftershocks(tickNow);
-    this.updateBurningTargets(tickNow);
-    this.updateHealingTargets(tickNow);
-    this.updateGroundEffects(tickNow);
     this.updateMobs(deltaSeconds, tickNow);
-    this.updateProjectilesShared(deltaSeconds, tickNow);
+    this.sharedCombatTickSystem.update(deltaSeconds, tickNow);
   }
 
   private canPlayerMoveTo(x: number, y: number) {

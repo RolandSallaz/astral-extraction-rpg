@@ -21,20 +21,16 @@ import { UpdateMobBalanceDto } from './dto/update-mob-balance.dto';
 import { UpdateMobVisualsDto } from './dto/update-mob-visuals.dto';
 import { UpdateSkillBalanceDto } from './dto/update-skill-balance.dto';
 import { DEFAULT_ITEM_BALANCE_CONFIG, type ItemBalanceEntry } from './item-balance.defaults';
-import { createDefaultItemBalanceConfig, GameConfigFiles, type ItemBalanceConfig } from './game-config-files';
+import { createDefaultItemBalanceConfig, type ItemBalanceConfig } from './game-config-files';
+import type { GameContentSnapshot } from '@mmorpg/shared/content/snapshot';
+import { GameContentRepository } from '../content/game-content.repository';
 
 @Injectable()
 export class GameConfigsService {
-  private configFiles: GameConfigFiles;
-
-  constructor() {
-    this.configFiles = new GameConfigFiles();
-  }
+  constructor(private readonly configFiles: GameContentRepository = new GameContentRepository()) {}
 
   static forRootDir(rootDir: string) {
-    const service = new GameConfigsService();
-    service.configFiles = new GameConfigFiles(rootDir);
-    return service;
+    return new GameConfigsService(new GameContentRepository(rootDir));
   }
 
   async getSkillBalance() {
@@ -111,6 +107,30 @@ export class GameConfigsService {
 
   async getMobVisuals() {
     return this.normalizeMobVisuals(await this.configFiles.readMobVisuals());
+  }
+
+  async getContentVersion() {
+    return {
+      version: await this.configFiles.readContentVersion(),
+    };
+  }
+
+  async getContentSnapshot(): Promise<GameContentSnapshot> {
+    const [version, skillBalance, mobBalance, itemBalance, mobVisuals] = await Promise.all([
+      this.configFiles.readContentVersion(),
+      this.getSkillBalance(),
+      this.getMobBalance(),
+      this.getItemBalance(),
+      this.getMobVisuals(),
+    ]);
+
+    return {
+      version,
+      skillBalance,
+      mobBalance,
+      itemBalance,
+      mobVisuals,
+    };
   }
 
   async updateItemBalance(

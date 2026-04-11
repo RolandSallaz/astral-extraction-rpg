@@ -20,4 +20,12 @@ export class GetGameConfigsQuery {
   mobVisuals() {
     return this.gameConfigsService.getMobVisuals();
   }
+
+  contentVersion() {
+    return this.gameConfigsService.getContentVersion();
+  }
+
+  contentSnapshot() {
+    return this.gameConfigsService.getContentSnapshot();
+  }
 }

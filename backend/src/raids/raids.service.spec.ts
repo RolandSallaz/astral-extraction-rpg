@@ -1,10 +1,10 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { RaidsService } from './raids.service';
 import { RaidTemplateDefinition, RaidTemplateFiles } from './raid-template-files';
 import type { RaidRunEntity } from './entities/raid-run.entity';
 import type { PlayerEntity } from '../players/entities/player.entity';
+import { StartRaidUseCase } from './use-cases/start-raid.use-case';
 
 type MockRepository<T> = {
   findOne: jest.Mock;
@@ -71,14 +71,14 @@ function createRun(
   } as RaidRunEntity;
 }
 
-describe('RaidsService', () => {
+describe('StartRaidUseCase', () => {
   let tempDir: string;
   let raidRunsRepository: MockRepository<RaidRunEntity>;
   let partiesService: {
     requirePartyLeader: jest.Mock;
     markPendingRaidForParty: jest.Mock;
   };
-  let service: RaidsService;
+  let startRaidUseCase: StartRaidUseCase;
   let template: RaidTemplateDefinition;
 
   beforeEach(async () => {
@@ -96,7 +96,7 @@ describe('RaidsService', () => {
       markPendingRaidForParty: jest.fn(),
     };
 
-    service = new RaidsService(
+    startRaidUseCase = new StartRaidUseCase(
       raidRunsRepository as never,
       partiesService as never,
       new RaidTemplateFiles(path.join(tempDir, 'raid-templates.json')),
@@ -129,7 +129,7 @@ describe('RaidsService', () => {
     }));
     partiesService.requirePartyLeader.mockRejectedValue(new Error('Party not found.'));
 
-    const result = await service.startRaid(
+    const result = await startRaidUseCase.execute(
       {
         quests: {
           znakomstvo: { status: 'completed' },
@@ -172,7 +172,7 @@ describe('RaidsService', () => {
     }));
     partiesService.requirePartyLeader.mockRejectedValue(new Error('Party not found.'));
 
-    const result = await service.startRaid(
+    const result = await startRaidUseCase.execute(
       {
         quests: {
           znakomstvo: { status: 'completed' },

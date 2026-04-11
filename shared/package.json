@@ -15,6 +15,7 @@
     "./balance/itemBalance": "./dist/balance/itemBalance.js",
     "./items/catalog": "./dist/items/catalog.js",
     "./content/paths": "./dist/content/paths.js",
+    "./content/snapshot": "./dist/content/snapshot.js",
     "./inventory/codec": "./dist/inventory/codec.js",
     "./player/contracts": "./dist/player/contracts.js",
     "./loot/tables": "./dist/loot/tables.js",
