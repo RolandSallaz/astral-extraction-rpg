@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
-import { dbConfig, TDbConfig } from './config/bd.config';
+import { dbConfig, TDbConfig } from './config/db.config';
 import { GameConfigsModule } from './game-configs/game-configs.module';
 import { ItemsModule } from './items/items.module';
 import { PartiesModule } from './parties/parties.module';

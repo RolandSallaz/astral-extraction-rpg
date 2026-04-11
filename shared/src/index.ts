@@ -17,6 +17,7 @@ export * from "./realtime/contracts";
 export * from "./gameplay/profiles";
 export * from "./skills/registry";
 export * from "./mobs/catalog";
+export * from "./mobs/skills";
 export * from "./mobs/visuals";
 export * from "./loot/tables";
 export * from "./raids/templates";

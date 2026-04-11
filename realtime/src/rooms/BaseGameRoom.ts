@@ -8,6 +8,10 @@ import {
   MOB_KINDS,
   type MobKind,
 } from "@mmorpg/shared/mobs/catalog";
+import {
+  SKELETON_DASH_SKILL,
+  SKELETON_DASH_SKILL_ID,
+} from "@mmorpg/shared/mobs/skills";
 import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import { type SkillBalanceConfig } from "./skillBalance.js";
@@ -28,6 +32,7 @@ import {
   getFireballCastRange,
   getFireballCooldownMs,
 } from "./fireballGems.js";
+import { createSkillHandlers, type SkillCastContext, type SkillHandler } from "./skills/index.js";
 import {
   getEffectiveMobAttackRange,
   getMobDesiredTargetPosition,
@@ -129,12 +134,6 @@ export type { MobPathCacheEntry } from "./mobPathing.js";
 export type { SkillId } from "@mmorpg/shared/skills/registry";
 
 export const SERVER_TICK_RATE = 30;
-const SKELETON_BITE_SKILL_ID = "bite";
-const SKELETON_BITE_CAST_MS = 1000;
-const SKELETON_BITE_COOLDOWN_MS = 2000;
-const SKELETON_BITE_DISTANCE_TILES = 3;
-const SKELETON_BITE_TRIGGER_DISTANCE_TILES = 4;
-const SKELETON_BITE_LUNGE_SPEED_PX_PER_SEC = 320;
 
 /**
  * Abstract base class that contains the shared game engine used by
@@ -223,6 +222,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     },
   });
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
+  protected readonly skillHandlers = createSkillHandlers();
   protected readonly sharedCombatTickSystem = new SharedCombatTickSystem({
     updatePendingCasts: (now) => this.updatePendingCasts(now),
     updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
@@ -297,97 +297,70 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
 
-    const p = this.profile;
-
-    if (skillId === "fireball") {
-      if (player.fireballCooldownEndsAt > now) {
-        return;
-      }
-
-      const requestedTargetX = Number.isFinite(message.targetX) ? message.targetX! : player.x;
-      const requestedTargetY = Number.isFinite(message.targetY) ? message.targetY! : player.y;
-      const clampedTarget = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
-      if (!this.canPerformFireballCast(player, clampedTarget.x, clampedTarget.y)) {
-        return;
-      }
-
-      player.fireballCooldownEndsAt = now + getFireballCooldownMs(p.fireballCooldownMs, player);
-      const castTimeMs = this.getPlayerCastTimeMs(player);
-      if (castTimeMs > 0) {
-        player.castingSkillId = "fireball";
-        player.castStartedAt = now;
-        player.castEndsAt = now + castTimeMs;
-        this.clearPlayerMovement(sessionId);
-        this.pendingSkillCasts.set(sessionId, {
-          skillId: "fireball",
-          targetX: clampedTarget.x,
-          targetY: clampedTarget.y,
-        });
-      } else {
-        const postCastLockMs = this.performFireballCast(sessionId, player, clampedTarget.x, clampedTarget.y);
-        if (postCastLockMs > 0) {
-          player.castingSkillId = "fireball";
-          player.castStartedAt = now;
-          player.castEndsAt = now + postCastLockMs;
-        }
-      }
+    const handler = this.skillHandlers.get(skillId);
+    if (!handler) {
       return;
     }
 
-    if (skillId === "fireNova") {
-      if (player.fireNovaCooldownEndsAt > now) {
-        return;
-      }
-
-      player.fireNovaCooldownEndsAt = now + p.fireNovaCooldownMs;
-      const castTimeMs = this.getPlayerCastTimeMs(player);
-      if (castTimeMs > 0) {
-        player.castingSkillId = "fireNova";
-        player.castStartedAt = now;
-        player.castEndsAt = now + castTimeMs;
-        this.clearPlayerMovement(sessionId);
-        this.pendingSkillCasts.set(sessionId, { skillId: "fireNova" });
-      } else {
-        const postCastLockMs = this.performFireNovaCast(sessionId, player);
-        if (postCastLockMs > 0) {
-          player.castingSkillId = "fireNova";
-          player.castStartedAt = now;
-          player.castEndsAt = now + postCastLockMs;
-        }
-      }
+    if (handler.getCooldownEndsAt(player) > now) {
       return;
     }
 
-    if (skillId === "fireField") {
-      if (player.fireFieldCooldownEndsAt > now) {
-        return;
-      }
+    const ctx = this.createSkillCastContext(sessionId, player, now);
 
+    let targetX = player.x;
+    let targetY = player.y;
+    if (handler.needsTarget) {
       const requestedTargetX = Number.isFinite(message.targetX) ? message.targetX! : player.x;
       const requestedTargetY = Number.isFinite(message.targetY) ? message.targetY! : player.y;
-      const clampedTarget = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
+      const clamped = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
+      targetX = clamped.x;
+      targetY = clamped.y;
+    }
 
-      player.fireFieldCooldownEndsAt = now + p.fireFieldCooldownMs;
-      const castTimeMs = this.getPlayerCastTimeMs(player);
-      if (castTimeMs > 0) {
-        player.castingSkillId = "fireField";
+    if (handler.canPerform && !handler.canPerform(ctx, targetX, targetY)) {
+      return;
+    }
+
+    handler.setCooldownEndsAt(player, now + handler.getCooldownMs(ctx));
+    const castTimeMs = this.getPlayerCastTimeMs(player);
+
+    if (castTimeMs > 0) {
+      player.castingSkillId = skillId;
+      player.castStartedAt = now;
+      player.castEndsAt = now + castTimeMs;
+      this.clearPlayerMovement(sessionId);
+      this.pendingSkillCasts.set(sessionId, {
+        skillId: skillId as SkillId,
+        targetX,
+        targetY,
+      });
+    } else {
+      const postCastLockMs = handler.performCast(ctx, targetX, targetY);
+      if (postCastLockMs > 0) {
+        player.castingSkillId = skillId;
         player.castStartedAt = now;
-        player.castEndsAt = now + castTimeMs;
-        this.clearPlayerMovement(sessionId);
-        this.pendingSkillCasts.set(sessionId, {
-          skillId: "fireField",
-          targetX: clampedTarget.x,
-          targetY: clampedTarget.y,
-        });
-      } else {
-        const postCastLockMs = this.performFireFieldCast(player, clampedTarget.x, clampedTarget.y, now);
-        if (postCastLockMs > 0) {
-          player.castingSkillId = "fireField";
-          player.castStartedAt = now;
-          player.castEndsAt = now + postCastLockMs;
-        }
+        player.castEndsAt = now + postCastLockMs;
       }
     }
+  }
+
+  protected createSkillCastContext(sessionId: string, player: BasePlayerState, now: number): SkillCastContext {
+    return {
+      sessionId,
+      player,
+      profile: this.profile,
+      now,
+      getPlayerCastTimeMs: (p) => this.getPlayerCastTimeMs(p),
+      clampTargetToCastRange: (p, ox, oy, tx, ty) => this.clampTargetToCastRange(p, ox, oy, tx, ty),
+      clearPlayerMovement: (sid) => this.clearPlayerMovement(sid),
+      getOwnerProjectileGemConfig: (oid, sid) => this.getOwnerProjectileGemConfig(oid, sid),
+      hasSplitProjectileGem: (oid) => this.hasSplitProjectileGem(oid),
+      spawnProjectile: (oid, sid, x, y, dx, dy, lt, ds, ss) =>
+        this.spawnProjectile(oid, sid, x, y, dx, dy, lt, ds, ss),
+      pendingBurstSpawns: this.pendingBurstSpawns,
+      createFireField: (p, tx, ty, n) => this.createFireField(p, tx, ty, n),
+    };
   }
 
   // ── Consumables ──────────────────────────────────────────────────
@@ -471,24 +444,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
 
-      let postCastLockMs = 0;
-      if (cast.skillId === "fireball") {
-        postCastLockMs = this.performFireballCast(
-          playerId,
-          player,
-          cast.targetX ?? player.x,
-          cast.targetY ?? player.y,
-        );
-      } else if (cast.skillId === "fireNova") {
-        postCastLockMs = this.performFireNovaCast(playerId, player);
-      } else if (cast.skillId === "fireField") {
-        postCastLockMs = this.performFireFieldCast(
-          player,
-          cast.targetX ?? player.x,
-          cast.targetY ?? player.y,
-          now,
-        );
-      }
+      const handler = this.skillHandlers.get(cast.skillId);
+      const ctx = this.createSkillCastContext(playerId, player, now);
+      const postCastLockMs = handler
+        ? handler.performCast(ctx, cast.targetX ?? player.x, cast.targetY ?? player.y)
+        : 0;
 
       this.pendingSkillCasts.delete(playerId);
       if (postCastLockMs > 0) {
@@ -748,7 +708,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         },
       });
 
-      if (this.tryRunSkeletonBite(mob, targetPlayer, players, now)) {
+      if (this.tryRunSkeletonDash(mob, targetPlayer, players, now)) {
         continue;
       }
 
@@ -837,10 +797,10 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.mobSkillHitTargets.delete(mob.id);
   }
 
-  protected startSkeletonBiteCast(mob: MobState, now: number) {
-    mob.castingSkillId = SKELETON_BITE_SKILL_ID;
+  protected startSkeletonDashCast(mob: MobState, now: number) {
+    mob.castingSkillId = SKELETON_DASH_SKILL_ID;
     mob.castStartedAt = now;
-    mob.castEndsAt = now + SKELETON_BITE_CAST_MS;
+    mob.castEndsAt = now + SKELETON_DASH_SKILL.castMs;
     mob.skillLungeStartedAt = 0;
     mob.skillLungeEndsAt = 0;
     mob.skillLungeFromX = mob.x;
@@ -849,12 +809,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     mob.skillLungeToY = mob.y;
     mob.targetX = mob.x;
     mob.targetY = mob.y;
-    mob.attackCooldownEndsAt = now + SKELETON_BITE_COOLDOWN_MS;
+    mob.attackCooldownEndsAt = now + SKELETON_DASH_SKILL.cooldownMs;
   }
 
-  protected resolveSkeletonBiteDestination(mob: MobState, target: BasePlayerState | null) {
+  protected resolveSkeletonDashDestination(mob: MobState, target: BasePlayerState | null) {
     const tileSize = this.profile.tileSize;
-    const maxDistance = tileSize * SKELETON_BITE_DISTANCE_TILES;
+    const maxDistance = tileSize * SKELETON_DASH_SKILL.lungeDistanceTiles;
     const desiredX = target ? target.x : mob.targetX;
     const desiredY = target ? target.y : mob.targetY;
     const deltaX = desiredX - mob.x;
@@ -969,7 +929,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
-  protected applySkeletonBiteHits(
+  protected applySkeletonDashHits(
     mob: MobState,
     players: BasePlayerState[],
     fromX: number,
@@ -1021,9 +981,15 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     mob.targetX = collisionX;
     mob.targetY = collisionY;
 
-    const resolvedDamage = this.applyDamageToPlayer(firstCollision.player, mob.attackDamage, "physical");
+    const resolvedDamage = this.applyDamageToPlayer(
+      firstCollision.player,
+      SKELETON_DASH_SKILL.damage,
+      SKELETON_DASH_SKILL.damageType,
+    );
     hitTargets.add(firstCollision.player.id);
-    this.onCombatLog(`${mob.name} bites ${firstCollision.player.name} for ${resolvedDamage}.`);
+    this.onCombatLog(
+      `${mob.name} uses ${SKELETON_DASH_SKILL.name} on ${firstCollision.player.name} for ${resolvedDamage}.`,
+    );
 
     if (firstCollision.player.health <= 0) {
       this.handlePlayerKilled(firstCollision.player);
@@ -1034,7 +1000,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     return true;
   }
 
-  protected tryRunSkeletonBite(
+  protected tryRunSkeletonDash(
     mob: MobState,
     targetPlayer: BasePlayerState | null,
     players: BasePlayerState[],
@@ -1053,7 +1019,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       mob.y = mob.skillLungeFromY + (mob.skillLungeToY - mob.skillLungeFromY) * progress;
       mob.targetX = mob.skillLungeToX;
       mob.targetY = mob.skillLungeToY;
-      const hitAnyTarget = this.applySkeletonBiteHits(mob, players, previousX, previousY, mob.x, mob.y);
+      const hitAnyTarget = this.applySkeletonDashHits(mob, players, previousX, previousY, mob.x, mob.y);
       if (hitAnyTarget) {
         this.clearMobSkillState(mob);
       }
@@ -1065,24 +1031,24 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       const previousY = mob.y;
       mob.x = mob.skillLungeToX;
       mob.y = mob.skillLungeToY;
-      this.applySkeletonBiteHits(mob, players, previousX, previousY, mob.x, mob.y);
+      this.applySkeletonDashHits(mob, players, previousX, previousY, mob.x, mob.y);
       this.clearMobSkillState(mob);
       return true;
     }
 
-    if (mob.castingSkillId === SKELETON_BITE_SKILL_ID && mob.castEndsAt > now) {
+    if (mob.castingSkillId === SKELETON_DASH_SKILL_ID && mob.castEndsAt > now) {
       mob.targetX = mob.x;
       mob.targetY = mob.y;
       return true;
     }
 
-    if (mob.castingSkillId === SKELETON_BITE_SKILL_ID && mob.castEndsAt > 0 && now >= mob.castEndsAt) {
-      const destination = this.resolveSkeletonBiteDestination(mob, targetPlayer);
+    if (mob.castingSkillId === SKELETON_DASH_SKILL_ID && mob.castEndsAt > 0 && now >= mob.castEndsAt) {
+      const destination = this.resolveSkeletonDashDestination(mob, targetPlayer);
       const distance = Math.hypot(destination.x - mob.x, destination.y - mob.y);
       const lungeDurationMs =
         distance <= 0.001
           ? 1
-          : Math.max(120, Math.round((distance / SKELETON_BITE_LUNGE_SPEED_PX_PER_SEC) * 1000));
+          : Math.max(120, Math.round((distance / SKELETON_DASH_SKILL.lungeSpeedPxPerSec) * 1000));
       mob.skillLungeStartedAt = now;
       mob.skillLungeEndsAt = now + lungeDurationMs;
       mob.skillLungeFromX = mob.x;
@@ -1099,7 +1065,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return false;
     }
 
-    const triggerDistance = this.profile.tileSize * SKELETON_BITE_TRIGGER_DISTANCE_TILES;
+    const triggerDistance = this.profile.tileSize * SKELETON_DASH_SKILL.triggerDistanceTiles;
     const distanceToTarget = Math.hypot(targetPlayer.x - mob.x, targetPlayer.y - mob.y);
     if (distanceToTarget > triggerDistance) {
       return false;
@@ -1111,7 +1077,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return true;
     }
 
-    this.startSkeletonBiteCast(mob, now);
+    this.startSkeletonDashCast(mob, now);
     return true;
   }
 

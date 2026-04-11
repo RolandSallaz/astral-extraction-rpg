@@ -49,7 +49,7 @@ export class PlayerInventoryService {
     });
 
     const itemDefinitions = await this.itemsService.findByCodes(uniqueCodes);
-    const definitionByCode = new Map(itemDefinitions.map((definition) => [definition.code, definition]));
+    const definitionByCode = new Map<string, (typeof itemDefinitions)[number]>(itemDefinitions.map((definition) => [definition.id, definition]));
 
     await this.playerItemsRepository.delete({ playerId });
 
@@ -68,7 +68,7 @@ export class PlayerInventoryService {
       baseItems.push(
         this.playerItemsRepository.create({
           playerId,
-          itemCode: itemDefinition.code,
+          itemCode: itemDefinition.id,
           equippedSlot: slot,
           inventorySlot: null,
           parentItemId: null,
@@ -98,12 +98,12 @@ export class PlayerInventoryService {
       baseItems.push(
         this.playerItemsRepository.create({
           playerId,
-          itemCode: itemDefinition.code,
+          itemCode: itemDefinition.id,
           equippedSlot: null,
           inventorySlot: index,
           parentItemId: null,
           socketIndex: null,
-          quantity: itemDefinition.stackable ? Math.max(1, Math.min(itemDefinition.maxStack, parsed.quantity)) : 1,
+          quantity: itemDefinition.stackable ? Math.max(1, Math.min(itemDefinition.maxStack ?? 1, parsed.quantity)) : 1,
         }),
       );
 
@@ -137,7 +137,7 @@ export class PlayerInventoryService {
       socketedItems.push(
         this.playerItemsRepository.create({
           playerId,
-          itemCode: itemDefinition.code,
+          itemCode: itemDefinition.id,
           equippedSlot: null,
           inventorySlot: null,
           parentItemId: parentItem.id,
@@ -163,7 +163,7 @@ export class PlayerInventoryService {
       return [
         this.playerItemsRepository.create({
           playerId,
-          itemCode: socketDefinition.code,
+          itemCode: socketDefinition.id,
           equippedSlot: null,
           inventorySlot: null,
           parentItemId: parentItem.id,

@@ -24,10 +24,11 @@ export async function ensureJsonFile<T>(filePath: string, defaults: T) {
   }
 }
 
-export async function readJsonFile<T>(filePath: string): Promise<T | null> {
+export async function readJsonFile<T>(filePath: string, normalize?: (raw: unknown) => T): Promise<T | null> {
   try {
     const rawValue = await readFile(filePath, 'utf8');
-    return JSON.parse(rawValue) as T;
+    const parsed = JSON.parse(rawValue);
+    return normalize ? normalize(parsed) : parsed as T;
   } catch {
     return null;
   }

@@ -3,6 +3,10 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
 import { MobState } from "../src/rooms/schema/MobState.js";
+import {
+  SKELETON_DASH_SKILL,
+  SKELETON_DASH_SKILL_ID,
+} from "@mmorpg/shared/mobs/skills";
 
 const RAT_ID = "rat-scout";
 const BAT_ID = "bat-stalker";
@@ -92,7 +96,7 @@ function createTestSkeleton(id: string, x: number, y: number) {
   skeleton.aggroRange = 999;
   skeleton.leashRange = 240;
   skeleton.attackRange = 28;
-  skeleton.attackDamage = 11;
+  skeleton.attackDamage = 0;
   skeleton.attackCooldownMs = 1100;
   skeleton.health = 52;
   skeleton.maxHealth = 52;
@@ -220,10 +224,10 @@ describe("world room", () => {
     assert.ok((updatedPlayer?.health ?? startingHealth) < startingHealth);
   });
 
-  it("starts a skeleton bite cast with a visible cast window and a 2s cooldown", async () => {
+  it("starts a skeleton dash skill cast with a visible cast window and a 2s cooldown", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const client = await colyseus.connectTo(room, {
-      name: "Bite Target",
+      name: "Dash Target",
     });
 
     await room.waitForNextPatch();
@@ -243,14 +247,17 @@ describe("world room", () => {
 
     await waitForNextSimulation(room, 180);
 
-    assert.strictEqual(skeleton.castingSkillId, "bite");
-    assert.strictEqual(skeleton.castEndsAt - skeleton.castStartedAt, 1000);
-    assert.strictEqual(skeleton.attackCooldownEndsAt - skeleton.castStartedAt, 2000);
+    assert.strictEqual(skeleton.castingSkillId, SKELETON_DASH_SKILL_ID);
+    assert.strictEqual(skeleton.castEndsAt - skeleton.castStartedAt, SKELETON_DASH_SKILL.castMs);
+    assert.strictEqual(
+      skeleton.attackCooldownEndsAt - skeleton.castStartedAt,
+      SKELETON_DASH_SKILL.cooldownMs,
+    );
     assert.strictEqual(player.health, startingHealth);
     assert.strictEqual(skeleton.skillLungeStartedAt, 0);
   });
 
-  it("keeps skeletons from using generic melee while bite is on cooldown", async () => {
+  it("keeps skeletons from using generic melee while dash is on cooldown", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const client = await colyseus.connectTo(room, {
       name: "Melee Immune Target",
@@ -278,7 +285,7 @@ describe("world room", () => {
     assert.strictEqual(player.health, startingHealth);
   });
 
-  it("stops a skeleton bite lunge at the collision edge and damages once", async () => {
+  it("stops a skeleton dash skill lunge at the collision edge and deals 35 damage once", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const client = await colyseus.connectTo(room, {
       name: "Collision Target",
@@ -302,13 +309,13 @@ describe("world room", () => {
     await waitForNextSimulation(room, 1450);
 
     assert.strictEqual(skeleton.castingSkillId, "");
-    assert.ok(player.health < startingHealth);
+    assert.strictEqual(startingHealth - player.health, SKELETON_DASH_SKILL.damage);
     assert.ok(skeleton.x < player.x);
     assert.ok(Math.hypot(player.x - skeleton.x, player.y - skeleton.y) >= 20);
 
-    const healthAfterBite = player.health;
+    const healthAfterDash = player.health;
     await waitForNextSimulation(room, 280);
-    assert.strictEqual(player.health, healthAfterBite);
+    assert.strictEqual(player.health, healthAfterDash);
   });
 
   it("rejects fireball casts without the required weapon", async () => {

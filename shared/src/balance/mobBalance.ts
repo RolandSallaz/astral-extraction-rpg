@@ -40,7 +40,7 @@ export const DEFAULT_MOB_BALANCE_CONFIG: MobBalanceConfig = {
     aggroRange: 160,
     leashRange: 240,
     attackRange: 28,
-    attackDamage: 11,
+    attackDamage: 0,
     attackCooldownMs: 1100,
     experienceReward: 36,
   },

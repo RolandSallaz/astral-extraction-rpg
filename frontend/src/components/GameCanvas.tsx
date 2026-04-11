@@ -26,6 +26,7 @@ import type {
   WorldRoomJoinOptions,
 } from '@mmorpg/shared/realtime/contracts';
 import { FIREBALL_BASE_CAST_TIME_MS } from '@mmorpg/shared/skills/fireball';
+import { SKELETON_DASH_SKILL_ID } from '@mmorpg/shared/mobs/skills';
 import {
   createDefaultMeadowMapAsset,
   createMeadowDecorations,
@@ -5441,15 +5442,15 @@ export function GameCanvas({
               const attackStartedAt = mob.currentAttackCooldownEndsAt - mob.currentAttackCooldownMs;
               const attackClip = getPreferredMobClip(mob.baseTexture, 'attack');
               const attackDurationMs = attackClip ? getMobAnimationDurationMs(attackClip) : 0;
-              const isSkeletonBiteLunging =
-                mob.currentCastingSkillId === 'bite' &&
+              const isSkeletonDashLunging =
+                mob.currentCastingSkillId === SKELETON_DASH_SKILL_ID &&
                 mob.currentSkillLungeStartedAt > 0 &&
                 serverNow < mob.currentSkillLungeEndsAt;
               const usesGenericAttackWindow = mob.baseTexture !== 'skeleton';
               const isAttacking =
                 !mob.isDead &&
                 (
-                  isSkeletonBiteLunging ||
+                  isSkeletonDashLunging ||
                   (
                     usesGenericAttackWindow &&
                     mob.currentAttackCooldownEndsAt > 0 &&
@@ -5500,7 +5501,7 @@ export function GameCanvas({
                 mob.animationStartedAt,
               );
               if (animationState === 'attack' && attackClip) {
-                if (isSkeletonBiteLunging) {
+                if (isSkeletonDashLunging) {
                   const totalFrames = Math.max(1, attackClip.endFrame - attackClip.startFrame + 1);
                   const lungeDuration = Math.max(1, mob.currentSkillLungeEndsAt - mob.currentSkillLungeStartedAt);
                   const lungeProgress = Phaser.Math.Clamp(

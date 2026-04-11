@@ -19,6 +19,7 @@ import {
 } from '@mmorpg/shared/balance/skillBalance';
 import {
   createDefaultMobVisualConfig,
+  normalizeMobVisualConfig,
   type MobVisualConfig,
 } from '@mmorpg/shared/mobs/visuals';
 import {
@@ -48,6 +49,29 @@ export function createDefaultItemBalanceConfig(): ItemBalanceConfig {
   return cloneItemBalanceConfig(DEFAULT_ITEM_BALANCE_CONFIG);
 }
 
+function normalizeSkillBalance(raw: unknown): SkillBalanceConfig {
+  const defaults = cloneSkillBalanceConfig(DEFAULT_SKILL_BALANCE_CONFIG);
+  if (!raw || typeof raw !== 'object') return defaults;
+  return cloneSkillBalanceConfig({ ...defaults, ...(raw as SkillBalanceConfig) });
+}
+
+function normalizeMobBalance(raw: unknown): MobBalanceConfig {
+  const defaults = cloneMobBalanceConfig(DEFAULT_MOB_BALANCE_CONFIG);
+  if (!raw || typeof raw !== 'object') return defaults;
+  return cloneMobBalanceConfig({ ...defaults, ...(raw as MobBalanceConfig) });
+}
+
+function normalizeItemBalance(raw: unknown): ItemBalanceConfig {
+  const defaults = createDefaultItemBalanceConfig();
+  if (!raw || typeof raw !== 'object') return defaults;
+  return cloneItemBalanceConfig({ ...defaults, ...(raw as ItemBalanceConfig) });
+}
+
+function normalizeMobVisuals(raw: unknown): MobVisualConfig {
+  if (!raw || typeof raw !== 'object') return createDefaultMobVisualConfig();
+  return normalizeMobVisualConfig(raw as Partial<Record<string, unknown>>);
+}
+
 export class GameConfigFiles {
   private readonly rootDir: string;
 
@@ -74,7 +98,7 @@ export class GameConfigFiles {
   async readSkillBalance() {
     const defaults = cloneSkillBalanceConfig(DEFAULT_SKILL_BALANCE_CONFIG);
     await ensureJsonFile(this.skillBalancePath, defaults);
-    return (await readJsonFile<SkillBalanceConfig>(this.skillBalancePath)) ?? defaults;
+    return (await readJsonFile<SkillBalanceConfig>(this.skillBalancePath, normalizeSkillBalance)) ?? defaults;
   }
 
   async writeSkillBalance(config: SkillBalanceConfig) {
@@ -85,7 +109,7 @@ export class GameConfigFiles {
   async readMobBalance() {
     const defaults = cloneMobBalanceConfig(DEFAULT_MOB_BALANCE_CONFIG);
     await ensureJsonFile(this.mobBalancePath, defaults);
-    return (await readJsonFile<MobBalanceConfig>(this.mobBalancePath)) ?? defaults;
+    return (await readJsonFile<MobBalanceConfig>(this.mobBalancePath, normalizeMobBalance)) ?? defaults;
   }
 
   async writeMobBalance(config: MobBalanceConfig) {
@@ -96,7 +120,7 @@ export class GameConfigFiles {
   async readItemBalance() {
     const defaults = createDefaultItemBalanceConfig();
     await ensureJsonFile(this.itemBalancePath, defaults);
-    return (await readJsonFile<ItemBalanceConfig>(this.itemBalancePath)) ?? defaults;
+    return (await readJsonFile<ItemBalanceConfig>(this.itemBalancePath, normalizeItemBalance)) ?? defaults;
   }
 
   async writeItemBalance(config: ItemBalanceConfig) {
@@ -107,7 +131,7 @@ export class GameConfigFiles {
   async readMobVisuals() {
     const defaults = createDefaultMobVisualConfig();
     await ensureJsonFile(this.mobVisualsPath, defaults);
-    return (await readJsonFile<MobVisualConfig>(this.mobVisualsPath)) ?? defaults;
+    return (await readJsonFile<MobVisualConfig>(this.mobVisualsPath, normalizeMobVisuals)) ?? defaults;
   }
 
   async writeMobVisuals(config: MobVisualConfig) {

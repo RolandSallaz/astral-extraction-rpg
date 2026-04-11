@@ -22,6 +22,7 @@
     "./raids/templates": "./dist/raids/templates.js",
     "./raids/content": "./dist/raids/content.js",
     "./mobs/catalog": "./dist/mobs/catalog.js",
+    "./mobs/skills": "./dist/mobs/skills.js",
     "./mobs/visuals": "./dist/mobs/visuals.js",
     "./worlds/definition": "./dist/worlds/definition.js",
     "./quests/content": "./dist/quests/content.js",

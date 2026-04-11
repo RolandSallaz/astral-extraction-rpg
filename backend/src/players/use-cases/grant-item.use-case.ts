@@ -42,10 +42,10 @@ export class GrantItemUseCase {
 
     const inventory = this.playerSerializer.buildInventoryState(targetPlayer);
     const stackSlotIndex =
-      itemDefinition.stackable && itemDefinition.maxStack > 1
+      itemDefinition.stackable && (itemDefinition.maxStack ?? 1) > 1
         ? inventory.findIndex((value) => {
             const parsed = parseInventoryItem(value);
-            return parsed?.itemId === itemDefinition.code && parsed.quantity < itemDefinition.maxStack;
+            return parsed?.itemId === itemDefinition.id && parsed && parsed.quantity < (itemDefinition.maxStack ?? 1);
           })
         : -1;
 
@@ -53,8 +53,8 @@ export class GrantItemUseCase {
       const parsed = parseInventoryItem(inventory[stackSlotIndex]);
       const nextInventory = [...inventory];
       nextInventory[stackSlotIndex] = serializeInventoryItem(
-        itemDefinition.code as ItemId,
-        Math.min(itemDefinition.maxStack, (parsed?.quantity ?? 1) + 1),
+        itemDefinition.id,
+        Math.min(itemDefinition.maxStack ?? 1, (parsed?.quantity ?? 1) + 1),
       );
       await this.playerInventoryService.syncPlayerItems(
         targetPlayer.id,
@@ -74,7 +74,7 @@ export class GrantItemUseCase {
     await this.playerItemsRepository.save(
       this.playerItemsRepository.create({
         playerId: targetPlayer.id,
-        itemCode: itemDefinition.code,
+        itemCode: itemDefinition.id,
         equippedSlot: null,
         inventorySlot: firstEmptySlot,
         quantity: 1,
