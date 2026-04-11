@@ -58,6 +58,7 @@ Thumbs.db
 *.tgz
 
 # Generated migration artifacts
+backend/src/migrations/*.ts
 backend/src/migrations/*.js
 backend/src/migrations/*.js.map
 backend/src/migrations/*.d.ts

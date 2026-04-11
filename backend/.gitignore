@@ -53,6 +53,7 @@ pids
 *.pid.lock
 
 # Generated migration artifacts
+/src/migrations/*.ts
 /src/migrations/*.js
 /src/migrations/*.js.map
 /src/migrations/*.d.ts
