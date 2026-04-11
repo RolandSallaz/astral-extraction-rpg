@@ -28,8 +28,8 @@
         ]
       },
       "tutorialMob": {
-        "id": "raid-rat-tutorial",
-        "kind": "rat",
+        "id": "raid-skeleton-tutorial",
+        "kind": "skeleton",
         "roomIndex": 2,
         "fallbackRoom": {
           "x": 18,

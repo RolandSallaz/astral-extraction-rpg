@@ -34,6 +34,16 @@ export const DEFAULT_MOB_BALANCE_CONFIG: MobBalanceConfig = {
     attackCooldownMs: 800,
     experienceReward: 22,
   },
+  skeleton: {
+    maxHealth: 52,
+    moveSpeed: 58,
+    aggroRange: 160,
+    leashRange: 240,
+    attackRange: 28,
+    attackDamage: 11,
+    attackCooldownMs: 1100,
+    experienceReward: 36,
+  },
 };
 
 export function cloneMobBalanceConfig(config: MobBalanceConfig): MobBalanceConfig {

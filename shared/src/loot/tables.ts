@@ -19,6 +19,10 @@ export const LOOT_TABLE_DEFINITIONS: Record<string, LootTableDefinition> = {
     id: "mob_bat",
     drops: [],
   },
+  mob_skeleton: {
+    id: "mob_skeleton",
+    drops: [],
+  },
 };
 
 export function getLootTableDefinition(id: string | null | undefined): LootTableDefinition | null {

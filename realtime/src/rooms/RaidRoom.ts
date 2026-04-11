@@ -489,11 +489,11 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       const nextX = player.x + movement.x * RAID_PLAYER_SPEED * deltaSeconds;
       const nextY = player.y + movement.y * RAID_PLAYER_SPEED * deltaSeconds;
 
-      if (this.canMoveTo(nextX, player.y)) {
+      if (this.canMoveTo(nextX, player.y, player)) {
         player.x = Math.max(TILE_SIZE / 2, Math.min(this.state.width * TILE_SIZE - TILE_SIZE / 2, nextX));
       }
 
-      if (this.canMoveTo(player.x, nextY)) {
+      if (this.canMoveTo(player.x, nextY, player)) {
         player.y = Math.max(TILE_SIZE / 2, Math.min(this.state.height * TILE_SIZE - TILE_SIZE / 2, nextY));
       }
 
@@ -501,7 +501,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     }
   }
 
-  private canMoveTo(x: number, y: number) {
+  private canMoveTo(x: number, y: number, player?: RaidPlayerState) {
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.state.width * TILE_SIZE - TILE_SIZE / 2, x));
     const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.state.height * TILE_SIZE - TILE_SIZE / 2, y));
     const clampedFootY = Math.max(
@@ -521,8 +521,22 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       return false;
     }
 
-    if (this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS).length > 0) {
-      return false;
+    const nearbyMobs = this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS);
+    if (nearbyMobs.length > 0) {
+      for (const mob of nearbyMobs) {
+        if (!player) {
+          return false;
+        }
+
+        const currentDistance = Math.hypot(player.x - mob.x, player.y - mob.y);
+        const nextDistance = Math.hypot(clampedX - mob.x, clampedY - mob.y);
+        const isAlreadyOverlapping = currentDistance < PLAYER_MOB_COLLISION_RADIUS;
+        const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
+
+        if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
+          return false;
+        }
+      }
     }
 
     return true;

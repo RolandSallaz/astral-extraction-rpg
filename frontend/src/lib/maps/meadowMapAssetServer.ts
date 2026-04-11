@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   createGameDataCandidateDirs,
+  getWorldMobsPath,
   getWorldDefinitionPath,
   getWorldTradersPath,
 } from '@mmorpg/shared/content/paths';
@@ -11,6 +12,7 @@ import {
   type WorldChestDefinition,
   type WorldDefinition,
 } from '@mmorpg/shared/worlds/definition';
+import { isMobKind } from '@mmorpg/shared/mobs/catalog';
 import {
   createDefaultMeadowMapAsset,
   type MeadowDecoration,
@@ -53,6 +55,7 @@ function resolveGameDataDirectory() {
 const GAME_DATA_DIRECTORY = resolveGameDataDirectory();
 const WORLD_DEFINITION_PATH = path.resolve(getWorldDefinitionPath(GAME_DATA_DIRECTORY, WORLD_ID));
 const WORLD_TRADERS_PATH = path.resolve(getWorldTradersPath(GAME_DATA_DIRECTORY, WORLD_ID));
+const WORLD_MOBS_PATH = path.resolve(getWorldMobsPath(GAME_DATA_DIRECTORY, WORLD_ID));
 
 function createDefaultOldMageTrader(): MeadowTraderAsset {
   return {
@@ -70,43 +73,61 @@ function normalizeTraders(
   width: number,
   height: number,
 ) {
-  const traders = (input ?? []).flatMap((trader) => {
+  return (input ?? []).reduce<MeadowTraderAsset[]>((accumulator, trader, index) => {
     const x = Math.floor(trader.x);
     const y = Math.floor(trader.y);
     if (x < 0 || y < 0 || x >= width || y >= height) {
-      return [];
+      return accumulator;
     }
 
-    const bodyTexturePath = typeof trader.bodyTexturePath === 'string' ? trader.bodyTexturePath : '';
-    const headTexturePath = typeof trader.headTexturePath === 'string' ? trader.headTexturePath : '';
-    if (!IMAGE_PATH_PATTERN.test(bodyTexturePath) || !IMAGE_PATH_PATTERN.test(headTexturePath)) {
-      return [];
-    }
-
-    return [{
-      id: typeof trader.id === 'string' && trader.id.trim() ? trader.id.trim() : OLD_MAGE_TRADER_ID,
+    const normalizedBase = {
+      id:
+        typeof trader.id === 'string' && trader.id.trim()
+          ? trader.id.trim()
+          : `npc-${x}-${y}-${index}`,
       x,
       y,
       name:
         typeof trader.name === 'string' && trader.name.trim()
           ? trader.name.trim().slice(0, 40)
-          : OLD_MAGE_TRADER_NAME,
+          : `NPC ${index + 1}`,
+    };
+
+    const spriteSheetPath = typeof trader.spriteSheetPath === 'string' ? trader.spriteSheetPath : '';
+    if (IMAGE_PATH_PATTERN.test(spriteSheetPath)) {
+      const frameWidth = Math.max(1, Math.floor(trader.frameWidth ?? 16));
+      const frameHeight = Math.max(1, Math.floor(trader.frameHeight ?? 16));
+      const frameCount = Math.max(1, Math.floor(trader.frameCount ?? 1));
+      accumulator.push({
+        ...normalizedBase,
+        spriteSheetPath,
+        frameWidth,
+        frameHeight,
+        frameCount,
+        animationFps: Math.max(1, Math.floor(trader.animationFps ?? 4)),
+        animationStartFrame: Math.max(0, Math.floor(trader.animationStartFrame ?? 0)),
+        columns: Math.max(1, Math.floor(trader.columns ?? frameCount)),
+        renderScale:
+          typeof trader.renderScale === 'number' && Number.isFinite(trader.renderScale)
+            ? Math.max(0.5, Math.min(8, trader.renderScale))
+            : 1,
+      } satisfies MeadowTraderAsset);
+      return accumulator;
+    }
+
+    const bodyTexturePath = typeof trader.bodyTexturePath === 'string' ? trader.bodyTexturePath : '';
+    const headTexturePath = typeof trader.headTexturePath === 'string' ? trader.headTexturePath : '';
+    if (!IMAGE_PATH_PATTERN.test(bodyTexturePath) || !IMAGE_PATH_PATTERN.test(headTexturePath)) {
+      return accumulator;
+    }
+
+    accumulator.push({
+      ...normalizedBase,
       bodyTexturePath,
       headTexturePath,
-    } satisfies MeadowTraderAsset];
-  });
-
-  const preferredTrader = traders.find((trader) =>
-    trader.id === OLD_MAGE_TRADER_ID || trader.name.trim().toLowerCase() === OLD_MAGE_TRADER_NAME.toLowerCase(),
-  ) ?? traders[0] ?? null;
-
-  return preferredTrader
-    ? [{
-        ...preferredTrader,
-        id: OLD_MAGE_TRADER_ID,
-        name: OLD_MAGE_TRADER_NAME,
-      }]
-    : [];
+    } satisfies MeadowTraderAsset);
+    return accumulator;
+  }, []);
 }
 
 function normalizeMapAsset(input: MeadowMapAsset): MeadowMapAsset {
@@ -186,7 +207,7 @@ function normalizeMapAsset(input: MeadowMapAsset): MeadowMapAsset {
   });
 
   const mobs = (input.mobs ?? []).flatMap((mob, index) => {
-    const kind = mob.kind === 'bat' ? 'bat' : mob.kind === 'rat' ? 'rat' : null;
+    const kind = typeof mob.kind === 'string' && isMobKind(mob.kind) ? mob.kind : null;
     if (!kind) {
       return [];
     }
@@ -240,6 +261,14 @@ function stripTradersFromMapAsset(asset: MeadowMapAsset): MeadowMapAsset {
   return {
     ...asset,
     traders: [],
+  };
+}
+
+function stripWorldEntitiesFromMapAsset(asset: MeadowMapAsset): MeadowMapAsset {
+  return {
+    ...asset,
+    traders: [],
+    mobs: [],
   };
 }
 
@@ -302,7 +331,7 @@ function buildWorldDefinitionFromMapAsset(
     spawn: asset.spawn,
     blockedTiles: Array.from(blockedTiles.values()),
     staticChests,
-    staticMobs: asset.mobs,
+    staticMobs: currentWorldDefinition.staticMobs,
   });
 }
 
@@ -333,6 +362,32 @@ async function saveWorldTradersToDisk(traders: MeadowTraderAsset[]) {
   await writeFile(WORLD_TRADERS_PATH, `${JSON.stringify(traders, null, 2)}\n`, 'utf8');
 }
 
+async function loadWorldMobsFromDisk(width: number, height: number, fallbackMobs?: MeadowMobAsset[]) {
+  try {
+    const rawValue = await readFile(WORLD_MOBS_PATH, 'utf8');
+    return normalizeMapAsset({
+      ...createDefaultMeadowMapAsset(),
+      width,
+      height,
+      mobs: JSON.parse(rawValue) as MeadowMobAsset[],
+    }).mobs;
+  } catch {
+    const mobs = normalizeMapAsset({
+      ...createDefaultMeadowMapAsset(),
+      width,
+      height,
+      mobs: fallbackMobs ?? [],
+    }).mobs;
+    await saveWorldMobsToDisk(mobs);
+    return mobs;
+  }
+}
+
+async function saveWorldMobsToDisk(mobs: MeadowMobAsset[]) {
+  await mkdir(path.dirname(WORLD_MOBS_PATH), { recursive: true });
+  await writeFile(WORLD_MOBS_PATH, `${JSON.stringify(mobs, null, 2)}\n`, 'utf8');
+}
+
 export async function loadMeadowMapAssetFromDisk() {
   try {
     const rawValue = await readFile(MAP_ASSET_PATH, 'utf8');
@@ -342,9 +397,15 @@ export async function loadMeadowMapAssetFromDisk() {
       normalizedMapAsset.height,
       normalizedMapAsset.traders,
     );
+    const mobs = await loadWorldMobsFromDisk(
+      normalizedMapAsset.width,
+      normalizedMapAsset.height,
+      normalizedMapAsset.mobs,
+    );
     return {
       ...normalizedMapAsset,
       traders,
+      mobs,
     };
   } catch {
     const fallback = createDefaultMeadowMapAsset();
@@ -352,6 +413,7 @@ export async function loadMeadowMapAssetFromDisk() {
     return {
       ...fallback,
       traders: await loadWorldTradersFromDisk(fallback.width, fallback.height),
+      mobs: await loadWorldMobsFromDisk(fallback.width, fallback.height),
     };
   }
 }
@@ -359,10 +421,11 @@ export async function loadMeadowMapAssetFromDisk() {
 export async function saveMeadowMapAssetToDisk(asset: MeadowMapAsset) {
   const normalized = normalizeMapAsset(asset);
   await mkdir(MAP_ASSET_DIRECTORY, { recursive: true });
-  await writeFile(MAP_ASSET_PATH, `${JSON.stringify(stripTradersFromMapAsset(normalized), null, 2)}\n`, 'utf8');
+  await writeFile(MAP_ASSET_PATH, `${JSON.stringify(stripWorldEntitiesFromMapAsset(normalized), null, 2)}\n`, 'utf8');
   await saveWorldTradersToDisk(normalized.traders);
+  await saveWorldMobsToDisk(normalized.mobs);
   await saveWorldDefinitionFromMapAsset(normalized);
   return normalized;
 }
 
-export { MAP_ASSET_PATH, WORLD_DEFINITION_PATH, WORLD_TRADERS_PATH };
+export { MAP_ASSET_PATH, WORLD_DEFINITION_PATH, WORLD_TRADERS_PATH, WORLD_MOBS_PATH };

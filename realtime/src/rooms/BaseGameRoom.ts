@@ -129,6 +129,12 @@ export type { MobPathCacheEntry } from "./mobPathing.js";
 export type { SkillId } from "@mmorpg/shared/skills/registry";
 
 export const SERVER_TICK_RATE = 30;
+const SKELETON_BITE_SKILL_ID = "bite";
+const SKELETON_BITE_CAST_MS = 1000;
+const SKELETON_BITE_COOLDOWN_MS = 2000;
+const SKELETON_BITE_DISTANCE_TILES = 3;
+const SKELETON_BITE_TRIGGER_DISTANCE_TILES = 4;
+const SKELETON_BITE_LUNGE_SPEED_PX_PER_SEC = 320;
 
 /**
  * Abstract base class that contains the shared game engine used by
@@ -204,6 +210,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected readonly mobPathCache = new Map<string, MobPathCacheEntry>();
   protected readonly losCache = new Map<string, boolean>();
   protected readonly itemFireResistance = createDefaultItemFireResistanceMap();
+  protected readonly mobSkillHitTargets = new Map<string, Set<string>>();
   protected readonly playerSpatialGrid = new SpatialGrid<BasePlayerState>(64);
   protected readonly mobSpatialGrid = new SpatialGrid<MobState>(64);
   protected readonly playerSpatialOrder = new Map<string, number>();
@@ -260,6 +267,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.playerSpatialGrid.clear();
     this.mobSpatialGrid.clear();
     this.projectileServerData.clear();
+    this.mobSkillHitTargets.clear();
   }
 
   // ── Shared message handlers ──────────────────────────────────────
@@ -740,9 +748,13 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         },
       });
 
+      if (this.tryRunSkeletonBite(mob, targetPlayer, players, now)) {
+        continue;
+      }
+
       if (targetPlayer) {
         const distance = Math.hypot(targetPlayer.x - mob.x, targetPlayer.y - mob.y);
-        if (distance <= getEffectiveMobAttackRange(mob)) {
+        if (this.resolveMobKind(mob) !== "skeleton" && distance <= getEffectiveMobAttackRange(mob)) {
           this.attackPlayerFromMob(mob, targetPlayer, now);
           continue;
         }
@@ -810,6 +822,297 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     if (player.health <= 0) {
       this.handlePlayerKilled(player);
     }
+  }
+
+  protected clearMobSkillState(mob: MobState) {
+    mob.castingSkillId = "";
+    mob.castStartedAt = 0;
+    mob.castEndsAt = 0;
+    mob.skillLungeStartedAt = 0;
+    mob.skillLungeEndsAt = 0;
+    mob.skillLungeFromX = 0;
+    mob.skillLungeFromY = 0;
+    mob.skillLungeToX = 0;
+    mob.skillLungeToY = 0;
+    this.mobSkillHitTargets.delete(mob.id);
+  }
+
+  protected startSkeletonBiteCast(mob: MobState, now: number) {
+    mob.castingSkillId = SKELETON_BITE_SKILL_ID;
+    mob.castStartedAt = now;
+    mob.castEndsAt = now + SKELETON_BITE_CAST_MS;
+    mob.skillLungeStartedAt = 0;
+    mob.skillLungeEndsAt = 0;
+    mob.skillLungeFromX = mob.x;
+    mob.skillLungeFromY = mob.y;
+    mob.skillLungeToX = mob.x;
+    mob.skillLungeToY = mob.y;
+    mob.targetX = mob.x;
+    mob.targetY = mob.y;
+    mob.attackCooldownEndsAt = now + SKELETON_BITE_COOLDOWN_MS;
+  }
+
+  protected resolveSkeletonBiteDestination(mob: MobState, target: BasePlayerState | null) {
+    const tileSize = this.profile.tileSize;
+    const maxDistance = tileSize * SKELETON_BITE_DISTANCE_TILES;
+    const desiredX = target ? target.x : mob.targetX;
+    const desiredY = target ? target.y : mob.targetY;
+    const deltaX = desiredX - mob.x;
+    const deltaY = desiredY - mob.y;
+    const length = Math.hypot(deltaX, deltaY);
+    const directionX = length > 0.001 ? deltaX / length : 1;
+    const directionY = length > 0.001 ? deltaY / length : 0;
+    const stepDistance = Math.max(4, tileSize / 4);
+    const steps = Math.max(1, Math.ceil(maxDistance / stepDistance));
+    let resolvedX = mob.x;
+    let resolvedY = mob.y;
+
+    for (let step = 1; step <= steps; step += 1) {
+      const travelled = Math.min(maxDistance, step * stepDistance);
+      const candidateX = mob.x + directionX * travelled;
+      const candidateY = mob.y + directionY * travelled;
+      if (!this.canMobMoveTo(candidateX, candidateY, mob.id)) {
+        break;
+      }
+      resolvedX = candidateX;
+      resolvedY = candidateY;
+    }
+
+    return {
+      x: resolvedX,
+      y: resolvedY,
+      directionX,
+      directionY,
+    };
+  }
+
+  protected getDistanceToSegment(
+    pointX: number,
+    pointY: number,
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+  ) {
+    const segmentX = endX - startX;
+    const segmentY = endY - startY;
+    const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+    if (lengthSquared <= 0.0001) {
+      return Math.hypot(pointX - startX, pointY - startY);
+    }
+
+    const projection = ((pointX - startX) * segmentX + (pointY - startY) * segmentY) / lengthSquared;
+    const clamped = Math.max(0, Math.min(1, projection));
+    const closestX = startX + segmentX * clamped;
+    const closestY = startY + segmentY * clamped;
+    return Math.hypot(pointX - closestX, pointY - closestY);
+  }
+
+  protected getSegmentCircleCollisionT(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    centerX: number,
+    centerY: number,
+    radius: number,
+  ) {
+    const deltaX = endX - startX;
+    const deltaY = endY - startY;
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+    if (lengthSquared <= 0.0001) {
+      return Math.hypot(startX - centerX, startY - centerY) <= radius ? 0 : null;
+    }
+
+    const offsetX = startX - centerX;
+    const offsetY = startY - centerY;
+    const c = offsetX * offsetX + offsetY * offsetY - radius * radius;
+    if (c <= 0) {
+      return 0;
+    }
+
+    const b = 2 * (offsetX * deltaX + offsetY * deltaY);
+    const discriminant = b * b - 4 * lengthSquared * c;
+    if (discriminant < 0) {
+      return null;
+    }
+
+    const root = Math.sqrt(discriminant);
+    const first = (-b - root) / (2 * lengthSquared);
+    const second = (-b + root) / (2 * lengthSquared);
+    if (first >= 0 && first <= 1) {
+      return first;
+    }
+    if (second >= 0 && second <= 1) {
+      return second;
+    }
+
+    return null;
+  }
+
+  protected resolvePlayerMobOverlap(player: BasePlayerState, mob: MobState) {
+    const minDistance = this.profile.playerMobCollisionRadius + 2;
+    const deltaX = player.x - mob.x;
+    const deltaY = player.y - mob.y;
+    const distance = Math.hypot(deltaX, deltaY);
+    if (distance >= minDistance) {
+      return;
+    }
+
+    const directionX = distance > 0.001 ? deltaX / distance : 1;
+    const directionY = distance > 0.001 ? deltaY / distance : 0;
+    const targetX = mob.x + directionX * minDistance;
+    const targetY = mob.y + directionY * minDistance;
+    if (this.canTeleportTo(targetX, targetY, player.id)) {
+      player.x = targetX;
+      player.y = targetY;
+    }
+  }
+
+  protected applySkeletonBiteHits(
+    mob: MobState,
+    players: BasePlayerState[],
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
+  ) {
+    const hitTargets = this.mobSkillHitTargets.get(mob.id) ?? new Set<string>();
+    const collisionRadius = this.profile.playerMobCollisionRadius;
+    let firstCollision:
+      | {
+        player: BasePlayerState;
+        t: number;
+      }
+      | null = null;
+
+    for (const player of players) {
+      if (player.dead || hitTargets.has(player.id)) {
+        continue;
+      }
+
+      const collisionT = this.getSegmentCircleCollisionT(
+        fromX,
+        fromY,
+        toX,
+        toY,
+        player.x,
+        player.y,
+        collisionRadius,
+      );
+      if (collisionT === null) {
+        continue;
+      }
+
+      if (!firstCollision || collisionT < firstCollision.t) {
+        firstCollision = { player, t: collisionT };
+      }
+    }
+
+    if (!firstCollision) {
+      this.mobSkillHitTargets.set(mob.id, hitTargets);
+      return false;
+    }
+
+    const collisionX = fromX + (toX - fromX) * firstCollision.t;
+    const collisionY = fromY + (toY - fromY) * firstCollision.t;
+    mob.x = collisionX;
+    mob.y = collisionY;
+    mob.targetX = collisionX;
+    mob.targetY = collisionY;
+
+    const resolvedDamage = this.applyDamageToPlayer(firstCollision.player, mob.attackDamage, "physical");
+    hitTargets.add(firstCollision.player.id);
+    this.onCombatLog(`${mob.name} bites ${firstCollision.player.name} for ${resolvedDamage}.`);
+
+    if (firstCollision.player.health <= 0) {
+      this.handlePlayerKilled(firstCollision.player);
+    }
+
+    this.resolvePlayerMobOverlap(firstCollision.player, mob);
+    this.mobSkillHitTargets.set(mob.id, hitTargets);
+    return true;
+  }
+
+  protected tryRunSkeletonBite(
+    mob: MobState,
+    targetPlayer: BasePlayerState | null,
+    players: BasePlayerState[],
+    now: number,
+  ) {
+    if (this.resolveMobKind(mob) !== "skeleton") {
+      return false;
+    }
+
+    if (mob.skillLungeEndsAt > now && mob.skillLungeStartedAt > 0) {
+      const duration = Math.max(1, mob.skillLungeEndsAt - mob.skillLungeStartedAt);
+      const progress = Math.max(0, Math.min(1, (now - mob.skillLungeStartedAt) / duration));
+      const previousX = mob.x;
+      const previousY = mob.y;
+      mob.x = mob.skillLungeFromX + (mob.skillLungeToX - mob.skillLungeFromX) * progress;
+      mob.y = mob.skillLungeFromY + (mob.skillLungeToY - mob.skillLungeFromY) * progress;
+      mob.targetX = mob.skillLungeToX;
+      mob.targetY = mob.skillLungeToY;
+      const hitAnyTarget = this.applySkeletonBiteHits(mob, players, previousX, previousY, mob.x, mob.y);
+      if (hitAnyTarget) {
+        this.clearMobSkillState(mob);
+      }
+      return true;
+    }
+
+    if (mob.skillLungeEndsAt > 0 && now >= mob.skillLungeEndsAt) {
+      const previousX = mob.x;
+      const previousY = mob.y;
+      mob.x = mob.skillLungeToX;
+      mob.y = mob.skillLungeToY;
+      this.applySkeletonBiteHits(mob, players, previousX, previousY, mob.x, mob.y);
+      this.clearMobSkillState(mob);
+      return true;
+    }
+
+    if (mob.castingSkillId === SKELETON_BITE_SKILL_ID && mob.castEndsAt > now) {
+      mob.targetX = mob.x;
+      mob.targetY = mob.y;
+      return true;
+    }
+
+    if (mob.castingSkillId === SKELETON_BITE_SKILL_ID && mob.castEndsAt > 0 && now >= mob.castEndsAt) {
+      const destination = this.resolveSkeletonBiteDestination(mob, targetPlayer);
+      const distance = Math.hypot(destination.x - mob.x, destination.y - mob.y);
+      const lungeDurationMs =
+        distance <= 0.001
+          ? 1
+          : Math.max(120, Math.round((distance / SKELETON_BITE_LUNGE_SPEED_PX_PER_SEC) * 1000));
+      mob.skillLungeStartedAt = now;
+      mob.skillLungeEndsAt = now + lungeDurationMs;
+      mob.skillLungeFromX = mob.x;
+      mob.skillLungeFromY = mob.y;
+      mob.skillLungeToX = destination.x;
+      mob.skillLungeToY = destination.y;
+      mob.targetX = destination.x;
+      mob.targetY = destination.y;
+      this.mobSkillHitTargets.set(mob.id, new Set<string>());
+      return true;
+    }
+
+    if (!targetPlayer || targetPlayer.dead) {
+      return false;
+    }
+
+    const triggerDistance = this.profile.tileSize * SKELETON_BITE_TRIGGER_DISTANCE_TILES;
+    const distanceToTarget = Math.hypot(targetPlayer.x - mob.x, targetPlayer.y - mob.y);
+    if (distanceToTarget > triggerDistance) {
+      return false;
+    }
+
+    if (mob.attackCooldownEndsAt > now) {
+      mob.targetX = mob.x;
+      mob.targetY = mob.y;
+      return true;
+    }
+
+    this.startSkeletonBiteCast(mob, now);
+    return true;
   }
 
   // ── Projectile system ────────────────────────────────────────────
@@ -1425,6 +1728,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     mob.burnEndsAt = 0;
     mob.respawnAt = Date.now() + this.profile.mobRespawnMs;
     mob.attackCooldownEndsAt = 0;
+    this.clearMobSkillState(mob);
     clearMobPath(this.mobPathCache, mob.id);
     this.mobBurns.delete(mob.id);
     this.onCombatLog(`${mob.name} collapses.`);

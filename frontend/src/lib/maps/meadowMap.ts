@@ -74,8 +74,16 @@ export type MeadowTraderAsset = {
   x: number;
   y: number;
   name: string;
-  bodyTexturePath: string;
-  headTexturePath: string;
+  bodyTexturePath?: string;
+  headTexturePath?: string;
+  spriteSheetPath?: string;
+  frameWidth?: number;
+  frameHeight?: number;
+  frameCount?: number;
+  animationFps?: number;
+  animationStartFrame?: number;
+  columns?: number;
+  renderScale?: number;
 };
 
 export type MeadowMobAsset = {

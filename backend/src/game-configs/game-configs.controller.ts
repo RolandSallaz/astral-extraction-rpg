@@ -2,8 +2,6 @@ import { Body, Controller, Get, Patch, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { CurrentPlayer } from '../auth/decorators/current-player.decorator';
 import { PlayerEntity } from '../players/entities/player.entity';
-import { UpdateMobBalanceDto } from './dto/update-mob-balance.dto';
-import { UpdateMobVisualsDto } from './dto/update-mob-visuals.dto';
 import { UpdateSkillBalanceDto } from './dto/update-skill-balance.dto';
 import type { ItemBalanceEntry } from './item-balance.defaults';
 import { GetGameConfigsQuery } from './use-cases/get-game-configs.query';
@@ -59,7 +57,7 @@ export class GameConfigsController {
   @Patch('mob-balance')
   updateMobBalance(
     @CurrentPlayer() player: PlayerEntity,
-    @Body() body: UpdateMobBalanceDto,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.updateGameConfigsUseCase.mobBalance(player, body);
   }
@@ -77,7 +75,7 @@ export class GameConfigsController {
   @Patch('mob-visuals')
   updateMobVisuals(
     @CurrentPlayer() player: PlayerEntity,
-    @Body() body: UpdateMobVisualsDto,
+    @Body() body: Record<string, unknown>,
   ) {
     return this.updateGameConfigsUseCase.mobVisuals(player, body);
   }

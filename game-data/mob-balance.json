@@ -18,5 +18,15 @@
     "attackDamage": 7,
     "attackCooldownMs": 800,
     "experienceReward": 22
+  },
+  "skeleton": {
+    "maxHealth": 52,
+    "moveSpeed": 58,
+    "aggroRange": 160,
+    "leashRange": 240,
+    "attackRange": 28,
+    "attackDamage": 0,
+    "attackCooldownMs": 1100,
+    "experienceReward": 36
   }
 }

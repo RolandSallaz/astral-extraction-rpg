@@ -1,0 +1,17 @@
+[
+  {
+    "id": "skeleton-23-14",
+    "kind": "skeleton",
+    "spawn": {
+      "x": 23,
+      "y": 14
+    },
+    "patrol": {
+      "minX": 23,
+      "maxX": 23,
+      "y": 14,
+      "radiusY": 1,
+      "phase": 0
+    }
+  }
+]

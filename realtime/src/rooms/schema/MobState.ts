@@ -26,6 +26,15 @@ export class MobState extends Schema {
   @type("number") attackDamage = 0;
   @type("number") attackCooldownMs = 0;
   @type("number") attackCooldownEndsAt = 0;
+  @type("string") castingSkillId = "";
+  @type("number") castStartedAt = 0;
+  @type("number") castEndsAt = 0;
+  @type("number") skillLungeStartedAt = 0;
+  @type("number") skillLungeEndsAt = 0;
+  @type("number") skillLungeFromX = 0;
+  @type("number") skillLungeFromY = 0;
+  @type("number") skillLungeToX = 0;
+  @type("number") skillLungeToY = 0;
   @type("number") experienceReward = 0;
   @type("number") health = 100;
   @type("number") maxHealth = 100;

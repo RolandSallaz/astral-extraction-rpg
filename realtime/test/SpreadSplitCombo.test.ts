@@ -1,13 +1,16 @@
 import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
-import appConfig from "../src/app.config.js";
+import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
 
 describe("spread + split combo", () => {
-  let colyseus: ColyseusTestServer<typeof appConfig>;
+  let colyseus: ColyseusTestServer<ReturnType<typeof createAppConfig>>;
 
-  before(async () => (colyseus = await boot(appConfig)));
-  after(async () => colyseus.shutdown());
+  before(async () => (colyseus = await boot(createAppConfig())));
+  after(async () => {
+    await colyseus.cleanup();
+    await colyseus.shutdown();
+  });
   beforeEach(async () => await colyseus.cleanup());
 
   it("spawns six projectiles for a fireball cast with spread and split gems", async () => {
