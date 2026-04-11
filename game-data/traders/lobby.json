@@ -4,7 +4,10 @@
     "x": 17,
     "y": 19,
     "name": "Old mage",
-    "bodyTexturePath": "/items/equipment/tunic_npc1.png",
-    "headTexturePath": "/items/equipment/oldman_mage_head.png"
+    "bodyItemId": "fire_robe",
+    "bodyTexturePath": "/character/equipment/fire_robe/fire_robe_idle.png",
+    "hairTexturePath": "/character/hairs/old_mage_haird.png",
+    "hairOffsetX": 0,
+    "hairOffsetY": -3.5
   }
 ]

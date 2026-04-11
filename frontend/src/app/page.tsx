@@ -9,7 +9,6 @@ import {
   ITEM_DEFINITIONS,
   parseInventoryItem,
   serializeInventoryItem,
-  type GemItemId,
   type ItemId,
 } from '@/lib/items/equipmentItems';
 import {
@@ -57,6 +56,9 @@ import {
 import { loadStoredLocale, persistLocale, pickLocale, type Locale } from '@/lib/i18n';
 import type { MeadowMapAsset, MeadowMobAsset, MeadowOverlayAsset, MeadowStampAsset, MeadowTile, MeadowTraderAsset } from '@/lib/maps/meadowMap';
 import { MOB_KINDS, getMobDefinition, type MobKind } from '@mmorpg/shared/mobs/catalog';
+import { DEFAULT_PLAYER_VISUALS } from '@mmorpg/shared/player/visuals';
+import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
+import { ITEM_DEFINITIONS as SHARED_ITEM_DEFINITIONS } from '@mmorpg/shared/items/catalog';
 import {
   createParty,
   giveItemToPlayer,
@@ -132,8 +134,11 @@ type WorldSpriteBrush = {
   scale: number;
 };
 type WorldTraderBrush = {
-  bodyTexturePath: MeadowTraderAsset['bodyTexturePath'];
-  headTexturePath: MeadowTraderAsset['headTexturePath'];
+  bodyItemId: string;
+  headItemId: string;
+  hairTexturePath: MeadowTraderAsset['hairTexturePath'];
+  hairOffsetX: number;
+  hairOffsetY: number;
 };
 type WorldMobBrush = {
   kind: MobKind;
@@ -326,11 +331,9 @@ const LOBBY_TOOLS_VISIBLE_STORAGE_KEY = 'mmorpg.lobby-tools.visible.v1';
 const LOBBY_TOOLS_POSITION_STORAGE_KEY = 'mmorpg.lobby-tools.position.v1';
 const ADMIN_TOOLS_POSITION_STORAGE_KEY = 'mmorpg.admin-tools.position.v1';
 const ACTIVE_ROOM_TARGET_STORAGE_KEY = 'mmorpg.active-room-target.v1';
-const ADMIN_GEM_COLORS_STORAGE_KEY = 'mmorpg.admin.gem-colors.v1';
 const MINIMAP_ZOOM_STORAGE_KEY = 'mmorpg.minimap.zoom.v1';
 const RAID_DEADLINE_MS = 15 * 60 * 1000;
 const ADMIN_ITEM_DEFINITIONS = Object.values(ITEM_DEFINITIONS);
-type AdminGemColorOverrides = Partial<Record<GemItemId, string>>;
 const TRADER_WINDOW_POSITION_STORAGE_KEY = 'mmorpg.ui.trader.position.v1';
 const PARTY_POLL_INTERVAL_MS = 2000;
 function getTraderQuestDefinitions(locale: Locale): Partial<Record<string, TraderQuestDefinition[]>> {
@@ -376,23 +379,17 @@ function getTraderOffers(trader: WorldTraderInteraction): TraderOffer[] {
   if (normalizedName.includes('old mage')) {
     return [
       { itemId: 'default_staff' },
-      { itemId: 'magic_hat' },
-      { itemId: 'robe_tunic' },
       { itemId: 'healing_potion', quantity: 1 },
       { itemId: 'fire_trail_gem' },
       { itemId: 'fire_return_gem' },
       { itemId: 'fire_range_gem' },
       { itemId: 'cast_speed_gem' },
       { itemId: 'critical_gem' },
-      { itemId: 'guard_gem' },
-      { itemId: 'focus_gem' },
-      { itemId: 'vitality_gem' },
     ];
   }
 
   return [
     { itemId: 'healing_potion', quantity: 1 },
-    { itemId: 'magic_hat' },
   ];
 }
 
@@ -410,6 +407,85 @@ function getTraderGreeting(trader: WorldTraderInteraction, locale: Locale) {
     ru: 'Посмотри, что у меня есть.',
     en: 'Browse the wares.',
   });
+}
+
+function renderStaticPlayerBaseBody() {
+  const idleAnimation = DEFAULT_PLAYER_VISUALS.animations.idle;
+  if (!idleAnimation) {
+    return (
+      <img
+        src={DEFAULT_PLAYER_VISUALS.body.texturePath}
+        alt="Trader body base"
+        className="pixelated absolute inset-0 h-full w-full object-contain"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="pixelated absolute inset-0 bg-no-repeat"
+      style={{
+        backgroundImage: `url(${idleAnimation.texturePath})`,
+        backgroundPosition: '0% 0%',
+        backgroundSize: `${idleAnimation.frameCount * 100}% 100%`,
+        imageRendering: 'pixelated',
+      }}
+    />
+  );
+}
+
+function isAnimatedTraderBodyOverlayPath(texturePath: string | undefined) {
+  return typeof texturePath === 'string' && /^\/character\/equipment\/.+_idle\.(png|jpg|jpeg|webp|gif)$/i.test(texturePath);
+}
+
+function renderStaticTraderBodyOverlay(texturePath: string, alt: string) {
+  const idleAnimation = DEFAULT_PLAYER_VISUALS.animations.idle;
+  if (idleAnimation && isAnimatedTraderBodyOverlayPath(texturePath)) {
+    return (
+      <div
+        aria-label={alt}
+        className="pixelated absolute inset-0 bg-no-repeat"
+        style={{
+          backgroundImage: `url(${texturePath})`,
+          backgroundPosition: '0% 0%',
+          backgroundSize: `${idleAnimation.frameCount * 100}% 100%`,
+          imageRendering: 'pixelated',
+        }}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={texturePath}
+      alt={alt}
+      className="pixelated absolute inset-0 h-full w-full object-contain"
+    />
+  );
+}
+
+function renderStaticHeadEyes(direction: 'up' | 'down' = 'down') {
+  const headWidth = DEFAULT_PLAYER_VISUALS.head.frameWidth ?? 16;
+  const headHeight = DEFAULT_PLAYER_VISUALS.head.frameHeight ?? 16;
+  const eyeSizePercentX = (1 / headWidth) * 100;
+  const eyeSizePercentY = (1 / headHeight) * 100;
+  const leftEye = DEFAULT_PLAYER_VISUALS.eyes.positions[direction].left;
+  const rightEye = DEFAULT_PLAYER_VISUALS.eyes.positions[direction].right;
+
+  return [leftEye, rightEye].map((eye, index) => (
+    <span
+      key={`${direction}-${index}`}
+      className="absolute rounded-none"
+      style={{
+        left: `${((eye.x + 0.5) / headWidth) * 100}%`,
+        top: `${((eye.y + 0.5) / headHeight) * 100}%`,
+        width: `${eyeSizePercentX}%`,
+        height: `${eyeSizePercentY}%`,
+        backgroundColor: DEFAULT_PLAYER_VISUALS.eyes.color,
+        transform: 'translate(-50%, -50%)',
+      }}
+    />
+  ));
 }
 
 function renderTraderPortrait(trader: WorldTraderInteraction) {
@@ -437,28 +513,36 @@ function renderTraderPortrait(trader: WorldTraderInteraction) {
     );
   }
 
+  const bodyTexturePath =
+    (trader.bodyItemId ? getEquipmentBodyTexturePath(trader.bodyItemId) : undefined) ??
+    trader.bodyTexturePath;
+  const headTexturePath =
+    (trader.headItemId ? getEquipmentBodyTexturePath(trader.headItemId) : undefined) ??
+    trader.headTexturePath;
+
   return (
     <>
+      {renderStaticPlayerBaseBody()}
+      {bodyTexturePath ? renderStaticTraderBodyOverlay(bodyTexturePath, `${trader.name} body`) : null}
       <img
-        src="/sprites/characters/body-torso-8x8.png"
-        alt="Trader body base"
-        className="pixelated absolute inset-0 h-full w-full object-contain"
-      />
-      {trader.bodyTexturePath ? (
-        <img
-          src={trader.bodyTexturePath}
-          alt={`${trader.name} body`}
-          className="pixelated absolute inset-0 h-full w-full object-contain"
-        />
-      ) : null}
-      <img
-        src="/sprites/characters/body-head-8x8.png"
+        src={DEFAULT_PLAYER_VISUALS.head.texturePath}
         alt="Trader head base"
         className="pixelated absolute inset-0 h-full w-full object-contain"
       />
-      {trader.headTexturePath ? (
+      {trader.hairTexturePath ? (
         <img
-          src={trader.headTexturePath}
+          src={trader.hairTexturePath}
+          alt={`${trader.name} hair`}
+          className="pixelated absolute inset-0 h-full w-full object-contain"
+          style={{
+            transform: `translate(${trader.hairOffsetX ?? 0}px, ${trader.hairOffsetY ?? 0}px)`,
+          }}
+        />
+      ) : null}
+      {renderStaticHeadEyes('down')}
+      {headTexturePath ? (
+        <img
+          src={headTexturePath}
           alt={`${trader.name} head`}
           className="pixelated absolute inset-0 h-full w-full object-contain"
         />
@@ -488,14 +572,12 @@ function ensureDefaultMobClip(config: MobVisualConfig[keyof MobVisualConfig]) {
       idle: config.clips.idle ?? { ...defaultClip, key: 'idle' },
       move: config.clips.move ?? { ...defaultClip, key: 'move' },
       attack: config.clips.attack ?? { ...defaultClip, key: 'attack' },
-      death: config.clips.death ?? { ...defaultClip, key: 'death', repeat: 0 },
     },
     states: {
       ...config.states,
       idle: 'idle',
       move: 'move',
       attack: 'attack',
-      death: 'death',
     },
   };
 }
@@ -524,7 +606,7 @@ function getDisplayedMobClipFieldValue(
   return clip[field];
 }
 
-const EDITABLE_MOB_ANIMATION_STATES = ['idle', 'move', 'attack', 'death'] as const;
+const EDITABLE_MOB_ANIMATION_STATES = ['idle', 'move', 'attack'] as const;
 
 function getMobClipRow(clip: { startFrame: number; columns: number }) {
   return Math.floor(clip.startFrame / Math.max(1, clip.columns)) + 1;
@@ -726,7 +808,7 @@ function QuestRequiredItemCard({
               <span
                 className="pixelated h-full w-full"
                 style={{
-                  backgroundColor: item.tintColor ?? '#ffffff',
+                  backgroundColor: '#ffffff',
                   WebkitMaskImage: `url(${item.texturePath})`,
                   maskImage: `url(${item.texturePath})`,
                   WebkitMaskRepeat: 'no-repeat',
@@ -861,24 +943,6 @@ function loadLobbyToolsVisible() {
   }
 
   return window.localStorage.getItem(LOBBY_TOOLS_VISIBLE_STORAGE_KEY) !== 'false';
-}
-
-function loadAdminGemColorOverrides(): AdminGemColorOverrides {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_GEM_COLORS_STORAGE_KEY);
-    if (!rawValue) {
-      return {};
-    }
-
-    const parsed = JSON.parse(rawValue) as AdminGemColorOverrides;
-    return parsed ?? {};
-  } catch {
-    return {};
-  }
 }
 
 function loadStoredActiveRoomTarget(): ActiveRoomTarget | null {
@@ -1351,9 +1415,14 @@ export default function Home() {
   const introductionQuestSteps = getIntroductionQuestSteps(locale);
   const sealedRelicQuestSteps = getSealedRelicQuestSteps(locale);
   const [selectedWorldTrader, setSelectedWorldTrader] = useState<WorldTraderBrush>({
-    bodyTexturePath: '',
-    headTexturePath: '',
+    bodyItemId: '',
+    headItemId: '',
+    hairTexturePath: '',
+    hairOffsetX: 0,
+    hairOffsetY: 0,
   });
+  const [traderBodySearch, setTraderBodySearch] = useState('');
+  const [traderHeadSearch, setTraderHeadSearch] = useState('');
   const [selectedWorldMob, setSelectedWorldMob] = useState<WorldMobBrush>({
     kind: MOB_KINDS[0] ?? 'rat',
   });
@@ -1397,10 +1466,7 @@ export default function Home() {
   const [adminItemBusyId, setAdminItemBusyId] = useState<string | null>(null);
   const [adminItemStatus, setAdminItemStatus] = useState('');
   const [selectedAdminItemId, setSelectedAdminItemId] = useState<ItemId>(
-    ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'magic_hat',
-  );
-  const [adminGemColorOverrides, setAdminGemColorOverrides] = useState<AdminGemColorOverrides>(
-    loadAdminGemColorOverrides,
+    ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'default_staff',
   );
   const skipFirstSaveRef = useRef(true);
   const skillBalanceLoadedRef = useRef(false);
@@ -1626,17 +1692,6 @@ export default function Home() {
     }
 
     window.localStorage.setItem(
-      ADMIN_GEM_COLORS_STORAGE_KEY,
-      JSON.stringify(adminGemColorOverrides),
-    );
-  }, [adminGemColorOverrides]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
       ADMIN_TOOLS_VISIBLE_STORAGE_KEY,
       String(adminToolsVisible),
     );
@@ -1737,23 +1792,41 @@ export default function Home() {
       return;
     }
 
-    const traderHeadOptions = adminImageOptions
-      .filter((imagePath) => /head/i.test(imagePath))
+    const traderHairOptions = adminImageOptions
+      .filter((imagePath) => /hair/i.test(imagePath))
       .sort((left, right) => left.localeCompare(right));
-    const traderBodyOptions = adminImageOptions
-      .filter((imagePath) => /(body|tunic|robe|blacksmith)/i.test(imagePath))
-      .sort((left, right) => left.localeCompare(right));
+    const bodyItems = ADMIN_ITEM_DEFINITIONS.filter(
+      (item) => item.type === 'equipment' && item.slot === 'body',
+    );
+    const headItems = ADMIN_ITEM_DEFINITIONS.filter(
+      (item) => item.type === 'equipment' && item.slot === 'head',
+    );
+    const preferredHairTexturePath =
+      traderHairOptions.find((imagePath) => /old_mage_haird/i.test(imagePath)) ??
+      traderHairOptions[0] ??
+      '';
+    const preferredBodyItemId =
+      bodyItems.find((item) => item.id === 'fire_robe')?.id ??
+      bodyItems[0]?.id ??
+      '';
+    const preferredHeadItemId = headItems[0]?.id ?? '';
 
     setSelectedWorldTrader((current) => ({
       ...current,
-      headTexturePath:
-        current.headTexturePath && traderHeadOptions.includes(current.headTexturePath)
-          ? current.headTexturePath
-          : (traderHeadOptions[0] ?? current.headTexturePath),
-      bodyTexturePath:
-        current.bodyTexturePath && traderBodyOptions.includes(current.bodyTexturePath)
-          ? current.bodyTexturePath
-          : (traderBodyOptions[0] ?? current.bodyTexturePath),
+      hairTexturePath:
+        typeof current.hairTexturePath === 'string' && (
+          current.hairTexturePath.length === 0 || traderHairOptions.includes(current.hairTexturePath)
+        )
+          ? current.hairTexturePath
+          : preferredHairTexturePath,
+      bodyItemId:
+        current.bodyItemId && bodyItems.some((item) => item.id === current.bodyItemId)
+          ? current.bodyItemId
+          : preferredBodyItemId,
+      headItemId:
+        current.headItemId && headItems.some((item) => item.id === current.headItemId)
+          ? current.headItemId
+          : preferredHeadItemId,
     }));
   }, [adminImageOptions]);
 
@@ -1765,8 +1838,11 @@ export default function Home() {
 
     setSelectedWorldTrader((current) => ({
       ...current,
-      bodyTexturePath: oldMage.bodyTexturePath || current.bodyTexturePath,
-      headTexturePath: oldMage.headTexturePath || current.headTexturePath,
+      bodyItemId: oldMage.bodyItemId || current.bodyItemId,
+      headItemId: oldMage.headItemId || current.headItemId,
+      hairTexturePath: oldMage.hairTexturePath ?? '',
+      hairOffsetX: oldMage.hairOffsetX ?? 0,
+      hairOffsetY: oldMage.hairOffsetY ?? 0,
     }));
   }, [worldMapDraft]);
 
@@ -2831,7 +2907,7 @@ export default function Home() {
                 field === 'frameRate'
                   ? Math.max(1, Math.floor(Number.parseFloat(value) || nextClip.frameRate || 1))
                   : nextClip.frameRate,
-              repeat: state === 'death' ? 0 : -1,
+              repeat: -1,
             },
           },
           states: {
@@ -2886,12 +2962,47 @@ export default function Home() {
   const worldSpriteOptions = adminImageOptions.filter((imagePath) =>
     activeWorldSpriteFolder ? imagePath.startsWith(`${activeWorldSpriteFolder}/`) : false,
   );
-  const worldTraderHeadOptions = (
-    adminImageOptions.filter((imagePath) => /head/i.test(imagePath)).sort((left, right) => left.localeCompare(right))
+  const worldTraderHairOptions = (
+    adminImageOptions.filter((imagePath) => /hair/i.test(imagePath)).sort((left, right) => left.localeCompare(right))
   );
-  const worldTraderBodyOptions = (
-    adminImageOptions.filter((imagePath) => /(body|tunic|robe|blacksmith)/i.test(imagePath)).sort((left, right) => left.localeCompare(right))
+  const worldTraderBodyItems = ADMIN_ITEM_DEFINITIONS.filter(
+    (item) => item.type === 'equipment' && item.slot === 'body',
   );
+  const worldTraderHeadItems = ADMIN_ITEM_DEFINITIONS.filter(
+    (item) => item.type === 'equipment' && item.slot === 'head',
+  );
+  const traderBodySearchValue = traderBodySearch.trim().toLowerCase();
+  const traderHeadSearchValue = traderHeadSearch.trim().toLowerCase();
+  const filteredTraderBodyItems = worldTraderBodyItems.filter((item) => {
+    if (!traderBodySearchValue) {
+      return true;
+    }
+    return (
+      item.id.toLowerCase().includes(traderBodySearchValue) ||
+      item.name.toLowerCase().includes(traderBodySearchValue)
+    );
+  });
+  const filteredTraderHeadItems = worldTraderHeadItems.filter((item) => {
+    if (!traderHeadSearchValue) {
+      return true;
+    }
+    return (
+      item.id.toLowerCase().includes(traderHeadSearchValue) ||
+      item.name.toLowerCase().includes(traderHeadSearchValue)
+    );
+  });
+  const selectedTraderBodyTexturePath = selectedWorldTrader.bodyItemId
+    ? getEquipmentBodyTexturePath(selectedWorldTrader.bodyItemId)
+    : undefined;
+  const selectedTraderHeadTexturePath = selectedWorldTrader.headItemId
+    ? getEquipmentBodyTexturePath(selectedWorldTrader.headItemId)
+    : undefined;
+  const selectedTraderBodyLabel = selectedWorldTrader.bodyItemId
+    ? ITEM_DEFINITIONS[selectedWorldTrader.bodyItemId]?.name ?? selectedWorldTrader.bodyItemId
+    : 'default body';
+  const selectedTraderHeadLabel = selectedWorldTrader.headItemId
+    ? ITEM_DEFINITIONS[selectedWorldTrader.headItemId]?.name ?? selectedWorldTrader.headItemId
+    : 'no head overlay';
   const selectedAdminItem = ITEM_DEFINITIONS[selectedAdminItemId];
   const selectedAdminItemBalance = itemBalanceDraft[selectedAdminItemId] ?? DEFAULT_ITEM_BALANCE_CONFIG[selectedAdminItemId];
   const selectedAdminMobDefinition = getMobDefinition(selectedAdminMobId);
@@ -3092,10 +3203,6 @@ export default function Home() {
   };
 
   const handleWorldTraderPaint = (tileX: number, tileY: number) => {
-    if (!selectedWorldTrader.bodyTexturePath || !selectedWorldTrader.headTexturePath) {
-      return;
-    }
-
     setWorldMapDraft((current) => {
       if (!current) {
         return current;
@@ -3103,14 +3210,20 @@ export default function Home() {
 
       return {
         ...current,
-        traders: [{
-          id: OLD_MAGE_TRADER_ID,
-          x: tileX,
-          y: tileY,
-          name: OLD_MAGE_TRADER_NAME,
-          bodyTexturePath: selectedWorldTrader.bodyTexturePath,
-          headTexturePath: selectedWorldTrader.headTexturePath,
-        }],
+        traders: [
+          {
+            id: OLD_MAGE_TRADER_ID,
+            x: tileX,
+            y: tileY,
+            name: OLD_MAGE_TRADER_NAME,
+            ...(selectedWorldTrader.bodyItemId ? { bodyItemId: selectedWorldTrader.bodyItemId } : {}),
+            ...(selectedWorldTrader.hairTexturePath ? { hairTexturePath: selectedWorldTrader.hairTexturePath } : {}),
+            ...(selectedWorldTrader.hairOffsetX || selectedWorldTrader.hairOffsetY
+              ? { hairOffsetX: selectedWorldTrader.hairOffsetX, hairOffsetY: selectedWorldTrader.hairOffsetY }
+              : {}),
+            ...(selectedWorldTrader.headItemId ? { headItemId: selectedWorldTrader.headItemId } : {}),
+          },
+        ],
       };
     });
   };
@@ -3157,12 +3270,12 @@ export default function Home() {
   };
 
   const handleOldMageAppearanceChange = (
-    key: 'bodyTexturePath' | 'headTexturePath',
+    key: 'bodyItemId' | 'headItemId' | 'hairTexturePath' | 'hairOffsetX' | 'hairOffsetY',
     value: string,
   ) => {
     setSelectedWorldTrader((current) => ({
       ...current,
-      [key]: value,
+      [key]: key === 'hairOffsetX' || key === 'hairOffsetY' ? Number.parseFloat(value) || 0 : value,
     }));
 
     setWorldMapDraft((current) => {
@@ -3175,16 +3288,30 @@ export default function Home() {
         return current;
       }
 
+      const updates: Partial<MeadowTraderAsset> = {
+        id: OLD_MAGE_TRADER_ID,
+        name: OLD_MAGE_TRADER_NAME,
+      };
+
+      if (key === 'bodyItemId') {
+        updates.bodyItemId = value || undefined;
+        updates.bodyTexturePath = undefined;
+      } else if (key === 'headItemId') {
+        updates.headItemId = value || undefined;
+        updates.headTexturePath = undefined;
+      } else if (key === 'hairOffsetX') {
+        updates.hairOffsetX = Number.parseFloat(value) || 0;
+      } else if (key === 'hairOffsetY') {
+        updates.hairOffsetY = Number.parseFloat(value) || 0;
+      } else {
+        updates[key] = value || undefined;
+      }
+
       return {
         ...current,
         traders: current.traders.map((trader) =>
           trader.id === oldMage.id
-            ? {
-                ...trader,
-                id: OLD_MAGE_TRADER_ID,
-                name: OLD_MAGE_TRADER_NAME,
-                [key]: value,
-              }
+            ? { ...trader, ...updates }
             : trader,
         ),
       };
@@ -4346,7 +4473,6 @@ export default function Home() {
         equipment={character.equipment}
         inventory={character.inventory ?? createEmptyInventory()}
         container={activeContainer}
-        itemTintOverrides={adminGemColorOverrides}
         itemBalanceConfig={itemBalanceConfig}
         playerGold={character.gold}
         playerStrength={character.strength}
@@ -4635,7 +4761,7 @@ export default function Home() {
                               <span
                                 className="pixelated h-full w-full"
                                 style={{
-                                  backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
+                                  backgroundColor: '#ffffff',
                                   WebkitMaskImage: `url(${item.texturePath})`,
                                   maskImage: `url(${item.texturePath})`,
                                   WebkitMaskRepeat: 'no-repeat',
@@ -4705,7 +4831,7 @@ export default function Home() {
                                 <span
                                   className="pixelated h-full w-full"
                                   style={{
-                                    backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
+                                    backgroundColor: '#ffffff',
                                     WebkitMaskImage: `url(${item.texturePath})`,
                                     maskImage: `url(${item.texturePath})`,
                                     WebkitMaskRepeat: 'no-repeat',
@@ -4756,7 +4882,7 @@ export default function Home() {
                           <span
                             className="pixelated h-full w-full"
                             style={{
-                              backgroundColor: adminGemColorOverrides[selectedSellItem.id as GemItemId] ?? selectedSellItem.tintColor ?? '#ffffff',
+                              backgroundColor: '#ffffff',
                               WebkitMaskImage: `url(${selectedSellItem.texturePath})`,
                               maskImage: `url(${selectedSellItem.texturePath})`,
                               WebkitMaskRepeat: 'no-repeat',
@@ -4814,7 +4940,7 @@ export default function Home() {
                           <span
                             className="pixelated h-full w-full"
                             style={{
-                              backgroundColor: adminGemColorOverrides[selectedItem.id as GemItemId] ?? selectedItem.tintColor ?? '#ffffff',
+                              backgroundColor: '#ffffff',
                               WebkitMaskImage: `url(${selectedItem.texturePath})`,
                               maskImage: `url(${selectedItem.texturePath})`,
                               WebkitMaskRepeat: 'no-repeat',
@@ -5567,7 +5693,7 @@ export default function Home() {
                         <span
                           className="pixelated h-16 w-16"
                           style={{
-                            backgroundColor: adminGemColorOverrides[selectedAdminItem.id as GemItemId] ?? selectedAdminItem.tintColor ?? '#ffffff',
+                            backgroundColor: '#ffffff',
                             WebkitMaskImage: `url(${selectedAdminItem.texturePath})`,
                             maskImage: `url(${selectedAdminItem.texturePath})`,
                             WebkitMaskRepeat: 'no-repeat',
@@ -5642,48 +5768,6 @@ export default function Home() {
                   </label>
                 </div>
 
-                {ADMIN_ITEM_DEFINITIONS.some((item) => item.type === 'gem') ? (
-                  <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
-                    <div className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Gem Colors</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {ADMIN_ITEM_DEFINITIONS.filter((item) => item.type === 'gem').map((item) => (
-                        <label key={item.id} className="block">
-                          <span className="text-[10px] uppercase tracking-[0.18em] text-[#bfd8a4]">{item.name}</span>
-                          <div className="mt-2 flex items-center gap-3 rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2">
-                            <span
-                              className="pixelated h-10 w-10 shrink-0"
-                              style={{
-                                backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
-                                WebkitMaskImage: `url(${item.texturePath})`,
-                                maskImage: `url(${item.texturePath})`,
-                                WebkitMaskRepeat: 'no-repeat',
-                                maskRepeat: 'no-repeat',
-                                WebkitMaskPosition: 'center',
-                                maskPosition: 'center',
-                                WebkitMaskSize: 'contain',
-                                maskSize: 'contain',
-                                transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                              }}
-                            />
-                            <input
-                              type="color"
-                              value={adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff'}
-                              onChange={(event) => {
-                                const nextColor = event.target.value;
-                                setAdminGemColorOverrides((current) => ({
-                                  ...current,
-                                  [item.id as GemItemId]: nextColor,
-                                }));
-                              }}
-                              className="block h-10 w-full cursor-pointer rounded-lg border border-[#d9efbd]/22 bg-[#203b11]/70 p-1"
-                            />
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
                 <div className="grid grid-cols-2 gap-3">
                   {ADMIN_ITEM_DEFINITIONS.map((item) => (
                     <button
@@ -5701,7 +5785,7 @@ export default function Home() {
                             <span
                               className="pixelated h-full w-full"
                               style={{
-                                backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
+                                backgroundColor: '#ffffff',
                                 WebkitMaskImage: `url(${item.texturePath})`,
                                 maskImage: `url(${item.texturePath})`,
                                 WebkitMaskRepeat: 'no-repeat',
@@ -5900,70 +5984,198 @@ export default function Home() {
                     <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
                       <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">NPC</div>
                       <div className="mt-2 text-sm text-[#d8ebc7]">
-                        Old mage is fixed. You can only move him and change his clothes.
+                        Old mage is fixed. You can only move him and change his sprite parts.
                       </div>
                     </div>
                     <label className="block">
                       <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Body</span>
+                      <input
+                        value={traderBodySearch}
+                        onChange={(event) => setTraderBodySearch(event.target.value)}
+                        placeholder="Search body items..."
+                        className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                      />
+                      <div className="mt-2 grid max-h-44 grid-cols-2 gap-2 overflow-auto pr-1">
+                        {filteredTraderBodyItems.length ? (
+                          filteredTraderBodyItems.map((item) => {
+                            const itemTexturePath = getEquipmentBodyTexturePath(item.id);
+                            const isSelected = selectedWorldTrader.bodyItemId === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => handleOldMageAppearanceChange('bodyItemId', item.id)}
+                                className={`rounded-xl border p-2 text-left transition ${
+                                  isSelected
+                                    ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                                    : 'border-[#89ad5d]/20 bg-[#203b11]/65 text-[#d8ebc7] hover:bg-[#294816]/72'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {itemTexturePath ? (
+                                    <img
+                                      src={itemTexturePath}
+                                      alt={item.name}
+                                      className="pixelated h-10 w-10 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 text-[10px] uppercase tracking-[0.12em] text-[#9fbc7e]">
+                                      No art
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold">{item.name}</div>
+                                    <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">
+                                      {item.id}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="col-span-2 rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2 text-xs text-[#9fbc7e]">
+                            No body items found.
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Hair</span>
                       <select
-                        value={selectedWorldTrader.bodyTexturePath}
-                        onChange={(event) => handleOldMageAppearanceChange('bodyTexturePath', event.target.value)}
+                        value={selectedWorldTrader.hairTexturePath}
+                        onChange={(event) => handleOldMageAppearanceChange('hairTexturePath', event.target.value)}
                         className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
                       >
-                        {worldTraderBodyOptions.map((spritePath) => (
+                        <option value="">None</option>
+                        {worldTraderHairOptions.map((spritePath) => (
                           <option key={spritePath} value={spritePath}>
                             {spritePath.split('/').at(-1) ?? spritePath}
                           </option>
                         ))}
                       </select>
                     </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Hair Offset X</span>
+                        <input
+                          type="number"
+                          step={0.5}
+                          value={selectedWorldTrader.hairOffsetX}
+                          onChange={(event) => handleOldMageAppearanceChange('hairOffsetX', event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Hair Offset Y</span>
+                        <input
+                          type="number"
+                          step={0.5}
+                          value={selectedWorldTrader.hairOffsetY}
+                          onChange={(event) => handleOldMageAppearanceChange('hairOffsetY', event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                        />
+                      </label>
+                    </div>
                     <label className="block">
-                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Head</span>
-                      <select
-                        value={selectedWorldTrader.headTexturePath}
-                        onChange={(event) => handleOldMageAppearanceChange('headTexturePath', event.target.value)}
+                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Head Overlay</span>
+                      <input
+                        value={traderHeadSearch}
+                        onChange={(event) => setTraderHeadSearch(event.target.value)}
+                        placeholder="Search head items..."
                         className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
-                      >
-                        {worldTraderHeadOptions.map((spritePath) => (
-                          <option key={spritePath} value={spritePath}>
-                            {spritePath.split('/').at(-1) ?? spritePath}
-                          </option>
-                        ))}
-                      </select>
+                      />
+                      <div className="mt-2 grid max-h-44 grid-cols-2 gap-2 overflow-auto pr-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOldMageAppearanceChange('headItemId', '')}
+                          className={`rounded-xl border p-2 text-left transition ${
+                            !selectedWorldTrader.headItemId
+                              ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                              : 'border-[#89ad5d]/20 bg-[#203b11]/65 text-[#d8ebc7] hover:bg-[#294816]/72'
+                          }`}
+                        >
+                          <div className="text-sm font-semibold">None</div>
+                          <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">
+                            Default Head
+                          </div>
+                        </button>
+                        {filteredTraderHeadItems.length ? (
+                          filteredTraderHeadItems.map((item) => {
+                            const itemTexturePath = getEquipmentBodyTexturePath(item.id);
+                            const isSelected = selectedWorldTrader.headItemId === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => handleOldMageAppearanceChange('headItemId', item.id)}
+                                className={`rounded-xl border p-2 text-left transition ${
+                                  isSelected
+                                    ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                                    : 'border-[#89ad5d]/20 bg-[#203b11]/65 text-[#d8ebc7] hover:bg-[#294816]/72'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {itemTexturePath ? (
+                                    <img
+                                      src={itemTexturePath}
+                                      alt={item.name}
+                                      className="pixelated h-10 w-10 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 text-[10px] uppercase tracking-[0.12em] text-[#9fbc7e]">
+                                      No art
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold">{item.name}</div>
+                                    <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">
+                                      {item.id}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="col-span-2 rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2 text-xs text-[#9fbc7e]">
+                            No head items found.
+                          </div>
+                        )}
+                      </div>
                     </label>
                     <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
                       <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Preview</div>
                       <div className="mt-3 flex min-h-[120px] items-center justify-center rounded-xl border border-[#d9efbd]/18 bg-[#102108]/60 p-3">
-                        {selectedWorldTrader.bodyTexturePath || selectedWorldTrader.headTexturePath ? (
-                          <div className="relative h-20 w-20">
+                        <div className="relative h-20 w-20">
+                          {renderStaticPlayerBaseBody()}
+                          {selectedTraderBodyTexturePath
+                            ? renderStaticTraderBodyOverlay(selectedTraderBodyTexturePath, 'Trader body preview')
+                            : null}
+                          <img
+                            src={DEFAULT_PLAYER_VISUALS.head.texturePath}
+                            alt="Trader head base"
+                            className="pixelated absolute inset-0 h-full w-full object-contain"
+                          />
+                          {selectedWorldTrader.hairTexturePath ? (
                             <img
-                              src="/sprites/characters/body-torso-8x8.png"
-                              alt="Trader body base"
+                              src={selectedWorldTrader.hairTexturePath}
+                              alt="Trader hair preview"
+                              className="pixelated absolute inset-0 h-full w-full object-contain"
+                              style={{
+                                transform: `translate(${selectedWorldTrader.hairOffsetX}px, ${selectedWorldTrader.hairOffsetY}px)`,
+                              }}
+                            />
+                          ) : null}
+                          {renderStaticHeadEyes('down')}
+                          {selectedTraderHeadTexturePath ? (
+                            <img
+                              src={selectedTraderHeadTexturePath}
+                              alt="Trader head preview"
                               className="pixelated absolute inset-0 h-full w-full object-contain"
                             />
-                            {selectedWorldTrader.bodyTexturePath ? (
-                              <img
-                                src={selectedWorldTrader.bodyTexturePath}
-                                alt="Trader body preview"
-                                className="pixelated absolute inset-0 h-full w-full object-contain"
-                              />
-                            ) : null}
-                            <img
-                              src="/sprites/characters/body-head-8x8.png"
-                              alt="Trader head base"
-                              className="pixelated absolute inset-0 h-full w-full object-contain"
-                            />
-                            {selectedWorldTrader.headTexturePath ? (
-                              <img
-                                src={selectedWorldTrader.headTexturePath}
-                                alt="Trader head preview"
-                                className="pixelated absolute inset-0 h-full w-full object-contain"
-                              />
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="text-xs uppercase tracking-[0.18em] text-[#9fbc7e]">No Trader Parts</div>
-                        )}
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -6032,7 +6244,7 @@ export default function Home() {
                             : worldEditorMode === 'mob'
                               ? `${selectedWorldMob.kind} · ${getMobDefinition(selectedWorldMob.kind).name}`
                               : worldEditorMode === 'trader'
-                                ? `${OLD_MAGE_TRADER_NAME} · ${selectedWorldTrader.bodyTexturePath || 'no body'} · ${selectedWorldTrader.headTexturePath || 'no head'}`
+                                ? `${OLD_MAGE_TRADER_NAME} · ${selectedTraderBodyLabel} · ${selectedWorldTrader.hairTexturePath || 'no hair'} · ${selectedTraderHeadLabel}`
                                 : `spawn @ ${worldMapDraft.spawn.x}:${worldMapDraft.spawn.y}`}
                       </div>
                       <div>

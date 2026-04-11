@@ -32,7 +32,7 @@ export const BASE_EQUIPMENT_SLOTS = [
 
 export type BaseEquipmentSlot = typeof BASE_EQUIPMENT_SLOTS[number];
 
-export const EQUIPMENT_ITEM_IDS = ["magic_hat", "robe_tunic", "default_staff"] as const;
+export const EQUIPMENT_ITEM_IDS = ["default_staff", "fire_robe"] as const;
 export type EquipmentItemId = typeof EQUIPMENT_ITEM_IDS[number];
 
 export const GEM_ITEM_IDS = [
@@ -61,9 +61,6 @@ export const GEM_ITEM_IDS = [
   "fire_orbit_gem",
   "fire_aftershock_gem",
   "fire_clone_gem",
-  "guard_gem",
-  "focus_gem",
-  "vitality_gem",
 ] as const;
 export type GemItemId = typeof GEM_ITEM_IDS[number];
 
@@ -98,32 +95,6 @@ export type SharedItemDefinition = {
 };
 
 export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
-  magic_hat: {
-    id: "magic_hat",
-    type: "equipment",
-    name: "Magic Hat",
-    value: 45,
-    iconPath: "/items/equipment/magic-hat.png",
-    slot: "head",
-    tier: 1,
-    socketType: "armor",
-    socketCount: 1,
-    tooltipStats: ["No stat bonuses", "1 gem socket"],
-    fireResistancePercent: 0,
-  },
-  robe_tunic: {
-    id: "robe_tunic",
-    type: "equipment",
-    name: "Robe Tunic",
-    value: 70,
-    iconPath: "/items/equipment/robe-tunic-8x8.png",
-    slot: "body",
-    tier: 2,
-    socketType: "armor",
-    socketCount: 2,
-    tooltipStats: ["20% Fire Damage Resistance", "2 gem sockets"],
-    fireResistancePercent: 20,
-  },
   default_staff: {
     id: "default_staff",
     type: "equipment",
@@ -136,6 +107,19 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     socketCount: 3,
     tooltipStats: ["Unlocks Fireball", "3 gem sockets"],
     fireResistancePercent: 0,
+  },
+  fire_robe: {
+    id: "fire_robe",
+    type: "equipment",
+    name: "Fire Robe",
+    value: 120,
+    iconPath: "/character/equipment/fire_robe/fire_robe_idle.png",
+    slot: "body",
+    tier: 2,
+    socketType: "armor",
+    socketCount: 3,
+    tooltipStats: ["Body armor", "3 gem sockets"],
+    fireResistancePercent: 15,
   },
   fire_trail_gem: {
     id: "fire_trail_gem",
@@ -435,42 +419,6 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     gemType: "weapon",
     socketableInto: ["default_staff"],
     tooltipStats: ["Socket into staff", "On hit: clone flies to nearest enemy", "Clone deals 40% damage", "-20% direct damage"],
-    fireResistancePercent: 0,
-  },
-  guard_gem: {
-    id: "guard_gem",
-    type: "gem",
-    name: "Guard Gem",
-    value: 40,
-    iconPath: "/items/gems/gem_basic.png",
-    slot: "body-gem-1",
-    gemType: "armor",
-    socketableInto: ["magic_hat", "robe_tunic"],
-    tooltipStats: ["Socket into clothing", "Armor gem", "-8% incoming damage per gem"],
-    fireResistancePercent: 0,
-  },
-  focus_gem: {
-    id: "focus_gem",
-    type: "gem",
-    name: "Focus Gem",
-    value: 50,
-    iconPath: "/items/gems/gem_basic.png",
-    slot: "body-gem-1",
-    gemType: "armor",
-    socketableInto: ["magic_hat", "robe_tunic"],
-    tooltipStats: ["Socket into clothing", "Armor gem", "-10% cast time per gem"],
-    fireResistancePercent: 0,
-  },
-  vitality_gem: {
-    id: "vitality_gem",
-    type: "gem",
-    name: "Vitality Gem",
-    value: 55,
-    iconPath: "/items/gems/gem_basic.png",
-    slot: "body-gem-1",
-    gemType: "armor",
-    socketableInto: ["magic_hat", "robe_tunic"],
-    tooltipStats: ["Socket into clothing", "Armor gem", "+25% healing received per gem"],
     fireResistancePercent: 0,
   },
   healing_potion: {

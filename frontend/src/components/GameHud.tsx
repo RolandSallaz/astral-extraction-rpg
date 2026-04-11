@@ -129,9 +129,7 @@ function isSameDragSource(left: DragSource, right: DragSource): boolean {
 type HudPanel = 'inventory' | 'equipment';
 
 const EQUIP_SLOTS: Array<{ id: EquipSlotId; label: string }> = [
-  { id: 'head', label: 'Head' },
   { id: 'amulet', label: 'Amulet' },
-  { id: 'body', label: 'Body' },
   { id: 'weapon', label: 'Weapon' },
   { id: 'offhand', label: 'Offhand' },
   { id: 'ring-1', label: 'Ring I' },
@@ -199,7 +197,7 @@ const SKILL_TOOLTIP_STATS: Record<SkillId, string[]> = {
   fireField: ['3x3 burning ground', '10s duration', 'Cooldown: 12s'],
 };
 
-type ItemTintOverrides = Partial<Record<GemItemId, string>>;
+type ItemTintOverrides = Record<string, never>;
 const MAX_ITEM_SOCKET_COUNT = 3;
 const ITEM_TIER_STYLES = {
   1: {
@@ -241,17 +239,8 @@ function getEquipmentSocketGemIds(slot: BaseEquipmentSlot, equipment: EquipmentS
   return getEquipmentSocketSlotIds(slot, equipment).map((slotId) => equipment[slotId] ?? null);
 }
 
-function getResolvedItemTint(itemId: string, itemTintOverrides: ItemTintOverrides) {
-  const item = EQUIPMENT_ITEMS[itemId as keyof typeof EQUIPMENT_ITEMS];
-  if (!item || item.type !== 'gem') {
-    return item?.tintColor ?? null;
-  }
-
-  return itemTintOverrides[item.id as GemItemId] ?? item.tintColor ?? null;
-}
-
-function getSocketColors(gemIds: Array<string | null>, itemTintOverrides: ItemTintOverrides) {
-  return gemIds.map((gemId) => (gemId ? (getResolvedItemTint(gemId, itemTintOverrides) ?? '#d7f0b6') : null));
+function getSocketColors(gemIds: Array<string | null>, _itemTintOverrides: ItemTintOverrides) {
+  return gemIds.map(() => null);
 }
 
 function getItemSocketGemIds(itemValue: string, equipment: EquipmentState, source?: DragSource) {
@@ -457,7 +446,6 @@ function ItemTile({
   const rotationDeg = item.iconRotationDeg ?? 0;
   const scale = compact ? (item.compactIconScale ?? item.iconScale ?? 1) : (item.iconScale ?? 1);
   const frameSizeClass = compact ? 'h-10 w-10' : 'h-12 w-12';
-  const tintColor = getResolvedItemTint(parsed.itemId, itemTintOverrides);
   const isConsumable = item.type === 'consumable' && parsed.itemId in CONSUMABLE_COOLDOWN_MS;
   const remainingMs =
     isConsumable ? Math.max(0, cooldownEndsAt - cooldownNow) : 0;
@@ -489,35 +477,16 @@ function ItemTile({
           />
         </>
       ) : null}
-      {item.type === 'gem' && tintColor ? (
-        <span
-          className={`pixelated relative z-[1] h-full w-full ${faded ? 'opacity-25' : ''}`}
-          style={{
-            backgroundColor: tintColor,
-            WebkitMaskImage: `url(${item.texturePath})`,
-            maskImage: `url(${item.texturePath})`,
-            WebkitMaskRepeat: 'no-repeat',
-            maskRepeat: 'no-repeat',
-            WebkitMaskPosition: 'center',
-            maskPosition: 'center',
-            WebkitMaskSize: 'contain',
-            maskSize: 'contain',
-            transform: `rotate(${rotationDeg}deg) scale(${scale})`,
-            transformOrigin: 'center center',
-          }}
-        />
-      ) : (
-        <img
-          src={item.texturePath}
-          alt={item.name}
-          draggable={false}
-          className={`pixelated relative z-[1] h-full w-full object-contain ${faded ? 'opacity-25' : ''}`}
-          style={{
-            transform: `rotate(${rotationDeg}deg) scale(${scale})`,
-            transformOrigin: 'center center',
-          }}
-        />
-      )}
+      <img
+        src={item.texturePath}
+        alt={item.name}
+        draggable={false}
+        className={`pixelated relative z-[1] h-full w-full object-contain ${faded ? 'opacity-25' : ''}`}
+        style={{
+          transform: `rotate(${rotationDeg}deg) scale(${scale})`,
+          transformOrigin: 'center center',
+        }}
+      />
       {parsed.quantity > 1 ? (
         <span className="pointer-events-none absolute bottom-0.5 right-0.5 rounded-sm bg-[#102008]/88 px-1 text-[10px] font-bold leading-none text-[#f4ffe8]">
           {parsed.quantity}

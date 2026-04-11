@@ -119,8 +119,6 @@ describe("world room", () => {
 
     const client1 = await colyseus.connectTo(room, {
       name: "Mage One",
-      bodyItem: "robe_tunic",
-      headItem: "magic_hat",
     });
     const client2 = await colyseus.connectTo(room, {
       name: "Mage Two",
@@ -134,8 +132,6 @@ describe("world room", () => {
     const localPlayer = room.state.players.get(client1.sessionId);
     assert.ok(localPlayer);
     assert.strictEqual(localPlayer?.name, "Mage One");
-    assert.strictEqual(localPlayer?.bodyItem, "robe_tunic");
-    assert.strictEqual(localPlayer?.headItem, "magic_hat");
 
     const startX = localPlayer?.x ?? 0;
     client1.send("move", { x: 1, y: 0 });

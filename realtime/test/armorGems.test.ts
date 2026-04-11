@@ -1,23 +1,32 @@
 import assert from "assert";
-import {
-  FOCUS_GEM_ID,
-  getArmorGemConfig,
-  GUARD_GEM_ID,
-  VITALITY_GEM_ID,
-} from "../src/rooms/armorGems.js";
+import { countArmorGems, getArmorGemConfig } from "../src/rooms/armorGems.js";
 
 describe("armor gem helpers", () => {
-  it("stacks armor gem effects across head and body sockets", () => {
+  it("keeps armor gem effects disabled while clothing is removed", () => {
+    assert.strictEqual(
+      countArmorGems(
+        {
+          headGemItem1: "guard_gem",
+          bodyGemItem1: "guard_gem",
+          bodyGemItem2: "focus_gem",
+          bodyGemItem3: "vitality_gem",
+          headGemItem2: "vitality_gem",
+        },
+        "guard_gem",
+      ),
+      0,
+    );
+
     const config = getArmorGemConfig({
-      headGemItem1: GUARD_GEM_ID,
-      bodyGemItem1: GUARD_GEM_ID,
-      bodyGemItem2: FOCUS_GEM_ID,
-      bodyGemItem3: VITALITY_GEM_ID,
-      headGemItem2: VITALITY_GEM_ID,
+      headGemItem1: "guard_gem",
+      bodyGemItem1: "guard_gem",
+      bodyGemItem2: "focus_gem",
+      bodyGemItem3: "vitality_gem",
+      headGemItem2: "vitality_gem",
     });
 
-    assert.ok(Math.abs(config.damageTakenMultiplier - 0.8464) < 0.00001);
-    assert.ok(Math.abs(config.castTimeMultiplier - 0.9) < 0.00001);
-    assert.ok(Math.abs(config.healingReceivedMultiplier - 1.5) < 0.00001);
+    assert.strictEqual(config.damageTakenMultiplier, 1);
+    assert.strictEqual(config.castTimeMultiplier, 1);
+    assert.strictEqual(config.healingReceivedMultiplier, 1);
   });
 });

@@ -73,11 +73,6 @@ describe("raid room", () => {
     const client = await colyseus.connectTo(room, {
       name: "Extract Raider",
       raidRunId: "raid-extract-test",
-      bodyItem: "robe_tunic",
-      headItem: "magic_hat",
-      headGemItem1: "focus_gem",
-      bodyGemItem1: "guard_gem",
-      bodyGemItem2: "vitality_gem",
       weaponItem: "default_staff",
       weaponGemItem1: "fire_trail_gem",
       inventory: ["healing_potion::2", "critical_gem"],
@@ -107,12 +102,7 @@ describe("raid room", () => {
     assert.strictEqual(payload.reason, "extracted");
     assert.strictEqual(payload.exitId, exitId);
     assert.deepStrictEqual(payload.equipment, {
-      head: "magic_hat",
-      body: "robe_tunic",
       weapon: "default_staff",
-      "head-gem-1": "focus_gem",
-      "body-gem-1": "guard_gem",
-      "body-gem-2": "vitality_gem",
       "weapon-gem-1": "fire_trail_gem",
     });
     assert.deepStrictEqual(payload.inventory, [

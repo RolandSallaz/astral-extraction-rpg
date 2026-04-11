@@ -13,6 +13,8 @@ import {
   type WorldDefinition,
 } from '@mmorpg/shared/worlds/definition';
 import { isMobKind } from '@mmorpg/shared/mobs/catalog';
+import { getEquipmentBodyTexturePath, getEquipmentVisual } from '@mmorpg/shared/visuals/equipmentVisuals';
+import { EQUIPMENT_ITEM_IDS } from '@mmorpg/shared/items/catalog';
 import {
   createDefaultMeadowMapAsset,
   type MeadowDecoration,
@@ -63,8 +65,8 @@ function createDefaultOldMageTrader(): MeadowTraderAsset {
     name: OLD_MAGE_TRADER_NAME,
     x: 17,
     y: 19,
-    bodyTexturePath: '/items/equipment/tunic_npc1.png',
-    headTexturePath: '/items/equipment/oldman_mage_head.png',
+    bodyItemId: 'fire_robe',
+    hairTexturePath: '/character/hairs/old_mage_haird.png',
   };
 }
 
@@ -115,16 +117,51 @@ function normalizeTraders(
       return accumulator;
     }
 
-    const bodyTexturePath = typeof trader.bodyTexturePath === 'string' ? trader.bodyTexturePath : '';
-    const headTexturePath = typeof trader.headTexturePath === 'string' ? trader.headTexturePath : '';
-    if (!IMAGE_PATH_PATTERN.test(bodyTexturePath) || !IMAGE_PATH_PATTERN.test(headTexturePath)) {
+    const bodyItemId = typeof trader.bodyItemId === 'string' && getEquipmentVisual(trader.bodyItemId)
+      ? trader.bodyItemId.trim()
+      : '';
+    const headItemId = typeof trader.headItemId === 'string' && getEquipmentVisual(trader.headItemId)
+      ? trader.headItemId.trim()
+      : '';
+
+    let bodyTexturePath = typeof trader.bodyTexturePath === 'string' ? trader.bodyTexturePath.trim() : '';
+    let hairTexturePath = typeof trader.hairTexturePath === 'string' ? trader.hairTexturePath.trim() : '';
+    let headTexturePath = typeof trader.headTexturePath === 'string' ? trader.headTexturePath.trim() : '';
+    const hairOffsetX = Number.isFinite(trader.hairOffsetX) ? Number(trader.hairOffsetX) : 0;
+    const hairOffsetY = Number.isFinite(trader.hairOffsetY) ? Number(trader.hairOffsetY) : 0;
+
+    // Resolve texture path from item ID if present.
+    if (bodyItemId) {
+      bodyTexturePath = getEquipmentBodyTexturePath(bodyItemId) ?? bodyTexturePath;
+    }
+    if (headItemId) {
+      headTexturePath = getEquipmentBodyTexturePath(headItemId) ?? headTexturePath;
+    }
+
+    // Backward compatibility: older data stored hair in headTexturePath.
+    if (!hairTexturePath && /hair/i.test(headTexturePath)) {
+      hairTexturePath = headTexturePath;
+      headTexturePath = '';
+    }
+
+    if (bodyTexturePath && !IMAGE_PATH_PATTERN.test(bodyTexturePath)) {
+      return accumulator;
+    }
+    if (hairTexturePath && !IMAGE_PATH_PATTERN.test(hairTexturePath)) {
+      return accumulator;
+    }
+    if (headTexturePath && !IMAGE_PATH_PATTERN.test(headTexturePath)) {
       return accumulator;
     }
 
     accumulator.push({
       ...normalizedBase,
-      bodyTexturePath,
-      headTexturePath,
+      ...(bodyItemId ? { bodyItemId } : {}),
+      ...(headItemId ? { headItemId } : {}),
+      ...(bodyTexturePath ? { bodyTexturePath } : {}),
+      ...(hairTexturePath ? { hairTexturePath } : {}),
+      ...(hairOffsetX || hairOffsetY ? { hairOffsetX, hairOffsetY } : {}),
+      ...(headTexturePath ? { headTexturePath } : {}),
     } satisfies MeadowTraderAsset);
     return accumulator;
   }, []);

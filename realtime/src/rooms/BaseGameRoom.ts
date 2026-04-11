@@ -995,6 +995,15 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       this.handlePlayerKilled(firstCollision.player);
     }
 
+    const knockbackDistance = this.profile.tileSize; // 1 tile
+    const tileSize = this.profile.tileSize;
+    const widthPx = this.getMapWidthPx();
+    const heightPx = this.getMapHeightPx();
+    this.pushTargetByKnockback(collisionX, collisionY, firstCollision.player, knockbackDistance, (nx, ny) => {
+      firstCollision!.player.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
+      firstCollision!.player.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
+    });
+
     this.resolvePlayerMobOverlap(firstCollision.player, mob);
     this.mobSkillHitTargets.set(mob.id, hitTargets);
     return true;

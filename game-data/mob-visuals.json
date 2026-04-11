@@ -16,7 +16,7 @@
   "skeleton": {
     "kind": "skeleton",
     "spriteScale": 2,
-    "anchorY": 0.8,
+    "anchorY": 0.75,
     "clips": {
       "default": {
         "key": "default",
