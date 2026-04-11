@@ -572,6 +572,17 @@ type CharacterVisual = {
   currentCastStartedAt: number;
   currentCastEndsAt: number;
   deathStartedAt: number;
+  interpPrevX: number;
+  interpPrevY: number;
+  interpPrevAt: number;
+  interpNextX: number;
+  interpNextY: number;
+  interpNextAt: number;
+  simPrevX: number;
+  simPrevY: number;
+  simX: number;
+  simY: number;
+  idleGraceUntil: number;
   isDead: boolean;
   isVisible?: boolean;
 };
@@ -758,7 +769,21 @@ function getVisualPixelSize(
   tileSize: number,
 ) {
   const frameWidth = visual.frameWidth ?? 16;
-  return (tileSize * visual.displayScale) / Math.max(1, frameWidth);
+  const rawPixelSize = (tileSize * visual.displayScale) / Math.max(1, frameWidth);
+  return Math.max(1, Math.round(rawPixelSize));
+}
+
+function getVisualDisplaySize(
+  visual: Pick<typeof DEFAULT_PLAYER_VISUALS.body, 'frameWidth' | 'frameHeight' | 'displayScale'>,
+  tileSize: number,
+) {
+  const pixelSize = getVisualPixelSize(visual, tileSize);
+  const frameWidth = visual.frameWidth ?? 16;
+  const frameHeight = visual.frameHeight ?? 16;
+  return {
+    width: frameWidth * pixelSize,
+    height: frameHeight * pixelSize,
+  };
 }
 
 function getEyeLookDirection(targetY: number | null | undefined, sourceY: number): PlayerEyeLookDirection {
@@ -2417,6 +2442,7 @@ export function GameCanvas({
             resolveSpriteSheetAnimationColumns(this, animation);
           });
           const camera = this.cameras.main;
+          camera.roundPixels = true;
           this.input.keyboard?.disableGlobalCapture();
           const cursors = this.input.keyboard
             ? {
@@ -2583,12 +2609,11 @@ export function GameCanvas({
             .setDepth(38.8);
           const worldEditTraderContainer = this.add.container(0, 0, []).setVisible(false).setDepth(39.3);
           const worldEditTraderEyePixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, tileSize);
+          const worldEditTraderBodyDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+          const worldEditTraderHeadDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, tileSize);
           const worldEditTraderBodyBase = this.add
             .image(0, 0, PLAYER_ANIMATIONS.idle?.textureKey ?? PLAYER_BODY_TEXTURE_KEY, PLAYER_BODY_DEFAULT_FRAME)
-            .setDisplaySize(
-              tileSize * DEFAULT_PLAYER_VISUALS.body.displayScale,
-              tileSize * DEFAULT_PLAYER_VISUALS.body.displayScale,
-            )
+            .setDisplaySize(worldEditTraderBodyDisplay.width, worldEditTraderBodyDisplay.height)
             .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.body.anchorY)
             .setAlpha(0.82);
           const worldEditTraderBodyLayer = this.add
@@ -2599,10 +2624,7 @@ export function GameCanvas({
             .setAlpha(0.92);
           const worldEditTraderHeadBase = this.add
             .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
-            .setDisplaySize(
-              tileSize * DEFAULT_PLAYER_VISUALS.head.displayScale,
-              tileSize * DEFAULT_PLAYER_VISUALS.head.displayScale,
-            )
+            .setDisplaySize(worldEditTraderHeadDisplay.width, worldEditTraderHeadDisplay.height)
             .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.head.anchorY)
             .setAlpha(0.82);
           const worldEditTraderHairLayer = this.add
@@ -3024,6 +3046,8 @@ export function GameCanvas({
 
                 const traderBodyAnimation = PLAYER_ANIMATIONS.idle;
                 const traderEyePixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, tileSize);
+                const traderBodyDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+                const traderHeadDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, tileSize);
                 const handDisplay = getHandDisplaySize(tileSize);
                 bodyBase = this.add
                   .image(
@@ -3032,10 +3056,7 @@ export function GameCanvas({
                     traderBodyAnimation?.textureKey ?? PLAYER_BODY_TEXTURE_KEY,
                     traderBodyAnimation ? traderBodyAnimation.startFrame : PLAYER_BODY_DEFAULT_FRAME,
                   )
-                  .setDisplaySize(
-                    tileSize * DEFAULT_PLAYER_VISUALS.body.displayScale,
-                    tileSize * DEFAULT_PLAYER_VISUALS.body.displayScale,
-                  )
+                  .setDisplaySize(traderBodyDisplay.width, traderBodyDisplay.height)
                   .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.body.anchorY);
                 rightHand = this.add
                   .image(0, 0, PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_DEFAULT_FRAME)
@@ -3058,10 +3079,7 @@ export function GameCanvas({
                 }
                 headBase = this.add
                   .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
-                  .setDisplaySize(
-                    tileSize * DEFAULT_PLAYER_VISUALS.head.displayScale,
-                    tileSize * DEFAULT_PLAYER_VISUALS.head.displayScale,
-                  )
+                  .setDisplaySize(traderHeadDisplay.width, traderHeadDisplay.height)
                   .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.head.anchorY);
                 if (hairTextureKey) {
                   hairLayer = this.add
@@ -3303,8 +3321,8 @@ export function GameCanvas({
             const body = this.add
               .image(0, 0, PLAYER_BODY_TEXTURE_KEY, PLAYER_BODY_DEFAULT_FRAME)
               .setDisplaySize(
-                meadowMap.tileSize * DEFAULT_PLAYER_VISUALS.body.displayScale,
-                meadowMap.tileSize * DEFAULT_PLAYER_VISUALS.body.displayScale,
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, meadowMap.tileSize).width,
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, meadowMap.tileSize).height,
               )
               .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.body.anchorY);
             const handDisplay = getHandDisplaySize(meadowMap.tileSize);
@@ -3336,8 +3354,8 @@ export function GameCanvas({
             const head = this.add
               .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
               .setDisplaySize(
-                meadowMap.tileSize * DEFAULT_PLAYER_VISUALS.head.displayScale,
-                meadowMap.tileSize * DEFAULT_PLAYER_VISUALS.head.displayScale,
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, meadowMap.tileSize).width,
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, meadowMap.tileSize).height,
               )
               .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.head.anchorY);
             const eyePixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, meadowMap.tileSize);
@@ -3557,6 +3575,17 @@ export function GameCanvas({
               currentCastStartedAt: 0,
               currentCastEndsAt: 0,
               deathStartedAt: 0,
+              interpPrevX: x,
+              interpPrevY: y,
+              interpPrevAt: this.time.now,
+              interpNextX: x,
+              interpNextY: y,
+              interpNextAt: this.time.now,
+              simPrevX: x,
+              simPrevY: y,
+              simX: x,
+              simY: y,
+              idleGraceUntil: 0,
               isDead: false,
             };
 
@@ -4227,6 +4256,34 @@ export function GameCanvas({
 
               character.targetX = networkPlayerState.x;
               character.targetY = networkPlayerState.y;
+              if (sessionId !== localSessionId) {
+                const now = this.time.now;
+                const distance = Phaser.Math.Distance.Between(
+                  character.interpNextX,
+                  character.interpNextY,
+                  character.targetX,
+                  character.targetY,
+                );
+                if (distance > 64) {
+                  character.container.setPosition(character.targetX, character.targetY);
+                  character.interpPrevX = character.targetX;
+                  character.interpPrevY = character.targetY;
+                  character.interpPrevAt = now;
+                  character.interpNextX = character.targetX;
+                  character.interpNextY = character.targetY;
+                  character.interpNextAt = now;
+                } else if (
+                  character.targetX !== character.interpNextX ||
+                  character.targetY !== character.interpNextY
+                ) {
+                  character.interpPrevX = character.interpNextX;
+                  character.interpPrevY = character.interpNextY;
+                  character.interpPrevAt = character.interpNextAt;
+                  character.interpNextX = character.targetX;
+                  character.interpNextY = character.targetY;
+                  character.interpNextAt = now;
+                }
+              }
               if (character.currentName !== networkPlayerState.name) {
                 character.nameplate.setText(networkPlayerState.name);
                 character.currentName = networkPlayerState.name;
@@ -4448,8 +4505,8 @@ export function GameCanvas({
             });
 
             const reconciliationDistance = Phaser.Math.Distance.Between(
-              character.container.x,
-              character.container.y,
+              character.simX,
+              character.simY,
               resolvedX,
               resolvedY,
             );
@@ -4459,12 +4516,19 @@ export function GameCanvas({
             }
 
             if (reconciliationDistance > 18) {
-              character.container.setPosition(resolvedX, resolvedY);
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
               return;
             }
 
-            character.container.x = Phaser.Math.Linear(character.container.x, resolvedX, 0.35);
-            character.container.y = Phaser.Math.Linear(character.container.y, resolvedY, 0.35);
+            const correctedX = Phaser.Math.Linear(character.simX, resolvedX, 0.35);
+            const correctedY = Phaser.Math.Linear(character.simY, resolvedY, 0.35);
+            character.simPrevX = character.simX;
+            character.simPrevY = character.simY;
+            character.simX = correctedX;
+            character.simY = correctedY;
           };
 
           const reconcileWorldLocalCharacter = (
@@ -4494,8 +4558,8 @@ export function GameCanvas({
             });
 
             const reconciliationDistance = Phaser.Math.Distance.Between(
-              character.container.x,
-              character.container.y,
+              character.simX,
+              character.simY,
               resolvedX,
               resolvedY,
             );
@@ -4505,12 +4569,19 @@ export function GameCanvas({
             }
 
             if (reconciliationDistance > 18) {
-              character.container.setPosition(resolvedX, resolvedY);
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
               return;
             }
 
-            character.container.x = Phaser.Math.Linear(character.container.x, resolvedX, 0.35);
-            character.container.y = Phaser.Math.Linear(character.container.y, resolvedY, 0.35);
+            const correctedX = Phaser.Math.Linear(character.simX, resolvedX, 0.35);
+            const correctedY = Phaser.Math.Linear(character.simY, resolvedY, 0.35);
+            character.simPrevX = character.simX;
+            character.simPrevY = character.simY;
+            character.simX = correctedX;
+            character.simY = correctedY;
           };
 
           const setCharacterVisibility = (character: CharacterVisual, visible: boolean, isLocalPlayer = false) => {
@@ -5571,8 +5642,8 @@ export function GameCanvas({
 
               if (isRaidScene) {
                 const replayed = applyRaidPredictedMovement(
-                  localCharacter.container.x,
-                  localCharacter.container.y,
+                  localCharacter.simX,
+                  localCharacter.simY,
                   normalizedX,
                   normalizedY,
                   CLIENT_SIMULATION_STEP_MS / 1000,
@@ -5586,11 +5657,14 @@ export function GameCanvas({
                   CLIENT_RAID_PLAYER_SPEED,
                   mobBlockers,
                 );
-                localCharacter.container.setPosition(replayed.x, replayed.y);
+                localCharacter.simPrevX = localCharacter.simX;
+                localCharacter.simPrevY = localCharacter.simY;
+                localCharacter.simX = replayed.x;
+                localCharacter.simY = replayed.y;
               } else {
                 const replayed = applyWorldPredictedMovement(
-                  localCharacter.container.x,
-                  localCharacter.container.y,
+                  localCharacter.simX,
+                  localCharacter.simY,
                   normalizedX,
                   normalizedY,
                   CLIENT_SIMULATION_STEP_MS,
@@ -5602,18 +5676,34 @@ export function GameCanvas({
                   CLIENT_PLAYER_SPEED,
                   mobBlockers,
                 );
-                localCharacter.container.setPosition(replayed.x, replayed.y);
+                localCharacter.simPrevX = localCharacter.simX;
+                localCharacter.simPrevY = localCharacter.simY;
+                localCharacter.simX = replayed.x;
+                localCharacter.simY = replayed.y;
               }
             }
 
+            const localInterpolationAlpha = localCharacter
+              ? Phaser.Math.Clamp(
+                movementSimulationAccumulatorMs / CLIENT_SIMULATION_STEP_MS,
+                0,
+                1,
+              )
+              : 0;
+
             characters.forEach((character, sessionId) => {
               const isLocalPlayer = sessionId === localSessionId;
+              let localMovementSignal = false;
               if (isLocalPlayer) {
                 const hasInput = normalizedX !== 0 || normalizedY !== 0;
+                const pendingInputs = isRaidScene ? pendingRaidInputs.length : pendingWorldInputs.length;
+                const pendingHasMotion = isRaidScene
+                  ? pendingRaidInputs.some((input) => input.x !== 0 || input.y !== 0)
+                  : pendingWorldInputs.some((input) => input.x !== 0 || input.y !== 0);
 
                 const correctionDistance = Phaser.Math.Distance.Between(
-                  character.container.x,
-                  character.container.y,
+                  character.simX,
+                  character.simY,
                   character.targetX,
                   character.targetY,
                 );
@@ -5621,40 +5711,57 @@ export function GameCanvas({
                 if (isRaidScene) {
                   if (pendingRaidInputs.length === 0) {
                     if (correctionDistance > 48) {
-                      character.container.setPosition(character.targetX, character.targetY);
+                      character.simPrevX = character.targetX;
+                      character.simPrevY = character.targetY;
+                      character.simX = character.targetX;
+                      character.simY = character.targetY;
                     } else if (correctionDistance > 0.8) {
                       const correctionLerp = Math.min(1, deltaSeconds * 14);
-                      character.container.x = Phaser.Math.Linear(
-                        character.container.x,
-                        character.targetX,
-                        correctionLerp,
-                      );
-                      character.container.y = Phaser.Math.Linear(
-                        character.container.y,
-                        character.targetY,
-                        correctionLerp,
-                      );
+                      const correctedX = Phaser.Math.Linear(character.simX, character.targetX, correctionLerp);
+                      const correctedY = Phaser.Math.Linear(character.simY, character.targetY, correctionLerp);
+                      character.simPrevX = character.simX;
+                      character.simPrevY = character.simY;
+                      character.simX = correctedX;
+                      character.simY = correctedY;
                     }
                   }
                 } else if (pendingWorldInputs.length === 0) {
                   if (correctionDistance > 48) {
-                    character.container.setPosition(character.targetX, character.targetY);
+                    character.simPrevX = character.targetX;
+                    character.simPrevY = character.targetY;
+                    character.simX = character.targetX;
+                    character.simY = character.targetY;
                   } else if (!hasInput && correctionDistance > 0.8) {
                     const correctionLerp = Math.min(1, deltaSeconds * 10);
-                    character.container.x = Phaser.Math.Linear(
-                      character.container.x,
-                      character.targetX,
-                      correctionLerp,
-                    );
-                    character.container.y = Phaser.Math.Linear(
-                      character.container.y,
-                      character.targetY,
-                      correctionLerp,
-                    );
+                    const correctedX = Phaser.Math.Linear(character.simX, character.targetX, correctionLerp);
+                    const correctedY = Phaser.Math.Linear(character.simY, character.targetY, correctionLerp);
+                    character.simPrevX = character.simX;
+                    character.simPrevY = character.simY;
+                    character.simX = correctedX;
+                    character.simY = correctedY;
                   }
                 }
+
+                if (!hasInput && pendingInputs === 0) {
+                  character.simPrevX = character.simX;
+                  character.simPrevY = character.simY;
+                }
+
+                const stepDistance = Phaser.Math.Distance.Between(
+                  character.simPrevX,
+                  character.simPrevY,
+                  character.simX,
+                  character.simY,
+                );
+                if (hasInput || pendingHasMotion || stepDistance > 0.6) {
+                  character.idleGraceUntil = this.time.now + 140;
+                }
+                localMovementSignal = this.time.now <= character.idleGraceUntil;
+                character.container.setPosition(
+                  Phaser.Math.Linear(character.simPrevX, character.simX, localInterpolationAlpha),
+                  Phaser.Math.Linear(character.simPrevY, character.simY, localInterpolationAlpha),
+                );
               } else {
-                const lerpFactor = Math.min(1, deltaSeconds * 12);
                 const distanceToTarget = Phaser.Math.Distance.Between(
                   character.container.x,
                   character.container.y,
@@ -5668,15 +5775,23 @@ export function GameCanvas({
                     character.targetY,
                   );
                 } else {
+                  const interpolationDelayMs = 160;
+                  const renderTime = this.time.now - interpolationDelayMs;
+                  const span = Math.max(1, character.interpNextAt - character.interpPrevAt);
+                  const t = Phaser.Math.Clamp(
+                    (renderTime - character.interpPrevAt) / span,
+                    0,
+                    1,
+                  );
                   character.container.x = Phaser.Math.Linear(
-                    character.container.x,
-                    character.targetX,
-                    lerpFactor,
+                    character.interpPrevX,
+                    character.interpNextX,
+                    t,
                   );
                   character.container.y = Phaser.Math.Linear(
-                    character.container.y,
-                    character.targetY,
-                    lerpFactor,
+                    character.interpPrevY,
+                    character.interpNextY,
+                    t,
                   );
                 }
               }
@@ -5776,9 +5891,7 @@ export function GameCanvas({
               const moved =
                 Math.abs(character.container.x - character.lastX) > 0.1 ||
                 Math.abs(character.container.y - character.lastY) > 0.1;
-              const movementSignal = isLocalPlayer
-                ? moved || normalizedX !== 0 || normalizedY !== 0
-                : moved;
+              const movementSignal = isLocalPlayer ? localMovementSignal : moved;
               if (movementSignal) {
                 character.lastMovedAt = this.time.now;
               }
