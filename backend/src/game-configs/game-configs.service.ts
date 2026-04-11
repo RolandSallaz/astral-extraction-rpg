@@ -27,7 +27,7 @@ import { GameContentRepository } from '../content/game-content.repository';
 
 @Injectable()
 export class GameConfigsService {
-  constructor(private readonly configFiles: GameContentRepository = new GameContentRepository()) {}
+  constructor(private readonly configFiles: GameContentRepository) {}
 
   static forRootDir(rootDir: string) {
     return new GameConfigsService(new GameContentRepository(rootDir));

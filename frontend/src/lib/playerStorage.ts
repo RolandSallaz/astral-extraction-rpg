@@ -109,6 +109,10 @@ function getSessionToken() {
   return window.localStorage.getItem(SESSION_TOKEN_KEY);
 }
 
+export function getStoredSessionToken() {
+  return getSessionToken();
+}
+
 async function request<T>(path: string, init?: RequestInit, authenticated = false): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set('Content-Type', 'application/json');

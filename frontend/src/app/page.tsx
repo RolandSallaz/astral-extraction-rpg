@@ -78,6 +78,7 @@ import {
   saveMobBalanceConfig,
   setPartyReady,
   startRaid,
+  getStoredSessionToken,
   type PartyView,
   type RaidTemplateView,
   type StartedRaidView,
@@ -160,6 +161,33 @@ type QuestObjectiveTarget = {
   worldY: number;
   label: string;
 } | null;
+
+function createAdminRequestHeaders(init?: HeadersInit) {
+  const headers = new Headers(init);
+  const token = getStoredSessionToken();
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return headers;
+}
+
+async function readResponseErrorMessage(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as
+    | { message?: string | string[] }
+    | null;
+
+  if (Array.isArray(payload?.message) && payload.message.length > 0) {
+    return payload.message.join(', ');
+  }
+
+  if (typeof payload?.message === 'string' && payload.message.trim()) {
+    return payload.message;
+  }
+
+  return fallback;
+}
 
 function getPageText(locale: Locale) {
   return {
@@ -1394,10 +1422,12 @@ export default function Home() {
       return;
     }
 
-    void fetch('/api/admin/public-images')
+    void fetch('/api/admin/public-images', {
+      headers: createAdminRequestHeaders(),
+    })
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error('Failed to load public images.');
+          throw new Error(await readResponseErrorMessage(response, 'Failed to load public images.'));
         }
 
         return response.json() as Promise<{ images: string[] }>;
@@ -1409,10 +1439,12 @@ export default function Home() {
         console.error('Failed to load admin image list', error);
       });
 
-    void fetch('/api/admin/maps/world')
+    void fetch('/api/admin/maps/world', {
+      headers: createAdminRequestHeaders(),
+    })
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error('Failed to load world map asset.');
+          throw new Error(await readResponseErrorMessage(response, 'Failed to load world map asset.'));
         }
 
         return response.json() as Promise<MeadowMapAsset>;
@@ -2666,9 +2698,11 @@ export default function Home() {
   };
 
   const handleReloadWorldMap = async () => {
-    const response = await fetch('/api/admin/maps/world');
+    const response = await fetch('/api/admin/maps/world', {
+      headers: createAdminRequestHeaders(),
+    });
     if (!response.ok) {
-      throw new Error('Failed to reload world map.');
+      throw new Error(await readResponseErrorMessage(response, 'Failed to reload world map.'));
     }
 
     const asset = await response.json() as MeadowMapAsset;
@@ -2683,14 +2717,14 @@ export default function Home() {
 
     const response = await fetch('/api/admin/maps/world', {
       method: 'PUT',
-      headers: {
+      headers: createAdminRequestHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(worldMapDraft),
     });
 
     if (!response.ok) {
-      throw new Error('Failed to save world map.');
+      throw new Error(await readResponseErrorMessage(response, 'Failed to save world map.'));
     }
 
     const savedAsset = await response.json() as MeadowMapAsset;
