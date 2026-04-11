@@ -1616,7 +1616,7 @@ export function GameCanvas({
   selectedWorldTile = 'grassGround',
   selectedWorldOverlay = { texture: 'ground-grass-edge-8x8', rotation: 0, flipX: false },
   selectedWorldSprite = { texturePath: '', rotation: 0, flipX: false, scale: 1 },
-  selectedWorldTrader = { name: 'Trader', bodyTexturePath: '', headTexturePath: '' },
+  selectedWorldTrader = { bodyTexturePath: '', headTexturePath: '' },
   onWorldEditPaint,
   onWorldEditHoverChange,
   onWorldEditDebugChange,
@@ -1695,7 +1695,6 @@ export function GameCanvas({
     scale: number;
   };
   selectedWorldTrader?: {
-    name: string;
     bodyTexturePath: MeadowTraderAsset['bodyTexturePath'];
     headTexturePath: MeadowTraderAsset['headTexturePath'];
   };
@@ -2220,6 +2219,7 @@ export function GameCanvas({
           const worldTradersById = new Map<string, MeadowTraderAsset>();
           const pendingWorldTextureKeys = new Set<string>();
           let worldSpawnMarker: Phaser.GameObjects.Container | null = null;
+          let currentWorldAsset = meadowAsset;
           let appliedWorldAssetSerialized = worldMapAssetOverrideSerializedRef.current;
           let raidTilesData: string[] = [];
           const exploredRaidTiles = new Set<number>();
@@ -2463,9 +2463,8 @@ export function GameCanvas({
                 this.textures.addImage(textureKey, image);
               }
               pendingWorldTextureKeys.delete(textureKey);
-              const latestAsset = worldMapAssetOverrideRef.current;
-              if (latestAsset && !isRaidScene) {
-                renderWorldMap(latestAsset);
+              if (!isRaidScene) {
+                renderWorldMap(worldMapAssetOverrideRef.current ?? currentWorldAsset);
               }
             };
             image.onerror = () => {
@@ -2476,6 +2475,7 @@ export function GameCanvas({
           };
 
           const renderWorldMap = (asset: MeadowMapAsset) => {
+            currentWorldAsset = asset;
             worldTileSprites.forEach((sprite) => sprite.destroy());
             worldTileSprites.length = 0;
             worldOverlaySprites.forEach((sprite) => sprite.destroy());
@@ -3239,9 +3239,9 @@ export function GameCanvas({
               character.headItem.clearTint();
             }
             character.head.x = 0;
-            character.head.y = bob * 0.2 - 2;
+            character.head.y = bob * 0.2;
             character.headItem.x = character.currentHeadOffsetX;
-            character.headItem.y = bob * 0.2 - 2 + character.currentHeadOffsetY;
+            character.headItem.y = bob * 0.2 + character.currentHeadOffsetY;
             character.shadow.width = 22;
           };
 

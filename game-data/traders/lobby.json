@@ -1,0 +1,10 @@
+[
+  {
+    "id": "old-mage",
+    "x": 17,
+    "y": 19,
+    "name": "Old mage",
+    "bodyTexturePath": "/items/equipment/tunic_npc1.png",
+    "headTexturePath": "/items/equipment/oldman_mage_head.png"
+  }
+]

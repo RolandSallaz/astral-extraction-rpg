@@ -28,6 +28,10 @@ export function getWorldDefinitionPath(gameDataDir: string, worldId: string) {
   return `${gameDataDir}/worlds/${worldId}.json`;
 }
 
+export function getWorldTradersPath(gameDataDir: string, worldId: string) {
+  return `${gameDataDir}/traders/${worldId}.json`;
+}
+
 export function getRaidTemplatesPath(gameDataDir: string) {
   return `${gameDataDir}/raids/templates.json`;
 }

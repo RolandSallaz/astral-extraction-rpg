@@ -5,7 +5,6 @@ import { GameCanvas, type MinimapSnapshot, type ObjectiveArrowState, type Realti
 import { GameChat } from '@/components/GameChat';
 import { GameHud, type ContainerView } from '@/components/GameHud';
 import { HudWindow } from '@/components/ui/HudWindow';
-import HealthBar from '@/components/ui/8bit/health-bar';
 import {
   ITEM_DEFINITIONS,
   parseInventoryItem,
@@ -126,7 +125,6 @@ type WorldSpriteBrush = {
   scale: number;
 };
 type WorldTraderBrush = {
-  name: string;
   bodyTexturePath: MeadowTraderAsset['bodyTexturePath'];
   headTexturePath: MeadowTraderAsset['headTexturePath'];
 };
@@ -161,6 +159,19 @@ type QuestObjectiveTarget = {
   worldY: number;
   label: string;
 } | null;
+
+const OLD_MAGE_TRADER_ID = 'old-mage';
+const OLD_MAGE_TRADER_NAME = 'Old mage';
+
+function findOldMageTrader(asset: MeadowMapAsset | null) {
+  if (!asset) {
+    return null;
+  }
+
+  return asset.traders.find((trader) =>
+    trader.id === OLD_MAGE_TRADER_ID || trader.name.trim().toLowerCase() === OLD_MAGE_TRADER_NAME.toLowerCase(),
+  ) ?? asset.traders[0] ?? null;
+}
 
 function createAdminRequestHeaders(init?: HeadersInit) {
   const headers = new Headers(init);
@@ -1130,7 +1141,6 @@ export default function Home() {
   const introductionQuestSteps = getIntroductionQuestSteps(locale);
   const sealedRelicQuestSteps = getSealedRelicQuestSteps(locale);
   const [selectedWorldTrader, setSelectedWorldTrader] = useState<WorldTraderBrush>({
-    name: 'Trader',
     bodyTexturePath: '',
     headTexturePath: '',
   });
@@ -1520,6 +1530,19 @@ export default function Home() {
           : (traderBodyOptions[0] ?? current.bodyTexturePath),
     }));
   }, [adminImageOptions]);
+
+  useEffect(() => {
+    const oldMage = findOldMageTrader(worldMapDraft);
+    if (!oldMage) {
+      return;
+    }
+
+    setSelectedWorldTrader((current) => ({
+      ...current,
+      bodyTexturePath: oldMage.bodyTexturePath || current.bodyTexturePath,
+      headTexturePath: oldMage.headTexturePath || current.headTexturePath,
+    }));
+  }, [worldMapDraft]);
 
   useEffect(() => {
     if (authStatus !== 'ready') {
@@ -2630,33 +2653,51 @@ export default function Home() {
         return current;
       }
 
-      const existingTrader = current.traders.find((trader) => trader.x === tileX && trader.y === tileY);
-      const nextTraders = current.traders.filter((trader) => !(trader.x === tileX && trader.y === tileY));
-      nextTraders.push({
-        id: existingTrader?.id ?? `trader-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        x: tileX,
-        y: tileY,
-        name: selectedWorldTrader.name.trim() || 'Trader',
-        bodyTexturePath: selectedWorldTrader.bodyTexturePath,
-        headTexturePath: selectedWorldTrader.headTexturePath,
-      });
-
       return {
         ...current,
-        traders: nextTraders,
+        traders: [{
+          id: OLD_MAGE_TRADER_ID,
+          x: tileX,
+          y: tileY,
+          name: OLD_MAGE_TRADER_NAME,
+          bodyTexturePath: selectedWorldTrader.bodyTexturePath,
+          headTexturePath: selectedWorldTrader.headTexturePath,
+        }],
       };
     });
   };
 
-  const handleWorldTraderErase = (tileX: number, tileY: number) => {
+  const handleOldMageAppearanceChange = (
+    key: 'bodyTexturePath' | 'headTexturePath',
+    value: string,
+  ) => {
+    setSelectedWorldTrader((current) => ({
+      ...current,
+      [key]: value,
+    }));
+
     setWorldMapDraft((current) => {
       if (!current) {
         return current;
       }
 
+      const oldMage = findOldMageTrader(current);
+      if (!oldMage) {
+        return current;
+      }
+
       return {
         ...current,
-        traders: current.traders.filter((trader) => !(trader.x === tileX && trader.y === tileY)),
+        traders: current.traders.map((trader) =>
+          trader.id === oldMage.id
+            ? {
+                ...trader,
+                id: OLD_MAGE_TRADER_ID,
+                name: OLD_MAGE_TRADER_NAME,
+                [key]: value,
+              }
+            : trader,
+        ),
       };
     });
   };
@@ -2680,11 +2721,6 @@ export default function Home() {
     }
 
     if (worldEditorMode === 'trader') {
-      if (eraseOverlay) {
-        handleWorldTraderErase(tileX, tileY);
-        return;
-      }
-
       handleWorldTraderPaint(tileX, tileY);
       return;
     }
@@ -3313,11 +3349,14 @@ export default function Home() {
             STR {character.strength} · AGI {character.agility} · INT {character.intellect}
           </div>
           <div className="mt-3 w-40">
-            <HealthBar
-              variant="retro"
-              value={Math.max(0, Math.min(100, (character.health / Math.max(1, character.maxHealth)) * 100))}
-              className="h-3 w-full"
-            />
+            <div className="h-3 w-full overflow-hidden rounded-full border border-[#d9efbd]/35 bg-[#0b1606]">
+              <div
+                className="h-full bg-[linear-gradient(90deg,#d84f4f_0%,#ef7a5f_100%)] transition-[width] duration-200"
+                style={{
+                  width: `${Math.max(0, Math.min(100, (character.health / Math.max(1, character.maxHealth)) * 100))}%`,
+                }}
+              />
+            </div>
             <div className="mt-1 text-[10px] text-[#dceec9]">
               HP {character.health}/{character.maxHealth}
             </div>
@@ -5027,7 +5066,7 @@ export default function Home() {
                   {([
                     ['tile', 'Tiles'],
                     ['sprite', 'Sprites'],
-                    ['trader', 'Traders'],
+                    ['trader', 'NPC'],
                     ['spawn', 'Spawn'],
                   ] as const).map(([mode, label]) => (
                     <button
@@ -5139,30 +5178,17 @@ export default function Home() {
                   </div>
                 ) : worldEditorMode === 'trader' ? (
                   <div className="space-y-3">
-                    <label className="block">
-                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Name</span>
-                      <input
-                        type="text"
-                        value={selectedWorldTrader.name}
-                        onChange={(event) =>
-                          setSelectedWorldTrader((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
-                      />
-                    </label>
+                    <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">NPC</div>
+                      <div className="mt-2 text-sm text-[#d8ebc7]">
+                        Old mage is fixed. You can only move him and change his clothes.
+                      </div>
+                    </div>
                     <label className="block">
                       <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Body</span>
                       <select
                         value={selectedWorldTrader.bodyTexturePath}
-                        onChange={(event) =>
-                          setSelectedWorldTrader((current) => ({
-                            ...current,
-                            bodyTexturePath: event.target.value,
-                          }))
-                        }
+                        onChange={(event) => handleOldMageAppearanceChange('bodyTexturePath', event.target.value)}
                         className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
                       >
                         {worldTraderBodyOptions.map((spritePath) => (
@@ -5176,12 +5202,7 @@ export default function Home() {
                       <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Head</span>
                       <select
                         value={selectedWorldTrader.headTexturePath}
-                        onChange={(event) =>
-                          setSelectedWorldTrader((current) => ({
-                            ...current,
-                            headTexturePath: event.target.value,
-                          }))
-                        }
+                        onChange={(event) => handleOldMageAppearanceChange('headTexturePath', event.target.value)}
                         className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
                       >
                         {worldTraderHeadOptions.map((spritePath) => (
@@ -5277,7 +5298,7 @@ export default function Home() {
                           : worldEditorMode === 'sprite'
                             ? 'Hold left mouse button to place the selected sprite on the world. Right mouse button removes the sprite from a tile.'
                             : worldEditorMode === 'trader'
-                              ? 'Hold left mouse button to place a trader. Right mouse button removes the trader from a tile.'
+                              ? 'Click on the world to place or move Old mage.'
                             : 'Click or drag on the world to move the spawn point.'}
                       </div>
                       <div>
@@ -5288,7 +5309,7 @@ export default function Home() {
                           : worldEditorMode === 'sprite'
                             ? `${selectedWorldSprite.texturePath || 'no sprite selected'} @ ${selectedWorldSprite.rotation}deg x${selectedWorldSprite.scale}${selectedWorldSprite.flipX ? ' mirror' : ''}`
                             : worldEditorMode === 'trader'
-                              ? `${selectedWorldTrader.name || 'Trader'} · ${selectedWorldTrader.bodyTexturePath || 'no body'} · ${selectedWorldTrader.headTexturePath || 'no head'}`
+                              ? `${OLD_MAGE_TRADER_NAME} · ${selectedWorldTrader.bodyTexturePath || 'no body'} · ${selectedWorldTrader.headTexturePath || 'no head'}`
                             : `spawn @ ${worldMapDraft.spawn.x}:${worldMapDraft.spawn.y}`}
                       </div>
                       <div>
@@ -5297,7 +5318,7 @@ export default function Home() {
                         {worldHoverTile ? `${worldHoverTile.x}:${worldHoverTile.y}` : '--:--'}
                       </div>
                       <div>Draft sprite-tiles: {worldMapDraft.stamps.length}</div>
-                      <div>Draft traders: {worldMapDraft.traders.length}</div>
+                      <div>Draft NPCs: {worldMapDraft.traders.length}</div>
                       <div>Texture key: {worldEditorDebug.textureKey || 'none'}</div>
                       <div>Texture loaded: {worldEditorDebug.textureLoaded ? 'yes' : 'no'}</div>
                       {worldEditorMode === 'sprite' ? (

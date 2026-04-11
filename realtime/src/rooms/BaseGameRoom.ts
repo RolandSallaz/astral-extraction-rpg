@@ -118,7 +118,7 @@ import type { BasePlayerState } from "./schema/BasePlayerState.js";
 import type { MobState } from "./schema/MobState.js";
 import type { ChestState } from "./schema/ChestState.js";
 import { GroundEffectState } from "./schema/GroundEffectState.js";
-import type { ProjectileState } from "./schema/ProjectileState.js";
+import { type ProjectileState, type ProjectileServerData, createDefaultProjectileServerData } from "./schema/ProjectileState.js";
 import { applyDamageToPlayer as applyDamageToPlayerService } from "./services/CombatService.js";
 import { SharedCombatTickSystem } from "./systems/RoomTickSystems.js";
 
@@ -183,6 +183,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     targetY?: number;
   }>();
   protected readonly projectileHitHistory = new Map<string, Set<string>>();
+  protected readonly projectileServerData = new Map<string, ProjectileServerData>();
   protected readonly pendingBurstSpawns: {
     ownerId: string;
     x: number;
@@ -201,6 +202,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected readonly consumableCooldownEndsAt = new Map<string, number>();
   protected readonly pendingTeleportScrollCasts = new Set<string>();
   protected readonly mobPathCache = new Map<string, MobPathCacheEntry>();
+  protected readonly losCache = new Map<string, boolean>();
   protected readonly itemFireResistance = createDefaultItemFireResistanceMap();
   protected readonly playerSpatialGrid = new SpatialGrid<BasePlayerState>(64);
   protected readonly mobSpatialGrid = new SpatialGrid<MobState>(64);
@@ -257,6 +259,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.playerHealing.clear();
     this.playerSpatialGrid.clear();
     this.mobSpatialGrid.clear();
+    this.projectileServerData.clear();
   }
 
   // ── Shared message handlers ──────────────────────────────────────
@@ -695,6 +698,10 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     now = Date.now(),
   ) {
     const tileSize = this.profile.tileSize;
+    // Rebuild mob spatial grid before movement so canMobMoveTo uses it
+    rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());
+    // Clear LOS cache each tick — same tile-pair lookups within the tick are still cached
+    this.losCache.clear();
 
     for (const mob of this.roomMobs.values()) {
       if (mob.dead) {
@@ -706,19 +713,31 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
 
+      const mobTileX = Math.floor(mob.x / tileSize);
+      const mobTileY = Math.floor(mob.y / tileSize);
       const targetPlayer = resolveMobAggroTarget(mob, players, {
         now,
-        canAcquireTarget: (player) =>
-          hasGridLineOfSight(
-            { x: Math.floor(mob.x / tileSize), y: Math.floor(mob.y / tileSize) },
-            { x: Math.floor(player.x / tileSize), y: Math.floor(player.y / tileSize) },
+        canAcquireTarget: (player) => {
+          const playerTileX = Math.floor(player.x / tileSize);
+          const playerTileY = Math.floor(player.y / tileSize);
+          const cacheKey = `${mobTileX}:${mobTileY}:${playerTileX}:${playerTileY}`;
+          const cached = this.losCache.get(cacheKey);
+          if (cached !== undefined) {
+            return cached;
+          }
+          const result = hasGridLineOfSight(
+            { x: mobTileX, y: mobTileY },
+            { x: playerTileX, y: playerTileY },
             {
               tileSize,
               width: this.getMapWidthTiles(),
               height: this.getMapHeightTiles(),
               isBlocked: (tx, ty) => this.isBlockedTile(tx, ty),
             },
-          ),
+          );
+          this.losCache.set(cacheKey, result);
+          return result;
+        },
       });
 
       if (targetPlayer) {
@@ -765,13 +784,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return false;
     }
 
-    for (const mob of this.roomMobs.values()) {
-      if (mob.id === mobId || mob.dead) {
+    const hitRadius = this.profile.mobHitRadius;
+    for (const nearby of this.mobSpatialGrid.queryRadius(clampedX, clampedY, hitRadius)) {
+      if (nearby.id === mobId) {
         continue;
       }
-      if (Math.hypot(mob.x - clampedX, mob.y - clampedY) < this.profile.mobHitRadius) {
-        return false;
-      }
+      return false;
     }
 
     return true;
@@ -803,13 +821,19 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     const p = this.profile;
 
     for (const [projectileId, projectile] of this.roomProjectiles.entries()) {
+      const sd = this.projectileServerData.get(projectileId);
+      if (!sd) {
+        this.roomProjectiles.delete(projectileId);
+        continue;
+      }
+
       // Homing
-      if (projectile.homingStrength > 0) {
+      if (sd.homingStrength > 0) {
         const closestTarget = this.findNearestProjectileTarget(projectile, 180);
         if (closestTarget) {
           const desiredX = (closestTarget.entity.x - projectile.x) / Math.max(closestTarget.distance, 0.001);
           const desiredY = (closestTarget.entity.y - projectile.y) / Math.max(closestTarget.distance, 0.001);
-          const steer = Math.min(1, projectile.homingStrength * deltaSeconds);
+          const steer = Math.min(1, sd.homingStrength * deltaSeconds);
           const nextDirX = projectile.directionX + (desiredX - projectile.directionX) * steer;
           const nextDirY = projectile.directionY + (desiredY - projectile.directionY) * steer;
           const length = Math.hypot(nextDirX, nextDirY);
@@ -821,21 +845,21 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       }
 
       // Orbit
-      if (projectile.orbitTimeRemaining > 0) {
+      if (sd.orbitTimeRemaining > 0) {
         const owner = this.getPlayer(projectile.ownerId);
         if (owner && !owner.dead) {
-          const elapsed = projectile.orbitTimeRemaining > deltaSeconds * 1000
+          const elapsed = sd.orbitTimeRemaining > deltaSeconds * 1000
             ? deltaSeconds * 1000
-            : projectile.orbitTimeRemaining;
-          projectile.orbitTimeRemaining -= elapsed;
+            : sd.orbitTimeRemaining;
+          sd.orbitTimeRemaining -= elapsed;
           const angle = (now / 1000) * Math.PI * 4;
-          projectile.x = owner.x + Math.cos(angle) * projectile.orbitRadius;
-          projectile.y = owner.y + Math.sin(angle) * projectile.orbitRadius;
+          projectile.x = owner.x + Math.cos(angle) * sd.orbitRadius;
+          projectile.y = owner.y + Math.sin(angle) * sd.orbitRadius;
           projectile.originX = owner.x;
           projectile.originY = owner.y;
           continue;
         }
-        projectile.orbitTimeRemaining = 0;
+        sd.orbitTimeRemaining = 0;
       }
 
       const previousX = projectile.x;
@@ -848,7 +872,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         projectile.spiralPhase += speed * deltaSeconds * projectile.spiralFrequency * 0.01;
         const nextOffset = Math.sin(projectile.spiralPhase) * projectile.spiralAmplitude;
         const offsetDelta = nextOffset - prevOffset;
-        projectile.distanceTraveled += speed * deltaSeconds;
+        sd.distanceTraveled += speed * deltaSeconds;
         const perpX = -projectile.directionY;
         const perpY = projectile.directionX;
         projectile.x += projectile.directionX * speed * deltaSeconds + perpX * offsetDelta;
@@ -865,8 +889,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         if (this.canProjectileReturn(projectile) && this.startProjectileReturn(projectile)) {
           continue;
         }
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -878,8 +901,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         projectile.x > widthPx + pad ||
         projectile.y > heightPx + pad
       ) {
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -888,8 +910,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         projectile.returning &&
         Math.hypot(projectile.x - projectile.originX, projectile.y - projectile.originY) <= 12
       ) {
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -900,10 +921,9 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         if (this.tryBounceProjectile(projectile, previousX, previousY)) {
           continue;
         }
-        this.applyProjectileSplash(projectile, projectile.x, projectile.y, null);
+        this.applyProjectileSplash(projectile, sd, projectile.x, projectile.y, null);
         this.explodeFireballIntoShards(projectile);
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -921,12 +941,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       let hitPlayer = false;
 
       for (const player of this.queryNearbyPlayers(projectile.x, projectile.y, p.playerHitRadius)) {
-        if (player.dead || !this.canProjectileHitPlayer(projectile, player) || hitHistory.has(`player:${player.id}`)) {
+        if (player.dead || !this.canProjectileHitPlayer(projectile, sd, player) || hitHistory.has(`player:${player.id}`)) {
           continue;
         }
 
         const attacker = this.getPlayer(projectile.ownerId);
-        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, player.health, player.maxHealth);
+        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, sd, player.health, player.maxHealth);
         const finalDamage = this.applyDamageToPlayer(player, resolvedDamage, "fire");
         this.applyProjectileLifesteal(projectile.ownerId, finalDamage, player.id);
         this.onCombatLog(`${attacker?.name || "Wanderer"} hits ${player.name} for ${finalDamage}.`);
@@ -934,32 +954,31 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           this.broadcastDamageText(player.x, player.y - 18, `-${finalDamage}`);
         }
         this.applyBurnToPlayer(player, this.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
-        this.pushTargetByKnockback(projectile.x, projectile.y, player, projectile.knockbackDistance, (nx, ny) => {
+        this.pushTargetByKnockback(projectile.x, projectile.y, player, sd.knockbackDistance, (nx, ny) => {
           player.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
           player.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
         });
-        this.applyProjectileSplash(projectile, projectile.x, projectile.y, `player:${player.id}`);
+        this.applyProjectileSplash(projectile, sd, projectile.x, projectile.y, `player:${player.id}`);
         hitHistory.add(`player:${player.id}`);
 
         if (player.health <= 0) {
           this.handlePlayerKilled(player);
         }
 
-        if (projectile.piercesRemaining > 0) {
-          projectile.piercesRemaining -= 1;
+        if (sd.piercesRemaining > 0) {
+          sd.piercesRemaining -= 1;
           hitPlayer = true;
           break;
         }
 
-        if (this.tryChainProjectile(projectile, `player:${player.id}`)) {
+        if (this.tryChainProjectile(projectile, sd, `player:${player.id}`)) {
           hitPlayer = true;
           break;
         }
 
-        this.applyOnHitGemEffects(projectile);
+        this.applyOnHitGemEffects(projectile, sd);
         this.explodeFireballIntoShards(projectile);
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         hitPlayer = true;
         break;
       }
@@ -975,7 +994,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         }
 
         const attacker = this.getPlayer(projectile.ownerId);
-        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, mob.health, mob.maxHealth);
+        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, sd, mob.health, mob.maxHealth);
         mob.health = Math.max(0, mob.health - resolvedDamage);
         this.applyProjectileLifesteal(projectile.ownerId, resolvedDamage);
         if (attacker && !attacker.dead) {
@@ -986,11 +1005,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           this.broadcastDamageText(mob.x, mob.y - 18, `-${resolvedDamage}`);
         }
         this.applyBurnToMob(mob, this.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
-        this.pushTargetByKnockback(projectile.x, projectile.y, mob, projectile.knockbackDistance, (nx, ny) => {
+        this.pushTargetByKnockback(projectile.x, projectile.y, mob, sd.knockbackDistance, (nx, ny) => {
           mob.x = nx;
           mob.y = ny;
         });
-        this.applyProjectileSplash(projectile, projectile.x, projectile.y, `mob:${mob.id}`);
+        this.applyProjectileSplash(projectile, sd, projectile.x, projectile.y, `mob:${mob.id}`);
         hitHistory.add(`mob:${mob.id}`);
         hitMob = true;
 
@@ -999,19 +1018,18 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           this.awardExperience(projectile.ownerId, mob.experienceReward);
         }
 
-        if (projectile.piercesRemaining > 0) {
-          projectile.piercesRemaining -= 1;
+        if (sd.piercesRemaining > 0) {
+          sd.piercesRemaining -= 1;
           break;
         }
 
-        if (this.tryChainProjectile(projectile, `mob:${mob.id}`)) {
+        if (this.tryChainProjectile(projectile, sd, `mob:${mob.id}`)) {
           break;
         }
 
-        this.applyOnHitGemEffects(projectile);
+        this.applyOnHitGemEffects(projectile, sd);
         this.explodeFireballIntoShards(projectile);
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         break;
       }
 
@@ -1019,6 +1037,13 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
     }
+  }
+
+  /** Clean up both schema and server data for a projectile. */
+  protected deleteProjectile(projectileId: string) {
+    this.projectileHitHistory.delete(projectileId);
+    this.projectileServerData.delete(projectileId);
+    this.roomProjectiles.delete(projectileId);
   }
 
   // ── Projectile helpers ───────────────────────────────────────────
@@ -1046,7 +1071,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     projectile.directionY = directionY;
     projectile.originX = x;
     projectile.originY = y;
-    applyGemConfigToProjectile(projectile, gemConfig, {
+    const serverData = createDefaultProjectileServerData();
+    applyGemConfigToProjectile(projectile, serverData, gemConfig, {
       bounceCount: this.getProjectileBounceCount(ownerId, skillId),
       rangeMultiplier: this.getProjectileRangeMultiplier(ownerId, skillId),
       fireballSpeed: p.fireballSpeed,
@@ -1057,6 +1083,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       sizeScale,
     });
     this.roomProjectiles.set(projectile.id, projectile);
+    this.projectileServerData.set(projectile.id, serverData);
   }
 
   /** Subclasses must provide the concrete ProjectileState constructor. */
@@ -1104,8 +1131,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     );
   }
 
-  protected tryChainProjectile(projectile: ProjectileState, excludeEntityId: string) {
-    if (projectile.chainRemaining <= 0) {
+  protected tryChainProjectile(projectile: ProjectileState, sd: ProjectileServerData, excludeEntityId: string) {
+    if (sd.chainRemaining <= 0) {
       return false;
     }
     const bestTarget = this.findNearestProjectileTarget(projectile, 180, excludeEntityId);
@@ -1120,24 +1147,24 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
     projectile.directionX = dx / distance;
     projectile.directionY = dy / distance;
-    projectile.chainRemaining -= 1;
+    sd.chainRemaining -= 1;
     return true;
   }
 
-  protected applyProjectileSplash(projectile: ProjectileState, hitX: number, hitY: number, excludedEntityId: string | null) {
-    if (projectile.splashRadius <= 0 || projectile.splashDamageScale <= 0) {
+  protected applyProjectileSplash(projectile: ProjectileState, sd: ProjectileServerData, hitX: number, hitY: number, excludedEntityId: string | null) {
+    if (sd.splashRadius <= 0 || sd.splashDamageScale <= 0) {
       return;
     }
 
     const splashDamage = Math.max(
       0,
-      Math.round(this.getSkillDirectDamage(projectile.skillId) * projectile.splashDamageScale * this.getProjectileDamageScale(projectile)),
+      Math.round(this.getSkillDirectDamage(projectile.skillId) * sd.splashDamageScale * this.getProjectileDamageScale(projectile, sd)),
     );
     if (splashDamage <= 0) {
       return;
     }
 
-    for (const player of this.queryNearbyPlayers(hitX, hitY, projectile.splashRadius)) {
+    for (const player of this.queryNearbyPlayers(hitX, hitY, sd.splashRadius)) {
       if (player.dead || `player:${player.id}` === excludedEntityId) {
         continue;
       }
@@ -1148,7 +1175,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       }
     }
 
-    for (const mob of this.queryNearbyMobs(hitX, hitY, projectile.splashRadius)) {
+    for (const mob of this.queryNearbyMobs(hitX, hitY, sd.splashRadius)) {
       if (mob.dead || `mob:${mob.id}` === excludedEntityId) {
         continue;
       }
@@ -1161,9 +1188,9 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
-  protected applyOnHitGemEffects(projectile: ProjectileState) {
+  protected applyOnHitGemEffects(projectile: ProjectileState, sd: ProjectileServerData) {
     const p = this.profile;
-    const { spawns, aftershock } = buildOnHitProjectileEffects(projectile, {
+    const { spawns, aftershock } = buildOnHitProjectileEffects(projectile, sd, {
       fireballLifetime: p.fireballLifetime,
       fireballShardLifetime: p.fireballShardLifetime,
       shardSkillId: FIREBALL_SHARD_SKILL_ID,
@@ -1188,8 +1215,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
-  protected canProjectileHitPlayer(projectile: ProjectileState, player: BasePlayerState) {
-    return canProjectileHitOwner(projectile, player.id, this.profile.fireballSelfHitArmDistance);
+  protected canProjectileHitPlayer(projectile: ProjectileState, sd: ProjectileServerData, player: BasePlayerState) {
+    return canProjectileHitOwner(projectile, sd.selfHitGraceEndsAt, player.id, this.profile.fireballSelfHitArmDistance);
   }
 
   // ── Skill cast helpers ───────────────────────────────────────────
@@ -1486,9 +1513,13 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
   // ── Spatial grid ─────────────────────────────────────────────────
 
+  protected rebuildMobSpatialGrid() {
+    rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());
+  }
+
   protected rebuildSpatialGrids() {
     rebuildRoomSpatialGrid(this.playerSpatialGrid, this.playerSpatialOrder, this.roomPlayers.values());
-    rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());
+    this.rebuildMobSpatialGrid();
   }
 
   protected queryNearbyPlayers(x: number, y: number, radius: number) {
@@ -1513,12 +1544,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     );
   }
 
-  protected getProjectileDamageScale(projectile: ProjectileState) {
-    return getRoomProjectileDamageScale(projectile);
+  protected getProjectileDamageScale(projectile: ProjectileState, sd: ProjectileServerData) {
+    return getRoomProjectileDamageScale(projectile, sd);
   }
 
-  protected getProjectileDirectDamage(projectile: ProjectileState, targetHealth: number, targetMaxHealth: number) {
-    return getRoomProjectileDirectDamage(this.skillBalance, projectile, targetHealth, targetMaxHealth);
+  protected getProjectileDirectDamage(projectile: ProjectileState, sd: ProjectileServerData, targetHealth: number, targetMaxHealth: number) {
+    return getRoomProjectileDirectDamage(this.skillBalance, projectile, sd, targetHealth, targetMaxHealth);
   }
 
   protected applyProjectileLifesteal(ownerId: string, resolvedDamage: number, targetPlayerId?: string) {

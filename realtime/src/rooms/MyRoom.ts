@@ -513,6 +513,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
   private updatePlayers(deltaSeconds: number, tickNow: number) {
     this.removeExpiredOfflinePlayers();
+    // Rebuild mob spatial grid so canPlayerMoveTo uses grid queries instead of O(N)
+    this.rebuildMobSpatialGrid();
 
     for (const [sessionId, player] of this.state.players.entries()) {
       if (player.dead) {
@@ -552,14 +554,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       return false;
     }
 
-    for (const mob of this.state.mobs.values()) {
-      if (mob.dead) {
-        continue;
-      }
-
-      if (Math.hypot(mob.x - clampedX, mob.y - clampedY) < PLAYER_MOB_COLLISION_RADIUS) {
-        return false;
-      }
+    if (this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS).length > 0) {
+      return false;
     }
 
     return true;

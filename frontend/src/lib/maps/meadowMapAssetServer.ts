@@ -1,5 +1,16 @@
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  createGameDataCandidateDirs,
+  getWorldDefinitionPath,
+  getWorldTradersPath,
+} from '@mmorpg/shared/content/paths';
+import {
+  normalizeWorldDefinition,
+  type WorldChestDefinition,
+  type WorldDefinition,
+} from '@mmorpg/shared/worlds/definition';
 import {
   createDefaultMeadowMapAsset,
   type MeadowDecoration,
@@ -13,6 +24,9 @@ import {
 
 const MAP_ASSET_DIRECTORY = path.join(process.cwd(), 'data');
 const MAP_ASSET_PATH = path.join(MAP_ASSET_DIRECTORY, 'world-map.json');
+const WORLD_ID = 'lobby';
+const OLD_MAGE_TRADER_ID = 'old-mage';
+const OLD_MAGE_TRADER_NAME = 'Old mage';
 const ALLOWED_TILES = new Set<MeadowTile>(['grassGround', 'ground', 'water']);
 const ALLOWED_DECORATIONS = new Set<MeadowDecoration['texture']>([
   'rock-1-8x8',
@@ -27,6 +41,73 @@ const ALLOWED_OVERLAY_TEXTURES = new Set<MeadowOverlayAsset['texture']>([
   'ground-grass-corner-8x8',
 ]);
 const IMAGE_PATH_PATTERN = /^\/.+\.(png|jpg|jpeg|webp|gif)$/i;
+
+function resolveGameDataDirectory() {
+  const candidateDirs = createGameDataCandidateDirs(process.cwd()).map((candidatePath) =>
+    path.resolve(candidatePath),
+  );
+
+  return candidateDirs.find((candidatePath) => existsSync(candidatePath)) ?? candidateDirs[0];
+}
+
+const GAME_DATA_DIRECTORY = resolveGameDataDirectory();
+const WORLD_DEFINITION_PATH = path.resolve(getWorldDefinitionPath(GAME_DATA_DIRECTORY, WORLD_ID));
+const WORLD_TRADERS_PATH = path.resolve(getWorldTradersPath(GAME_DATA_DIRECTORY, WORLD_ID));
+
+function createDefaultOldMageTrader(): MeadowTraderAsset {
+  return {
+    id: OLD_MAGE_TRADER_ID,
+    name: OLD_MAGE_TRADER_NAME,
+    x: 17,
+    y: 19,
+    bodyTexturePath: '/items/equipment/tunic_npc1.png',
+    headTexturePath: '/items/equipment/oldman_mage_head.png',
+  };
+}
+
+function normalizeTraders(
+  input: MeadowTraderAsset[] | null | undefined,
+  width: number,
+  height: number,
+) {
+  const traders = (input ?? []).flatMap((trader) => {
+    const x = Math.floor(trader.x);
+    const y = Math.floor(trader.y);
+    if (x < 0 || y < 0 || x >= width || y >= height) {
+      return [];
+    }
+
+    const bodyTexturePath = typeof trader.bodyTexturePath === 'string' ? trader.bodyTexturePath : '';
+    const headTexturePath = typeof trader.headTexturePath === 'string' ? trader.headTexturePath : '';
+    if (!IMAGE_PATH_PATTERN.test(bodyTexturePath) || !IMAGE_PATH_PATTERN.test(headTexturePath)) {
+      return [];
+    }
+
+    return [{
+      id: typeof trader.id === 'string' && trader.id.trim() ? trader.id.trim() : OLD_MAGE_TRADER_ID,
+      x,
+      y,
+      name:
+        typeof trader.name === 'string' && trader.name.trim()
+          ? trader.name.trim().slice(0, 40)
+          : OLD_MAGE_TRADER_NAME,
+      bodyTexturePath,
+      headTexturePath,
+    } satisfies MeadowTraderAsset];
+  });
+
+  const preferredTrader = traders.find((trader) =>
+    trader.id === OLD_MAGE_TRADER_ID || trader.name.trim().toLowerCase() === OLD_MAGE_TRADER_NAME.toLowerCase(),
+  ) ?? traders[0] ?? null;
+
+  return preferredTrader
+    ? [{
+        ...preferredTrader,
+        id: OLD_MAGE_TRADER_ID,
+        name: OLD_MAGE_TRADER_NAME,
+      }]
+    : [];
+}
 
 function normalizeMapAsset(input: MeadowMapAsset): MeadowMapAsset {
   const fallback = createDefaultMeadowMapAsset();
@@ -104,34 +185,6 @@ function normalizeMapAsset(input: MeadowMapAsset): MeadowMapAsset {
     } satisfies MeadowStampAsset];
   });
 
-  const traders = (input.traders ?? []).flatMap((trader, index) => {
-    const x = Math.floor(trader.x);
-    const y = Math.floor(trader.y);
-    if (x < 0 || y < 0 || x >= width || y >= height) {
-      return [];
-    }
-
-    const bodyTexturePath = typeof trader.bodyTexturePath === 'string' ? trader.bodyTexturePath : '';
-    const headTexturePath = typeof trader.headTexturePath === 'string' ? trader.headTexturePath : '';
-    if (!IMAGE_PATH_PATTERN.test(bodyTexturePath) || !IMAGE_PATH_PATTERN.test(headTexturePath)) {
-      return [];
-    }
-
-    const rawName = typeof trader.name === 'string' ? trader.name.trim() : '';
-    const id = typeof trader.id === 'string' && trader.id.trim()
-      ? trader.id.trim()
-      : `trader-${x}-${y}-${index}`;
-
-    return [{
-      id,
-      x,
-      y,
-      name: rawName.slice(0, 40) || 'Trader',
-      bodyTexturePath,
-      headTexturePath,
-    } satisfies MeadowTraderAsset];
-  });
-
   const mobs = (input.mobs ?? []).flatMap((mob, index) => {
     const kind = mob.kind === 'bat' ? 'bat' : mob.kind === 'rat' ? 'rat' : null;
     if (!kind) {
@@ -178,27 +231,138 @@ function normalizeMapAsset(input: MeadowMapAsset): MeadowMapAsset {
     decorations,
     overlays,
     stamps,
-    traders,
+    traders: normalizeTraders(input.traders, width, height),
     mobs,
   };
+}
+
+function stripTradersFromMapAsset(asset: MeadowMapAsset): MeadowMapAsset {
+  return {
+    ...asset,
+    traders: [],
+  };
+}
+
+async function loadWorldDefinitionFromDisk() {
+  try {
+    const rawValue = await readFile(WORLD_DEFINITION_PATH, 'utf8');
+    return normalizeWorldDefinition(JSON.parse(rawValue) as WorldDefinition);
+  } catch {
+    return normalizeWorldDefinition({
+      id: WORLD_ID,
+      name: 'Lobby Meadow',
+    });
+  }
+}
+
+function buildWorldDefinitionFromMapAsset(
+  asset: MeadowMapAsset,
+  currentWorldDefinition: WorldDefinition,
+): WorldDefinition {
+  const chestDefinitionsByPosition = new Map<string, WorldChestDefinition>(
+    currentWorldDefinition.staticChests.map((chest) => [`${chest.x}:${chest.y}`, chest]),
+  );
+  const chestDecorations = asset.decorations.filter((decoration) => decoration.texture === 'chest-8x8');
+  const blockedTiles = new Map<string, { x: number; y: number }>();
+
+  asset.decorations.forEach((decoration) => {
+    if (!decoration.blocked && decoration.texture !== 'chest-8x8') {
+      return;
+    }
+
+    blockedTiles.set(`${decoration.x}:${decoration.y}`, { x: decoration.x, y: decoration.y });
+  });
+
+  const staticChests = chestDecorations.map((decoration, index) => {
+    const positionKey = `${decoration.x}:${decoration.y}`;
+    const existingChest = chestDefinitionsByPosition.get(positionKey);
+    if (existingChest) {
+      return existingChest;
+    }
+
+    const columns = 4;
+    const rows = 3;
+    return {
+      id: `meadow-chest-${decoration.x}-${decoration.y}-${index}`,
+      title: 'Wooden Chest',
+      subtitle: 'Container',
+      columns,
+      rows,
+      x: decoration.x,
+      y: decoration.y,
+      slots: Array.from({ length: columns * rows }, () => ''),
+    } satisfies WorldChestDefinition;
+  });
+
+  return normalizeWorldDefinition({
+    ...currentWorldDefinition,
+    tileSize: asset.tileSize,
+    width: asset.width,
+    height: asset.height,
+    spawn: asset.spawn,
+    blockedTiles: Array.from(blockedTiles.values()),
+    staticChests,
+    staticMobs: asset.mobs,
+  });
+}
+
+async function saveWorldDefinitionFromMapAsset(asset: MeadowMapAsset) {
+  const currentWorldDefinition = await loadWorldDefinitionFromDisk();
+  const nextWorldDefinition = buildWorldDefinitionFromMapAsset(asset, currentWorldDefinition);
+  await mkdir(path.dirname(WORLD_DEFINITION_PATH), { recursive: true });
+  await writeFile(WORLD_DEFINITION_PATH, `${JSON.stringify(nextWorldDefinition, null, 2)}\n`, 'utf8');
+}
+
+async function loadWorldTradersFromDisk(width: number, height: number, fallbackTraders?: MeadowTraderAsset[]) {
+  try {
+    const rawValue = await readFile(WORLD_TRADERS_PATH, 'utf8');
+    return normalizeTraders(JSON.parse(rawValue) as MeadowTraderAsset[], width, height);
+  } catch {
+    const traders = normalizeTraders(
+      fallbackTraders && fallbackTraders.length > 0 ? fallbackTraders : [createDefaultOldMageTrader()],
+      width,
+      height,
+    );
+    await saveWorldTradersToDisk(traders);
+    return traders;
+  }
+}
+
+async function saveWorldTradersToDisk(traders: MeadowTraderAsset[]) {
+  await mkdir(path.dirname(WORLD_TRADERS_PATH), { recursive: true });
+  await writeFile(WORLD_TRADERS_PATH, `${JSON.stringify(traders, null, 2)}\n`, 'utf8');
 }
 
 export async function loadMeadowMapAssetFromDisk() {
   try {
     const rawValue = await readFile(MAP_ASSET_PATH, 'utf8');
-    return normalizeMapAsset(JSON.parse(rawValue) as MeadowMapAsset);
+    const normalizedMapAsset = normalizeMapAsset(JSON.parse(rawValue) as MeadowMapAsset);
+    const traders = await loadWorldTradersFromDisk(
+      normalizedMapAsset.width,
+      normalizedMapAsset.height,
+      normalizedMapAsset.traders,
+    );
+    return {
+      ...normalizedMapAsset,
+      traders,
+    };
   } catch {
     const fallback = createDefaultMeadowMapAsset();
     await saveMeadowMapAssetToDisk(fallback);
-    return fallback;
+    return {
+      ...fallback,
+      traders: await loadWorldTradersFromDisk(fallback.width, fallback.height),
+    };
   }
 }
 
 export async function saveMeadowMapAssetToDisk(asset: MeadowMapAsset) {
   const normalized = normalizeMapAsset(asset);
   await mkdir(MAP_ASSET_DIRECTORY, { recursive: true });
-  await writeFile(MAP_ASSET_PATH, `${JSON.stringify(normalized, null, 2)}\n`, 'utf8');
+  await writeFile(MAP_ASSET_PATH, `${JSON.stringify(stripTradersFromMapAsset(normalized), null, 2)}\n`, 'utf8');
+  await saveWorldTradersToDisk(normalized.traders);
+  await saveWorldDefinitionFromMapAsset(normalized);
   return normalized;
 }
 
-export { MAP_ASSET_PATH };
+export { MAP_ASSET_PATH, WORLD_DEFINITION_PATH, WORLD_TRADERS_PATH };

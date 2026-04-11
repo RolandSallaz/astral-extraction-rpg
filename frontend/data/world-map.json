@@ -770,11 +770,11 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
       "ground",
       "ground",
       "ground",
       "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -787,8 +787,8 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -837,8 +837,8 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -887,8 +887,8 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -937,8 +937,8 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -987,8 +987,8 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -1037,8 +1037,8 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
       "grassGround",
       "grassGround",
       "grassGround",
@@ -1063,15 +1063,15 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
       "ground",
       "ground",
       "ground",
@@ -1113,15 +1113,6 @@
       "grassGround",
       "grassGround",
       "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
       "ground",
       "ground",
       "ground",
@@ -1129,12 +1120,21 @@
       "ground",
       "ground",
       "ground",
-      "grassGround",
       "ground",
-      "grassGround",
-      "grassGround",
-      "grassGround",
-      "grassGround",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
+      "ground",
       "ground",
       "ground",
       "ground",
@@ -2237,40 +2237,120 @@
   "overlays": [],
   "stamps": [
     {
-      "x": 16,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
+      "x": 18,
+      "y": 22,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
       "rotation": 0,
       "flipX": false,
       "scale": 1
     },
     {
       "x": 17,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 180,
+      "y": 22,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
       "flipX": false,
       "scale": 1
     },
     {
-      "x": 16,
-      "y": 14,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 270,
+      "x": 14,
+      "y": 22,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
       "flipX": false,
       "scale": 1
     },
     {
-      "x": 16,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 270,
+      "x": 9,
+      "y": 22,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
       "flipX": false,
       "scale": 1
     },
     {
-      "x": 16,
-      "y": 12,
+      "x": 18,
+      "y": 11,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 19,
+      "y": 11,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 19,
+      "y": 10,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 18,
+      "y": 10,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 18,
+      "y": 9,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 19,
+      "y": 9,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 18,
+      "y": 8,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 19,
+      "y": 8,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 19,
+      "y": 7,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 18,
+      "y": 7,
+      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "rotation": 0,
+      "flipX": false,
+      "scale": 1
+    },
+    {
+      "x": 17,
+      "y": 20,
       "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
       "rotation": 90,
       "flipX": false,
@@ -2278,734 +2358,29 @@
     },
     {
       "x": 20,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 21,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 270,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 21,
-      "y": 14,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 21,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 21,
-      "y": 12,
+      "y": 20,
       "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
       "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 20,
-      "y": 12,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 17,
-      "y": 12,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
       "flipX": false,
       "scale": 1
     },
     {
       "x": 25,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 27,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 28,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 29,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 30,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 35,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 36,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 16,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 17,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 18,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 19,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 20,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 20,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 19,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 18,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 17,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 16,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 17,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 17,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 16,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 16,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 15,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 14,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 15,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 14,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 13,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 13,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 12,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 11,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 12,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 11,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 10,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 9,
-      "y": 22,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 9,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 10,
-      "y": 21,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 12,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 11,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 19,
-      "y": 12,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 19,
-      "y": 11,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 19,
-      "y": 10,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 10,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 9,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 19,
-      "y": 9,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 8,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 19,
-      "y": 8,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 19,
-      "y": 7,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 18,
-      "y": 7,
-      "texturePath": "/sprites/terrain/ground-8x8.png",
+      "y": 23,
+      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
       "rotation": 0,
       "flipX": false,
       "scale": 1
     },
     {
       "x": 32,
-      "y": 15,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 35,
-      "y": 15,
+      "y": 23,
       "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
       "rotation": 270,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 31,
-      "y": 14,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 36,
-      "y": 14,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 270,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 38,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 270,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 40,
-      "y": 11,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 270,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 40,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 32,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 30,
-      "y": 7,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 29,
-      "y": 8,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 28,
-      "y": 9,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 27,
-      "y": 10,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 27,
-      "y": 12,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 27,
-      "y": 11,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 270,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 28,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-corner-tl-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 29,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 30,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 37,
-      "y": 13,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 39,
-      "y": 12,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 180,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 40,
-      "y": 10,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 40,
-      "y": 9,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 40,
-      "y": 8,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 40,
-      "y": 7,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 90,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 39,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 38,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 37,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 36,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 35,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 34,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 33,
-      "y": 6,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
-      "flipX": false,
-      "scale": 1
-    },
-    {
-      "x": 31,
-      "y": 7,
-      "texturePath": "/sprites/terrain/ground-grass-top-8x8.png",
-      "rotation": 0,
       "flipX": false,
       "scale": 1
     }
   ],
-  "traders": [
-    {
-      "id": "trader-1775733245820-2fac5d",
-      "x": 17,
-      "y": 19,
-      "name": "Old mage",
-      "bodyTexturePath": "/items/equipment/tunic_npc1.png",
-      "headTexturePath": "/items/equipment/oldman_mage_head.png"
-    }
-  ],
+  "traders": [],
   "mobs": []
 }

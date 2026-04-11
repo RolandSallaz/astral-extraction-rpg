@@ -377,6 +377,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.updateRaidExpiration();
       this.removeExpiredOfflinePlayers();
       const deltaSeconds = deltaTime / 1000;
+      this.rebuildMobSpatialGrid();
       this.updatePlayers(deltaSeconds);
       this.updateMobs(deltaSeconds, tickNow);
       this.sharedRaidCombatTickSystem.update(deltaSeconds, tickNow);
@@ -520,14 +521,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       return false;
     }
 
-    for (const mob of this.state.mobs.values()) {
-      if (mob.dead) {
-        continue;
-      }
-
-      if (Math.hypot(mob.x - clampedX, mob.y - clampedY) < PLAYER_MOB_COLLISION_RADIUS) {
-        return false;
-      }
+    if (this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS).length > 0) {
+      return false;
     }
 
     return true;
