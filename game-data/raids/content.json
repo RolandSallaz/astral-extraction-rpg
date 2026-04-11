@@ -1,0 +1,173 @@
+{
+  "templates": {
+    "crypt_small": {
+      "isTutorial": true,
+      "chest": {
+        "title": "Astral Reliquary",
+        "subtitle": "Training Cache",
+        "columns": 4,
+        "rows": 3,
+        "fixedSlots": [
+          "default_staff",
+          "fire_trail_gem"
+        ],
+        "lootPools": {
+          "outer": [],
+          "mid": [],
+          "core": []
+        },
+        "lootBands": []
+      },
+      "questObjectiveChest": {
+        "title": "Sealed Reliquary",
+        "subtitle": "Quest Objective",
+        "columns": 4,
+        "rows": 3,
+        "fixedSlots": [
+          "sealed_relic"
+        ]
+      },
+      "tutorialMob": {
+        "id": "raid-rat-tutorial",
+        "kind": "rat",
+        "roomIndex": 2,
+        "fallbackRoom": {
+          "x": 18,
+          "y": 4,
+          "width": 6,
+          "height": 7
+        },
+        "patrolInset": 1,
+        "patrolRadiusY": 0,
+        "patrolPhase": 0.25
+      },
+      "mobGeneration": {
+        "minSpawnCount": 0,
+        "maxSpawnCount": 0,
+        "spawnRatio": 0,
+        "batMinRoomHeight": 8,
+        "batMinRoomWidth": 8,
+        "batRandomThreshold": 0.45,
+        "batPatrolRadiusMin": 8,
+        "batPatrolRadiusRoomHeightOffset": 3,
+        "batPatrolRadiusScale": 4
+      }
+    },
+    "crypt": {
+      "isTutorial": false,
+      "chest": {
+        "title": "Crypt Chest",
+        "subtitle": "Raid Loot",
+        "columns": 4,
+        "rows": 3,
+        "fixedSlots": [],
+        "lootPools": {
+          "outer": [
+            "magic_hat",
+            "magic_hat",
+            "magic_hat",
+            "healing_potion",
+            "healing_potion",
+            "healing_potion",
+            "teleport_scroll",
+            "fire_trail_gem",
+            "cast_speed_gem",
+            "duration_gem",
+            "guard_gem",
+            "focus_gem",
+            "vitality_gem",
+            "fire_spiral_gem",
+            "fire_orbit_gem"
+          ],
+          "mid": [
+            "robe_tunic",
+            "robe_tunic",
+            "healing_potion",
+            "healing_potion",
+            "teleport_scroll",
+            "fire_shatter_gem",
+            "fire_return_gem",
+            "fire_bounce_gem",
+            "pierce_gem",
+            "homing_gem",
+            "area_gem",
+            "fire_spread_gem",
+            "fire_burst_gem",
+            "fire_fork_gem"
+          ],
+          "core": [
+            "default_staff",
+            "fire_longshot_gem",
+            "fire_split_gem",
+            "fire_range_gem",
+            "chain_gem",
+            "knockback_gem",
+            "lifesteal_gem",
+            "execution_gem",
+            "critical_gem",
+            "fire_nova_impact_gem",
+            "fire_aftershock_gem",
+            "fire_clone_gem"
+          ]
+        },
+        "lootBands": [
+          {
+            "minCenterBias": 0.72,
+            "itemCount": 5,
+            "pools": [
+              "outer",
+              "outer",
+              "outer",
+              "mid",
+              "mid",
+              "core"
+            ]
+          },
+          {
+            "minCenterBias": 0.42,
+            "itemCount": 4,
+            "pools": [
+              "outer",
+              "outer",
+              "outer",
+              "mid",
+              "mid"
+            ]
+          },
+          {
+            "minCenterBias": 0,
+            "itemCount": 3,
+            "pools": [
+              "outer",
+              "outer",
+              "outer",
+              "outer",
+              "mid"
+            ]
+          }
+        ]
+      },
+      "questObjectiveChest": {
+        "title": "Sealed Reliquary",
+        "subtitle": "Quest Objective",
+        "columns": 4,
+        "rows": 3,
+        "fixedSlots": [
+          "sealed_relic"
+        ]
+      },
+      "tutorialMob": null,
+      "mobGeneration": {
+        "minSpawnCount": 6,
+        "maxSpawnCount": 18,
+        "spawnRatio": 0.75,
+        "batMinRoomHeight": 8,
+        "batMinRoomWidth": 8,
+        "batRandomThreshold": 0.45,
+        "batPatrolRadiusMin": 8,
+        "batPatrolRadiusRoomHeightOffset": 3,
+        "batPatrolRadiusScale": 4
+      }
+    }
+  }
+}

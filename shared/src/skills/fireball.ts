@@ -1,0 +1,1 @@
+export const FIREBALL_BASE_CAST_TIME_MS = 200;

@@ -1,0 +1,22 @@
+{
+  "rat": {
+    "maxHealth": 38,
+    "moveSpeed": 64,
+    "aggroRange": 144,
+    "leashRange": 224,
+    "attackRange": 24,
+    "attackDamage": 6,
+    "attackCooldownMs": 900,
+    "experienceReward": 18
+  },
+  "bat": {
+    "maxHealth": 34,
+    "moveSpeed": 72,
+    "aggroRange": 176,
+    "leashRange": 224,
+    "attackRange": 24,
+    "attackDamage": 7,
+    "attackCooldownMs": 800,
+    "experienceReward": 22
+  }
+}

@@ -1,0 +1,46 @@
+import { Schema, type } from "@colyseus/schema";
+
+export class ProjectileState extends Schema {
+  @type("string") id = "";
+  @type("string") ownerId = "";
+  @type("string") skillId = "fireball";
+  @type("number") x = 0;
+  @type("number") y = 0;
+  @type("number") directionX = 0;
+  @type("number") directionY = 0;
+  @type("number") lifetime = 0;
+  @type("number") originX = 0;
+  @type("number") originY = 0;
+  @type("boolean") returning = false;
+  @type("number") bouncesRemaining = 0;
+  @type("number") piercesRemaining = 0;
+  @type("number") chainRemaining = 0;
+  @type("number") damageScale = 1;
+  @type("number") maxDistance = 0;
+  @type("number") sizeScale = 1;
+  @type("number") speed = 0;
+  @type("number") homingStrength = 0;
+  @type("number") splashRadius = 0;
+  @type("number") splashDamageScale = 0;
+  @type("number") knockbackDistance = 0;
+  @type("number") lifestealRatio = 0;
+  @type("number") executionThreshold = 0;
+  @type("number") executionDamageMultiplier = 1;
+  @type("number") criticalChance = 0;
+  @type("number") criticalDamageMultiplier = 1;
+  @type("number") selfHitGraceEndsAt = 0;
+  @type("number") spiralAmplitude = 0;
+  @type("number") spiralFrequency = 0;
+  @type("number") spiralPhase = 0;
+  @type("boolean") fork = false;
+  @type("number") forkDamageScale = 1;
+  @type("number") distanceTraveled = 0;
+  @type("number") orbitTimeRemaining = 0;
+  @type("number") orbitRadius = 0;
+  @type("number") aftershockDelayMs = 0;
+  @type("number") aftershockDamageScale = 0;
+  @type("number") novaImpactCount = 0;
+  @type("number") novaImpactDamageScale = 0;
+  @type("boolean") cloneOnHit = false;
+  @type("number") cloneDamageScale = 0;
+}

@@ -1,0 +1,43 @@
+{
+  "name": "@mmorpg/shared",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./balance/skillBalance": "./dist/balance/skillBalance.js",
+    "./balance/mobBalance": "./dist/balance/mobBalance.js",
+    "./balance/itemBalance": "./dist/balance/itemBalance.js",
+    "./items/catalog": "./dist/items/catalog.js",
+    "./content/paths": "./dist/content/paths.js",
+    "./inventory/codec": "./dist/inventory/codec.js",
+    "./player/contracts": "./dist/player/contracts.js",
+    "./loot/tables": "./dist/loot/tables.js",
+    "./raids/templates": "./dist/raids/templates.js",
+    "./raids/content": "./dist/raids/content.js",
+    "./mobs/catalog": "./dist/mobs/catalog.js",
+    "./mobs/visuals": "./dist/mobs/visuals.js",
+    "./worlds/definition": "./dist/worlds/definition.js",
+    "./quests/content": "./dist/quests/content.js",
+    "./quests/core": "./dist/quests/core.js",
+    "./procgen/seededRandom": "./dist/procgen/seededRandom.js",
+    "./procgen/generateRaidLayout": "./dist/procgen/generateRaidLayout.js",
+    "./skills/fireball": "./dist/skills/fireball.js",
+    "./skills/effects": "./dist/skills/effects.js",
+    "./skills/gemEffects": "./dist/skills/gemEffects.js",
+    "./realtime/contracts": "./dist/realtime/contracts.js",
+    "./gameplay/profiles": "./dist/gameplay/profiles.js",
+    "./skills/registry": "./dist/skills/registry.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "devDependencies": {
+    "typescript": "^6.0.2"
+  }
+}

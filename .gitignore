@@ -1,0 +1,64 @@
+# AI/tooling
+.aider*
+.claude/
+.git-nested-backups/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+build/
+out/
+coverage/
+.nyc_output/
+**/dist/
+**/build/
+**/coverage/
+
+# Next.js
+.next/
+**/.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+!.env.development.example
+
+# Docker/local runtime data
+.npm-cache/
+pids/
+*.pid
+*.seed
+*.pid.lock
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Package artifacts
+*.tgz
+
+# Generated migration artifacts
+backend/src/migrations/*.js
+backend/src/migrations/*.js.map
+backend/src/migrations/*.d.ts
+backend/dist/migrations/

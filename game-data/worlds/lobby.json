@@ -1,0 +1,66 @@
+{
+  "id": "lobby",
+  "name": "Lobby Meadow",
+  "tileSize": 32,
+  "width": 40,
+  "height": 30,
+  "safeLobby": true,
+  "hostileMobsEnabled": false,
+  "spawn": {
+    "x": 20,
+    "y": 15
+  },
+  "blockedTiles": [
+    {
+      "x": 10,
+      "y": 22
+    }
+  ],
+  "staticChests": [
+    {
+      "id": "meadow-chest-10-22",
+      "title": "Wooden Chest",
+      "subtitle": "Container",
+      "columns": 4,
+      "rows": 3,
+      "x": 10,
+      "y": 22,
+      "slots": [
+        "magic_hat",
+        "robe_tunic"
+      ]
+    }
+  ],
+  "staticMobs": [
+    {
+      "id": "rat-scout",
+      "kind": "rat",
+      "spawn": {
+        "x": 13,
+        "y": 18
+      },
+      "patrol": {
+        "minX": 11,
+        "maxX": 16,
+        "y": 18,
+        "radiusY": 0,
+        "phase": 0.35
+      }
+    },
+    {
+      "id": "bat-stalker",
+      "kind": "bat",
+      "spawn": {
+        "x": 25,
+        "y": 12
+      },
+      "patrol": {
+        "minX": 22,
+        "maxX": 28,
+        "y": 12,
+        "radiusY": 14,
+        "phase": 1.15
+      }
+    }
+  ]
+}

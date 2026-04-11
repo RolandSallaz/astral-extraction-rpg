@@ -1,0 +1,12 @@
+node_modules/
+build/
+dist/
+coverage/
+.nyc_output/
+.colyseus-cloud.json
+.devmode.json
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo

@@ -1,0 +1,16 @@
+{
+  "rat": {
+    "kind": "rat",
+    "spriteScale": 1,
+    "anchorY": 1,
+    "clips": {},
+    "states": {}
+  },
+  "bat": {
+    "kind": "bat",
+    "spriteScale": 1,
+    "anchorY": 1,
+    "clips": {},
+    "states": {}
+  }
+}

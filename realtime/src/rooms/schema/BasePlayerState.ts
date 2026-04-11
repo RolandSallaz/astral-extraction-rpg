@@ -1,0 +1,40 @@
+import { Schema, type } from "@colyseus/schema";
+
+export class BasePlayerState extends Schema {
+  @type("string") id = "";
+  @type("string") name = "Wanderer";
+  @type("string") role = "USER";
+  @type("number") x = 0;
+  @type("number") y = 0;
+  @type("number") health = 100;
+  @type("number") maxHealth = 100;
+  @type("number") level = 1;
+  @type("number") experience = 0;
+  @type("number") strength = 1;
+  @type("number") agility = 1;
+  @type("number") intellect = 1;
+  @type("number") burnTicksRemaining = 0;
+  @type("number") burnEndsAt = 0;
+  @type("number") healingTicksRemaining = 0;
+  @type("number") healingEndsAt = 0;
+  @type("number") fireballCooldownEndsAt = 0;
+  @type("number") fireNovaCooldownEndsAt = 0;
+  @type("number") fireFieldCooldownEndsAt = 0;
+  @type("string") castingSkillId = "";
+  @type("number") castStartedAt = 0;
+  @type("number") castEndsAt = 0;
+  @type("number") lastProcessedInput = 0;
+  @type("boolean") dead = false;
+  @type("string") bodyItem = "";
+  @type("string") headItem = "";
+  @type("string") weaponItem = "";
+  @type("string") headGemItem1 = "";
+  @type("string") headGemItem2 = "";
+  @type("string") headGemItem3 = "";
+  @type("string") bodyGemItem1 = "";
+  @type("string") bodyGemItem2 = "";
+  @type("string") bodyGemItem3 = "";
+  @type("string") weaponGemItem1 = "";
+  @type("string") weaponGemItem2 = "";
+  @type("string") weaponGemItem3 = "";
+}

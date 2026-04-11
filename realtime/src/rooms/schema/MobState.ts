@@ -1,0 +1,36 @@
+import type { MobKind } from "@mmorpg/shared/mobs/catalog";
+import { Schema, type } from "@colyseus/schema";
+
+export class MobState extends Schema {
+  @type("string") id = "";
+  @type("string") kind: MobKind | "" = "";
+  @type("string") name = "";
+  @type("string") texture = "";
+  @type("string") aggroTargetId = "";
+  @type("number") aggroLockedUntil = 0;
+  @type("number") spawnX = 0;
+  @type("number") spawnY = 0;
+  @type("number") x = 0;
+  @type("number") y = 0;
+  @type("number") targetX = 0;
+  @type("number") targetY = 0;
+  @type("number") patrolMinX = 0;
+  @type("number") patrolMaxX = 0;
+  @type("number") patrolY = 0;
+  @type("number") patrolRadiusY = 0;
+  @type("number") patrolPhase = 0;
+  @type("number") moveSpeed = 0;
+  @type("number") aggroRange = 0;
+  @type("number") leashRange = 0;
+  @type("number") attackRange = 0;
+  @type("number") attackDamage = 0;
+  @type("number") attackCooldownMs = 0;
+  @type("number") attackCooldownEndsAt = 0;
+  @type("number") experienceReward = 0;
+  @type("number") health = 100;
+  @type("number") maxHealth = 100;
+  @type("number") burnTicksRemaining = 0;
+  @type("number") burnEndsAt = 0;
+  @type("boolean") dead = false;
+  @type("number") respawnAt = 0;
+}

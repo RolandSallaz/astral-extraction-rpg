@@ -1,0 +1,24 @@
+[
+  {
+    "code": "crypt_small",
+    "name": "Crypt Small",
+    "description": "Compact astral crypt for the first rite: loot a staff and gem, socket them, kill a rat, then reach the exit.",
+    "biome": "crypt",
+    "minPlayers": 1,
+    "maxPlayers": 1,
+    "width": 32,
+    "height": 16,
+    "isActive": true
+  },
+  {
+    "code": "crypt",
+    "name": "Crypt",
+    "description": "Procedural crypt for delves beyond the first rite.",
+    "biome": "crypt",
+    "minPlayers": 1,
+    "maxPlayers": 4,
+    "width": 64,
+    "height": 64,
+    "isActive": true
+  }
+]
