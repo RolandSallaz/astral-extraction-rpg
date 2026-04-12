@@ -664,6 +664,10 @@ function parseStoredActionBarBindings(
   }
 }
 
+function hasActionBarBindings(bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>) {
+  return Object.keys(bindings).length > 0;
+}
+
 export function GameHud({
   equipment,
   inventory,
@@ -725,17 +729,61 @@ export function GameHud({
     return parseStoredActionBarBindings(window.localStorage.getItem(ACTION_BAR_STORAGE_KEY))
       ?? getDefaultActionBarBindings(equipment);
   });
+  const clearHoveredItemScope = (scope: HoveredItemState['scope']) => {
+    setHoveredItem((current) => (current?.scope === scope ? null : current));
+  };
+  const clearContainerUiState = () => {
+    clearHoveredItemScope('container');
+    setItemContextMenu((current) =>
+      current?.source.type === 'container' ? null : current,
+    );
+    setInspectItem((current) =>
+      current?.source.type === 'container' ? null : current,
+    );
+    setDragState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      if (current.source.type === 'container') {
+        return null;
+      }
+
+      if (
+        current.source.type === 'inspect-socket' &&
+        current.source.itemSource.type === 'container'
+      ) {
+        return null;
+      }
+
+      return current;
+    });
+  };
+  const visibleInspectItem =
+    inspectItem && (inspectItem.source.type !== 'container' || container)
+      ? inspectItem
+      : null;
+  const visibleItemContextMenu =
+    itemContextMenu && (itemContextMenu.source.type !== 'container' || container)
+      ? itemContextMenu
+      : null;
+  const visibleHoveredItem =
+    hoveredItem &&
+    (hoveredItem.scope !== 'container' || container) &&
+    (hoveredItem.scope !== 'inspect' || visibleInspectItem)
+      ? hoveredItem
+      : null;
   const availableSkills = getAvailableSkills(equipment);
-  const hoveredItemTooltipLineCount = hoveredItem
+  const hoveredItemTooltipLineCount = visibleHoveredItem
     ? (() => {
-        const itemId = getInventoryItemId(hoveredItem.itemId);
+        const itemId = getInventoryItemId(visibleHoveredItem.itemId);
         return itemId ? getItemTooltipLines(itemId, itemBalanceConfig).length : 1;
       })()
     : 0;
-  const hoveredItemPosition = hoveredItem
+  const hoveredItemPosition = visibleHoveredItem
     ? getSafeTooltipPosition(
-        hoveredItem.pointerX,
-        hoveredItem.pointerY,
+        visibleHoveredItem.pointerX,
+        visibleHoveredItem.pointerY,
         252,
         Math.min(320, 92 + hoveredItemTooltipLineCount * 22),
       )
@@ -743,8 +791,8 @@ export function GameHud({
   const hoveredSkillPosition = hoveredSkill
     ? getSafeTooltipPosition(hoveredSkill.pointerX, hoveredSkill.pointerY, 252, 164)
     : null;
-  const itemContextMenuPosition = itemContextMenu
-    ? getSafeTooltipPosition(itemContextMenu.pointerX, itemContextMenu.pointerY, 216, 196)
+  const itemContextMenuPosition = visibleItemContextMenu
+    ? getSafeTooltipPosition(visibleItemContextMenu.pointerX, visibleItemContextMenu.pointerY, 216, 196)
     : null;
 
   useEffect(() => {
@@ -756,20 +804,26 @@ export function GameHud({
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(ACTION_BAR_STORAGE_KEY, JSON.stringify(actionBarBindings));
-  }, [actionBarBindings]);
+    const persistedBindings = hasActionBarBindings(actionBarBindings)
+      ? actionBarBindings
+      : getDefaultActionBarBindings(equipment);
+    window.localStorage.setItem(ACTION_BAR_STORAGE_KEY, JSON.stringify(persistedBindings));
+  }, [actionBarBindings, equipment]);
 
-  useEffect(() => {
-    setActionBarBindings((current) => {
-      if (Object.keys(current).length > 0) {
-        return current;
-      }
+  const getResolvedActionBarBindings = (
+    bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
+  ) => (hasActionBarBindings(bindings) ? bindings : getDefaultActionBarBindings(equipment));
 
-      return getDefaultActionBarBindings(equipment);
-    });
-  }, [equipment]);
+  const updateActionBarBindings = (
+    updater: (
+      current: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
+    ) => Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
+  ) => {
+    setActionBarBindings((current) => updater(getResolvedActionBarBindings(current)));
+  };
 
-  const getActionBarBinding = (slotKey: ActionSlotKey) => actionBarBindings[slotKey] ?? null;
+  const getActionBarBinding = (slotKey: ActionSlotKey) =>
+    getResolvedActionBarBindings(actionBarBindings)[slotKey] ?? null;
 
   const findActionBarInventorySlot = (itemId: ConsumableItemId) =>
     inventory.findIndex((itemValue) => getInventoryItemId(itemValue) === itemId);
@@ -785,14 +839,14 @@ export function GameHud({
     }, 0);
 
   const setActionBarBinding = (slotKey: ActionSlotKey, binding: ActionBarBinding | null) => {
-    setActionBarBindings((current) => ({
+    updateActionBarBindings((current) => ({
       ...current,
       [slotKey]: binding,
     }));
   };
 
   const assignSkillToFirstAvailableActionSlot = (skillId: SkillId) => {
-    setActionBarBindings((current) => {
+    updateActionBarBindings((current) => {
       const emptySlot = ACTION_BAR_SLOTS.find(({ key }) => !current[key]);
       const targetSlotKey = emptySlot?.key ?? ACTION_BAR_SLOTS[0].key;
       return {
@@ -916,12 +970,18 @@ export function GameHud({
 
       if (event.code === 'KeyI') {
         event.preventDefault();
+        if (inventoryOpen) {
+          clearHoveredItemScope('inventory');
+        }
         setInventoryOpen((current) => !current);
         return;
       }
 
       if (event.code === 'Tab') {
         event.preventDefault();
+        if (equipmentOpen) {
+          clearHoveredItemScope('equipment');
+        }
         setEquipmentOpen((current) => !current);
         return;
       }
@@ -950,63 +1010,7 @@ export function GameHud({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [actionBarBindings, availableSkills, consumableCooldowns, inventory, onInventoryUse, onSkillTrigger, skillCooldowns]);
-
-  useEffect(() => {
-    if (container) {
-      return;
-    }
-
-    setHoveredItem((current) => (current?.scope === 'container' ? null : current));
-    setItemContextMenu((current) =>
-      current?.source.type === 'container' ? null : current,
-    );
-    setInspectItem((current) =>
-      current?.source.type === 'container' ? null : current,
-    );
-    setDragState((current) => {
-      if (!current) {
-        return current;
-      }
-
-      if (current.source.type === 'container') {
-        return null;
-      }
-
-      if (
-        current.source.type === 'inspect-socket' &&
-        current.source.itemSource.type === 'container'
-      ) {
-        return null;
-      }
-
-      return current;
-    });
-  }, [container]);
-
-  useEffect(() => {
-    if (inventoryOpen) {
-      return;
-    }
-
-    setHoveredItem((current) => (current?.scope === 'inventory' ? null : current));
-  }, [inventoryOpen]);
-
-  useEffect(() => {
-    if (equipmentOpen) {
-      return;
-    }
-
-    setHoveredItem((current) => (current?.scope === 'equipment' ? null : current));
-  }, [equipmentOpen]);
-
-  useEffect(() => {
-    if (inspectItem) {
-      return;
-    }
-
-    setHoveredItem((current) => (current?.scope === 'inspect' ? null : current));
-  }, [inspectItem]);
+  }, [actionBarBindings, availableSkills, clearHoveredItemScope, consumableCooldowns, equipmentOpen, inventory, inventoryOpen, onInventoryUse, onSkillTrigger, skillCooldowns]);
 
   const setEquipmentSocketsInEquipment = (slot: BaseEquipmentSlot, nextGemIds: Array<string | null>) => {
     const nextEquipment = { ...equipment };
@@ -1378,10 +1382,16 @@ export function GameHud({
 
   const togglePanel = (panel: HudPanel) => {
     if (panel === 'inventory') {
+      if (inventoryOpen) {
+        clearHoveredItemScope('inventory');
+      }
       setInventoryOpen((current) => !current);
       return;
     }
 
+    if (equipmentOpen) {
+      clearHoveredItemScope('equipment');
+    }
     setEquipmentOpen((current) => !current);
   };
 
@@ -1705,7 +1715,7 @@ export function GameHud({
           return;
         }
 
-        setActionBarBindings((current) => ({
+        updateActionBarBindings((current) => ({
           ...current,
           [slotKey]: draggedBinding,
           [sourceSlotKey]: current[slotKey] ?? null,
@@ -2239,7 +2249,10 @@ export function GameHud({
           title="Backpack"
           storageKey={INVENTORY_POSITION_STORAGE_KEY}
           defaultPosition={{ left: 620, top: 120 }}
-          onClose={() => setInventoryOpen(false)}
+          onClose={() => {
+            setInventoryOpen(false);
+            clearHoveredItemScope('inventory');
+          }}
           className={`z-20 w-max ${HUD_WINDOW_GREEN_CLASS}`}
         >
           <div className={HUD_SECTION_CLASS} onMouseUp={dropIntoBackpackZone}>
@@ -2294,7 +2307,10 @@ export function GameHud({
           title="Character"
           storageKey={EQUIPMENT_POSITION_STORAGE_KEY}
           defaultPosition={{ left: 860, top: 120 }}
-          onClose={() => setEquipmentOpen(false)}
+          onClose={() => {
+            setEquipmentOpen(false);
+            clearHoveredItemScope('equipment');
+          }}
           className={`z-20 w-max ${HUD_WINDOW_GREEN_CLASS}`}
         >
           <div className="flex items-start gap-4">
@@ -2393,7 +2409,10 @@ export function GameHud({
           subtitle={container.subtitle}
           storageKey={CONTAINER_POSITION_STORAGE_KEY}
           defaultPosition={{ left: 20, top: 120 }}
-          onClose={onCloseContainer}
+          onClose={() => {
+            clearContainerUiState();
+            onCloseContainer();
+          }}
           className={`z-30 w-max ${HUD_WINDOW_BROWN_CLASS}`}
         >
           <div className={HUD_SECTION_CLASS}>
@@ -2471,35 +2490,35 @@ export function GameHud({
         </div>
       ) : null}
 
-      {itemContextMenu ? (
+      {visibleItemContextMenu ? (
         <div
           className="fixed z-50 w-[200px] rounded-2xl border border-[#d9efbd]/30 bg-[#17320d]/94 p-2 shadow-[0_18px_44px_rgba(0,0,0,0.32)] backdrop-blur-md"
           style={{
-            left: itemContextMenuPosition?.left ?? itemContextMenu.pointerX + 16,
-            top: itemContextMenuPosition?.top ?? itemContextMenu.pointerY + 16,
+            left: itemContextMenuPosition?.left ?? visibleItemContextMenu.pointerX + 16,
+            top: itemContextMenuPosition?.top ?? visibleItemContextMenu.pointerY + 16,
           }}
           onMouseDown={(event) => event.stopPropagation()}
         >
           <button
             type="button"
-            onClick={() => handleEquipFromSource(itemContextMenu.source, itemContextMenu.itemValue)}
+            onClick={() => handleEquipFromSource(visibleItemContextMenu.source, visibleItemContextMenu.itemValue)}
             className="block w-full rounded-xl px-3 py-2 text-left text-sm text-[#f4ffe8] transition hover:bg-[#294816]/72"
           >
             {(() => {
-              const itemId = getInventoryItemId(itemContextMenu.itemValue);
+              const itemId = getInventoryItemId(visibleItemContextMenu.itemValue);
               return itemId && EQUIPMENT_ITEMS[itemId].type === 'consumable' ? 'Use' : 'Equip';
             })()}
           </button>
           <button
             type="button"
-            onClick={() => handleInspectItem(itemContextMenu.itemValue, itemContextMenu.source)}
+            onClick={() => handleInspectItem(visibleItemContextMenu.itemValue, visibleItemContextMenu.source)}
             className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-[#f4ffe8] transition hover:bg-[#294816]/72"
           >
             Inspect
           </button>
           <button
             type="button"
-            onClick={() => handleDropItem(itemContextMenu.source)}
+            onClick={() => handleDropItem(visibleItemContextMenu.source)}
             className="mt-1 block w-full rounded-xl px-3 py-2 text-left text-sm text-[#ffd7c9] transition hover:bg-[#5a2318]/72"
           >
             Drop
@@ -2507,7 +2526,7 @@ export function GameHud({
         </div>
       ) : null}
 
-      {inspectItem ? (
+      {visibleInspectItem ? (
         <HudWindow
           title="Inspect"
           defaultPosition={{ left: 480, top: 180 }}
@@ -2519,19 +2538,19 @@ export function GameHud({
           className={`z-40 w-[280px] ${HUD_WINDOW_GREEN_CLASS}`}
         >
           {(() => {
-            const parsed = parseInventoryItem(inspectItem.itemValue);
+            const parsed = parseInventoryItem(visibleInspectItem.itemValue);
             if (!parsed) {
               return null;
             }
 
             const item = EQUIPMENT_ITEMS[parsed.itemId];
             const socketCount = item.socketCount ?? 0;
-            const socketGemIds = getItemSocketGemIds(inspectItem.itemValue, equipment, inspectItem.source);
+            const socketGemIds = getItemSocketGemIds(visibleInspectItem.itemValue, equipment, visibleInspectItem.source);
             const socketColors = getItemSocketColors(
-              inspectItem.itemValue,
+              visibleInspectItem.itemValue,
               equipment,
               itemTintOverrides,
-              inspectItem.source,
+              visibleInspectItem.source,
             );
 
             return (
@@ -2539,12 +2558,12 @@ export function GameHud({
                 <div className={HUD_SECTION_CLASS}>
                   <div
                     className="flex items-center gap-3"
-                    onMouseEnter={showItemTooltip(inspectItem.itemValue, 'inspect')}
+                    onMouseEnter={showItemTooltip(visibleInspectItem.itemValue, 'inspect')}
                     onMouseMove={moveItemTooltip}
                     onMouseLeave={hideItemTooltip}
                   >
                     <ItemTile
-                      itemValue={inspectItem.itemValue}
+                      itemValue={visibleInspectItem.itemValue}
                       socketCount={socketCount}
                       socketColors={socketColors}
                       itemTintOverrides={itemTintOverrides}
@@ -2597,7 +2616,7 @@ export function GameHud({
                               skillId: null,
                               source: {
                                 type: 'inspect-socket',
-                                itemSource: inspectItem.source,
+                                itemSource: visibleInspectItem.source,
                                 socketIndex: index,
                               },
                               pointerX: event.clientX,
@@ -2652,37 +2671,37 @@ export function GameHud({
         </HudWindow>
       ) : null}
 
-      {hoveredItem ? (
+      {visibleHoveredItem ? (
         <div
           className="pointer-events-none fixed z-50 max-h-[calc(100vh-40px)] max-w-[220px] overflow-y-auto rounded-2xl border border-[#d9efbd]/30 bg-[#17320d]/94 px-4 py-3 text-left shadow-[0_18px_44px_rgba(0,0,0,0.32)] backdrop-blur-md"
           style={{
-            left: hoveredItemPosition?.left ?? hoveredItem.pointerX + 16,
-            top: hoveredItemPosition?.top ?? hoveredItem.pointerY + 16,
+            left: hoveredItemPosition?.left ?? visibleHoveredItem.pointerX + 16,
+            top: hoveredItemPosition?.top ?? visibleHoveredItem.pointerY + 16,
           }}
         >
           <div
             className="font-serif text-lg font-bold"
             style={{
               color: (() => {
-                const itemId = getInventoryItemId(hoveredItem.itemId);
+                const itemId = getInventoryItemId(visibleHoveredItem.itemId);
                 return getItemTierStyle(itemId)?.textColor ?? '#f6ffea';
               })(),
             }}
           >
             {(() => {
-              const itemId = getInventoryItemId(hoveredItem.itemId);
+              const itemId = getInventoryItemId(visibleHoveredItem.itemId);
               return itemId ? EQUIPMENT_ITEMS[itemId].name : 'Unknown Item';
             })()}
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-[#bfd8a4]">
             {(() => {
-              const itemId = getInventoryItemId(hoveredItem.itemId);
+              const itemId = getInventoryItemId(visibleHoveredItem.itemId);
               return itemId ? (EQUIPMENT_ITEMS[itemId].slot ?? EQUIPMENT_ITEMS[itemId].type) : 'item';
             })()}
           </div>
           <div className="mt-2 space-y-1 text-sm leading-5 text-[#dceec9]">
             {(() => {
-              const itemId = getInventoryItemId(hoveredItem.itemId);
+              const itemId = getInventoryItemId(visibleHoveredItem.itemId);
               return (itemId ? getItemTooltipLines(itemId, itemBalanceConfig) : ['Unknown item']).map((line) => (
                 <div key={line}>{line}</div>
               ));
