@@ -43,6 +43,13 @@ export type PendingAftershock = {
   triggerAt: number;
 };
 
+import type { ProjectileServerData } from "./schema/ProjectileState.js";
+
+/**
+ * Union of schema (visual) fields and server-only combat fields.
+ * Used by functions that need to read/write the full projectile state
+ * (e.g. applyGemConfigToProjectile, updateProjectilesShared).
+ */
 export type MutableProjectile = {
   ownerId: string;
   skillId: string;
@@ -55,37 +62,12 @@ export type MutableProjectile = {
   originY: number;
   returning: boolean;
   bouncesRemaining: number;
-  piercesRemaining: number;
-  chainRemaining: number;
-  damageScale: number;
-  maxDistance: number;
   sizeScale: number;
   speed: number;
-  homingStrength: number;
-  splashRadius: number;
-  splashDamageScale: number;
-  knockbackDistance: number;
-  lifestealRatio: number;
-  executionThreshold: number;
-  executionDamageMultiplier: number;
-  criticalChance: number;
-  criticalDamageMultiplier: number;
-  selfHitGraceEndsAt: number;
   spiralAmplitude: number;
   spiralFrequency: number;
   spiralPhase: number;
-  fork: boolean;
-  forkDamageScale: number;
-  distanceTraveled: number;
-  orbitTimeRemaining: number;
-  orbitRadius: number;
-  aftershockDelayMs: number;
-  aftershockDamageScale: number;
-  novaImpactCount: number;
-  novaImpactDamageScale: number;
-  cloneOnHit: boolean;
-  cloneDamageScale: number;
-};
+} & ProjectileServerData;
 
 export function getSharedFireballCastTimeMs(
   player: CombatGemPlayer | undefined,
@@ -231,7 +213,8 @@ export function buildFireballCastPlan(options: {
 }
 
 export function applyGemConfigToProjectile(
-  projectile: MutableProjectile,
+  schema: { lifetime: number; returning: boolean; bouncesRemaining: number; sizeScale: number; speed: number; spiralAmplitude: number; spiralFrequency: number },
+  serverData: ProjectileServerData,
   gemConfig: ProjectileGemConfig,
   options: {
     bounceCount: number;
@@ -245,37 +228,41 @@ export function applyGemConfigToProjectile(
   },
 ) {
   const resolvedLifetime = options.lifetime * options.rangeMultiplier;
-  projectile.lifetime = resolvedLifetime;
-  projectile.returning = false;
-  projectile.bouncesRemaining = options.bounceCount;
-  projectile.piercesRemaining = gemConfig.pierceCount;
-  projectile.chainRemaining = gemConfig.chainCount;
-  projectile.damageScale = (options.damageScale ?? 1) * gemConfig.directDamageMultiplier;
-  projectile.maxDistance = options.fireballSpeed * gemConfig.projectileSpeedMultiplier * resolvedLifetime;
-  projectile.sizeScale = options.sizeScale ?? 1;
-  projectile.speed = options.fireballSpeed * gemConfig.projectileSpeedMultiplier;
-  projectile.homingStrength = gemConfig.homingStrength;
-  projectile.splashRadius = gemConfig.splashRadius;
-  projectile.splashDamageScale = gemConfig.splashDamageScale;
-  projectile.knockbackDistance = gemConfig.knockbackDistance;
-  projectile.lifestealRatio = gemConfig.lifestealRatio;
-  projectile.executionThreshold = gemConfig.executionThreshold;
-  projectile.executionDamageMultiplier = gemConfig.executionDamageMultiplier;
-  projectile.criticalChance = gemConfig.criticalChance;
-  projectile.criticalDamageMultiplier = gemConfig.criticalDamageMultiplier;
-  projectile.spiralAmplitude = gemConfig.spiralAmplitude;
-  projectile.spiralFrequency = gemConfig.spiralFrequency;
-  projectile.fork = gemConfig.fork;
-  projectile.forkDamageScale = gemConfig.forkDamageScale;
-  projectile.orbitTimeRemaining = gemConfig.orbitDurationMs;
-  projectile.orbitRadius = gemConfig.orbitRadius;
-  projectile.aftershockDelayMs = gemConfig.aftershockDelayMs;
-  projectile.aftershockDamageScale = gemConfig.aftershockDamageScale;
-  projectile.novaImpactCount = gemConfig.novaImpactCount;
-  projectile.novaImpactDamageScale = gemConfig.novaImpactDamageScale;
-  projectile.cloneOnHit = gemConfig.cloneOnHit;
-  projectile.cloneDamageScale = gemConfig.cloneDamageScale;
-  projectile.selfHitGraceEndsAt = options.now + options.selfHitGraceMs;
+
+  // Schema (client-synced) fields
+  schema.lifetime = resolvedLifetime;
+  schema.returning = false;
+  schema.bouncesRemaining = options.bounceCount;
+  schema.sizeScale = options.sizeScale ?? 1;
+  schema.speed = options.fireballSpeed * gemConfig.projectileSpeedMultiplier;
+  schema.spiralAmplitude = gemConfig.spiralAmplitude;
+  schema.spiralFrequency = gemConfig.spiralFrequency;
+
+  // Server-only combat fields
+  serverData.piercesRemaining = gemConfig.pierceCount;
+  serverData.chainRemaining = gemConfig.chainCount;
+  serverData.damageScale = (options.damageScale ?? 1) * gemConfig.directDamageMultiplier;
+  serverData.maxDistance = options.fireballSpeed * gemConfig.projectileSpeedMultiplier * resolvedLifetime;
+  serverData.homingStrength = gemConfig.homingStrength;
+  serverData.splashRadius = gemConfig.splashRadius;
+  serverData.splashDamageScale = gemConfig.splashDamageScale;
+  serverData.knockbackDistance = gemConfig.knockbackDistance;
+  serverData.lifestealRatio = gemConfig.lifestealRatio;
+  serverData.executionThreshold = gemConfig.executionThreshold;
+  serverData.executionDamageMultiplier = gemConfig.executionDamageMultiplier;
+  serverData.criticalChance = gemConfig.criticalChance;
+  serverData.criticalDamageMultiplier = gemConfig.criticalDamageMultiplier;
+  serverData.fork = gemConfig.fork;
+  serverData.forkDamageScale = gemConfig.forkDamageScale;
+  serverData.orbitTimeRemaining = gemConfig.orbitDurationMs;
+  serverData.orbitRadius = gemConfig.orbitRadius;
+  serverData.aftershockDelayMs = gemConfig.aftershockDelayMs;
+  serverData.aftershockDamageScale = gemConfig.aftershockDamageScale;
+  serverData.novaImpactCount = gemConfig.novaImpactCount;
+  serverData.novaImpactDamageScale = gemConfig.novaImpactDamageScale;
+  serverData.cloneOnHit = gemConfig.cloneOnHit;
+  serverData.cloneDamageScale = gemConfig.cloneDamageScale;
+  serverData.selfHitGraceEndsAt = options.now + options.selfHitGraceMs;
 }
 
 export function advanceProjectilePosition(
@@ -325,15 +312,19 @@ export function advanceProjectilePosition(
   return { continuedOrbit: false, previousX, previousY };
 }
 
-export function buildOnHitProjectileEffects(projectile: MutableProjectile, options: {
-  fireballLifetime: number;
-  fireballShardLifetime: number;
-  shardSkillId: string;
-}) {
+export function buildOnHitProjectileEffects(
+  projectile: { ownerId: string; skillId: string; x: number; y: number; directionX: number; directionY: number },
+  serverData: ProjectileServerData,
+  options: {
+    fireballLifetime: number;
+    fireballShardLifetime: number;
+    shardSkillId: string;
+  },
+) {
   const spawns: ProjectileSpawnRequest[] = [];
   let aftershock: PendingAftershock | null = null;
 
-  if (projectile.fork) {
+  if (serverData.fork) {
     const baseAngle = Math.atan2(projectile.directionY, projectile.directionX);
     for (const offset of [-Math.PI / 6, Math.PI / 6]) {
       const angle = baseAngle + offset;
@@ -345,15 +336,15 @@ export function buildOnHitProjectileEffects(projectile: MutableProjectile, optio
         directionX: Math.cos(angle),
         directionY: Math.sin(angle),
         lifetime: options.fireballLifetime * 0.5,
-        damageScale: projectile.forkDamageScale,
+        damageScale: serverData.forkDamageScale,
         sizeScale: 0.7,
       });
     }
   }
 
-  if (projectile.novaImpactCount > 0) {
-    for (let i = 0; i < projectile.novaImpactCount; i++) {
-      const angle = (Math.PI * 2 * i) / projectile.novaImpactCount;
+  if (serverData.novaImpactCount > 0) {
+    for (let i = 0; i < serverData.novaImpactCount; i++) {
+      const angle = (Math.PI * 2 * i) / serverData.novaImpactCount;
       spawns.push({
         ownerId: projectile.ownerId,
         skillId: options.shardSkillId,
@@ -362,13 +353,13 @@ export function buildOnHitProjectileEffects(projectile: MutableProjectile, optio
         directionX: Math.cos(angle),
         directionY: Math.sin(angle),
         lifetime: options.fireballShardLifetime,
-        damageScale: projectile.novaImpactDamageScale,
+        damageScale: serverData.novaImpactDamageScale,
         sizeScale: 0.5,
       });
     }
   }
 
-  if (projectile.cloneOnHit) {
+  if (serverData.cloneOnHit) {
     spawns.push({
       ownerId: projectile.ownerId,
       skillId: projectile.skillId,
@@ -377,18 +368,18 @@ export function buildOnHitProjectileEffects(projectile: MutableProjectile, optio
       directionX: projectile.directionX,
       directionY: projectile.directionY,
       lifetime: options.fireballLifetime * 0.5,
-      damageScale: projectile.cloneDamageScale,
+      damageScale: serverData.cloneDamageScale,
       sizeScale: 0.8,
     });
   }
 
-  if (projectile.aftershockDelayMs > 0) {
+  if (serverData.aftershockDelayMs > 0) {
     aftershock = {
       ownerId: projectile.ownerId,
       x: projectile.x,
       y: projectile.y,
-      damageScale: projectile.aftershockDamageScale,
-      triggerAt: Date.now() + projectile.aftershockDelayMs,
+      damageScale: serverData.aftershockDamageScale,
+      triggerAt: Date.now() + serverData.aftershockDelayMs,
     };
   }
 

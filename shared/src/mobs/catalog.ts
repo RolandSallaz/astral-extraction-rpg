@@ -1,4 +1,4 @@
-export const MOB_KINDS = ["rat", "bat"] as const;
+export const MOB_KINDS = ["rat", "bat", "skeleton"] as const;
 
 export type MobKind = (typeof MOB_KINDS)[number];
 
@@ -22,10 +22,16 @@ export const MOB_DEFINITIONS: Record<MobKind, MobDefinition> = {
     texture: "bat",
     lootTableId: "mob_bat",
   },
+  skeleton: {
+    kind: "skeleton",
+    name: "Skeleton",
+    texture: "skeleton",
+    lootTableId: "mob_skeleton",
+  },
 };
 
 export function isMobKind(value: string): value is MobKind {
-  return value === "rat" || value === "bat";
+  return MOB_KINDS.includes(value as MobKind);
 }
 
 export function getMobDefinition(kind: MobKind): MobDefinition {

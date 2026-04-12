@@ -127,6 +127,7 @@ services:
       PORT: 5173
       NEXT_PUBLIC_API_URL: http://localhost:3000
       NEXT_PUBLIC_REALTIME_URL: ws://localhost:2567
+      BACKEND_INTERNAL_URL: http://backend:3000
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
     ports:

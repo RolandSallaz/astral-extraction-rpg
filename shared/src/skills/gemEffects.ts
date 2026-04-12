@@ -25,9 +25,6 @@ export const FIRE_FORK_GEM_ID = "fire_fork_gem" as const;
 export const FIRE_ORBIT_GEM_ID = "fire_orbit_gem" as const;
 export const FIRE_AFTERSHOCK_GEM_ID = "fire_aftershock_gem" as const;
 export const FIRE_CLONE_GEM_ID = "fire_clone_gem" as const;
-export const GUARD_GEM_ID = "guard_gem" as const;
-export const FOCUS_GEM_ID = "focus_gem" as const;
-export const VITALITY_GEM_ID = "vitality_gem" as const;
 
 export const FIREBALL_SHARD_SKILL_ID = "fireballShard" as const;
 export const FIREBALL_SPLIT_SKILL_ID = "fireballSplit" as const;
@@ -411,27 +408,6 @@ export const GEM_EFFECT_DESCRIPTORS: Record<GemItemId, ProjectileGemDescriptor> 
       cloneDamageScale: 0.4,
       directDamageMultiplier: 0.8,
       projectileOnly: true,
-    },
-  },
-  guard_gem: {
-    templateData: {
-      kind: "gem",
-      gemType: "armor",
-      effect: "guard",
-    },
-  },
-  focus_gem: {
-    templateData: {
-      kind: "gem",
-      gemType: "armor",
-      effect: "focus",
-    },
-  },
-  vitality_gem: {
-    templateData: {
-      kind: "gem",
-      gemType: "armor",
-      effect: "vitality",
     },
   },
 };

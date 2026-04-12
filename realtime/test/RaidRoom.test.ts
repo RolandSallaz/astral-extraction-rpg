@@ -1,6 +1,6 @@
 import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
-import appConfig from "../src/app.config.js";
+import { createAppConfig } from "../src/app.config.js";
 import { RaidRoomState } from "../src/rooms/schema/RaidRoomState.js";
 import { RaidRoom } from "../src/rooms/RaidRoom.js";
 
@@ -10,10 +10,13 @@ async function waitForNextSimulation(room: { waitForNextPatch: () => Promise<unk
 }
 
 describe("raid room", () => {
-  let colyseus: ColyseusTestServer<typeof appConfig>;
+  let colyseus: ColyseusTestServer<ReturnType<typeof createAppConfig>>;
 
-  before(async () => (colyseus = await boot(appConfig)));
-  after(async () => colyseus.shutdown());
+  before(async () => (colyseus = await boot(createAppConfig())));
+  after(async () => {
+    await colyseus.cleanup();
+    await colyseus.shutdown();
+  });
   beforeEach(async () => await colyseus.cleanup());
 
   it("expires the raid, kills players and notifies the client", async () => {
@@ -70,11 +73,6 @@ describe("raid room", () => {
     const client = await colyseus.connectTo(room, {
       name: "Extract Raider",
       raidRunId: "raid-extract-test",
-      bodyItem: "robe_tunic",
-      headItem: "magic_hat",
-      headGemItem1: "focus_gem",
-      bodyGemItem1: "guard_gem",
-      bodyGemItem2: "vitality_gem",
       weaponItem: "default_staff",
       weaponGemItem1: "fire_trail_gem",
       inventory: ["healing_potion::2", "critical_gem"],
@@ -104,12 +102,7 @@ describe("raid room", () => {
     assert.strictEqual(payload.reason, "extracted");
     assert.strictEqual(payload.exitId, exitId);
     assert.deepStrictEqual(payload.equipment, {
-      head: "magic_hat",
-      body: "robe_tunic",
       weapon: "default_staff",
-      "head-gem-1": "focus_gem",
-      "body-gem-1": "guard_gem",
-      "body-gem-2": "vitality_gem",
       "weapon-gem-1": "fire_trail_gem",
     });
     assert.deepStrictEqual(payload.inventory, [
@@ -164,8 +157,9 @@ describe("raid room", () => {
 
     const tutorialMobs = Array.from(room.state.mobs.values());
     assert.strictEqual(tutorialMobs.length, 1);
-    assert.strictEqual(tutorialMobs[0]?.id, "raid-rat-tutorial");
-    assert.strictEqual(tutorialMobs[0]?.name, "Rat");
+    assert.strictEqual(tutorialMobs[0]?.id, "raid-skeleton-tutorial");
+    assert.strictEqual(tutorialMobs[0]?.kind, "skeleton");
+    assert.strictEqual(tutorialMobs[0]?.name, "Skeleton");
 
     await client.leave();
   });

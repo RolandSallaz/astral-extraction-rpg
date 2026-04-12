@@ -189,11 +189,11 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
   }
 
   protected shouldSpawnStaticMobs() {
-    return this.worldDefinition.hostileMobsEnabled;
+    return this.worldDefinition.hostileMobsEnabled || this.worldDefinition.staticMobs.length > 0;
   }
 
   onCreate() {
-    this.balancePoller.start();
+    this.contentSnapshotPoller.start();
     this.createStaticChests();
     if (this.shouldSpawnStaticMobs()) {
       this.createStaticMobs();
@@ -513,6 +513,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
   private updatePlayers(deltaSeconds: number, tickNow: number) {
     this.removeExpiredOfflinePlayers();
+    // Rebuild mob spatial grid so canPlayerMoveTo uses grid queries instead of O(N)
+    this.rebuildMobSpatialGrid();
 
     for (const [sessionId, player] of this.state.players.entries()) {
       if (player.dead) {
@@ -528,7 +530,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       const nextY = player.y + player.moveY * PLAYER_SPEED * deltaSeconds;
       const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, nextX));
       const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.getMapHeightPx() - TILE_SIZE / 2, nextY));
-      if (this.canPlayerMoveTo(clampedX, clampedY)) {
+      if (this.canPlayerMoveTo(clampedX, clampedY, player)) {
         player.x = clampedX;
         player.y = clampedY;
       }
@@ -538,17 +540,11 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       }
     }
 
-    this.updatePendingCasts(tickNow);
-    this.updatePendingBurstSpawns(tickNow);
-    this.updatePendingAftershocks(tickNow);
-    this.updateBurningTargets(tickNow);
-    this.updateHealingTargets(tickNow);
-    this.updateGroundEffects(tickNow);
     this.updateMobs(deltaSeconds, tickNow);
-    this.updateProjectilesShared(deltaSeconds, tickNow);
+    this.sharedCombatTickSystem.update(deltaSeconds, tickNow);
   }
 
-  private canPlayerMoveTo(x: number, y: number) {
+  private canPlayerMoveTo(x: number, y: number, player?: PlayerState) {
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, x));
     const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.getMapHeightPx() - TILE_SIZE / 2, y));
     const tileX = Math.floor(clampedX / TILE_SIZE);
@@ -558,13 +554,21 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       return false;
     }
 
-    for (const mob of this.state.mobs.values()) {
-      if (mob.dead) {
-        continue;
-      }
+    const nearbyMobs = this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS);
+    if (nearbyMobs.length > 0) {
+      for (const mob of nearbyMobs) {
+        if (!player) {
+          return false;
+        }
 
-      if (Math.hypot(mob.x - clampedX, mob.y - clampedY) < PLAYER_MOB_COLLISION_RADIUS) {
-        return false;
+        const currentDistance = Math.hypot(player.x - mob.x, player.y - mob.y);
+        const nextDistance = Math.hypot(clampedX - mob.x, clampedY - mob.y);
+        const isAlreadyOverlapping = currentDistance < PLAYER_MOB_COLLISION_RADIUS;
+        const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
+
+        if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
+          return false;
+        }
       }
     }
 

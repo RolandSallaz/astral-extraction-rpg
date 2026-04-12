@@ -1,7 +1,12 @@
 import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
-import appConfig from "../src/app.config.js";
+import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
+import { MobState } from "../src/rooms/schema/MobState.js";
+import {
+  SKELETON_DASH_SKILL,
+  SKELETON_DASH_SKILL_ID,
+} from "@mmorpg/shared/mobs/skills";
 
 const RAT_ID = "rat-scout";
 const BAT_ID = "bat-stalker";
@@ -11,20 +16,102 @@ async function waitForNextSimulation(room: { waitForNextPatch: () => Promise<unk
   await room.waitForNextPatch();
 }
 
-async function spawnStaticWorldMobsForTest(room: { waitForNextPatch: () => Promise<unknown> }) {
-  (
-    room as unknown as {
-      createStaticMobs: () => void;
-    }
-  ).createStaticMobs();
+async function spawnStaticWorldMobsForTest(room: {
+  waitForNextPatch: () => Promise<unknown>;
+  state: MyRoomState;
+}) {
+  room.state.mobs.set(RAT_ID, createTestRat(RAT_ID, 20 * 32 + 16, 14 * 32 + 16));
+  room.state.mobs.set(BAT_ID, createTestBat(BAT_ID, 22 * 32 + 16, 14 * 32 + 16));
   await room.waitForNextPatch();
 }
 
-describe("world room", () => {
-  let colyseus: ColyseusTestServer<typeof appConfig>;
+function createTestRat(id: string, x: number, y: number) {
+  const rat = new MobState();
+  rat.id = id;
+  rat.kind = "rat";
+  rat.texture = "rat";
+  rat.name = "Rat";
+  rat.x = x;
+  rat.y = y;
+  rat.targetX = x;
+  rat.targetY = y;
+  rat.spawnX = x;
+  rat.spawnY = y;
+  rat.patrolMinX = x - 32;
+  rat.patrolMaxX = x + 32;
+  rat.patrolY = y;
+  rat.moveSpeed = 64;
+  rat.aggroRange = 999;
+  rat.leashRange = 224;
+  rat.attackRange = 24;
+  rat.attackDamage = 6;
+  rat.attackCooldownMs = 900;
+  rat.health = 38;
+  rat.maxHealth = 38;
+  rat.experienceReward = 18;
+  return rat;
+}
 
-  before(async () => (colyseus = await boot(appConfig)));
-  after(async () => colyseus.shutdown());
+function createTestBat(id: string, x: number, y: number) {
+  const bat = new MobState();
+  bat.id = id;
+  bat.kind = "bat";
+  bat.texture = "bat";
+  bat.name = "Bat";
+  bat.x = x;
+  bat.y = y;
+  bat.targetX = x;
+  bat.targetY = y;
+  bat.spawnX = x;
+  bat.spawnY = y;
+  bat.patrolMinX = x - 32;
+  bat.patrolMaxX = x + 32;
+  bat.patrolY = y;
+  bat.patrolRadiusY = 24;
+  bat.moveSpeed = 72;
+  bat.aggroRange = 999;
+  bat.leashRange = 224;
+  bat.attackRange = 24;
+  bat.attackDamage = 7;
+  bat.attackCooldownMs = 800;
+  bat.health = 34;
+  bat.maxHealth = 34;
+  bat.experienceReward = 22;
+  return bat;
+}
+
+function createTestSkeleton(id: string, x: number, y: number) {
+  const skeleton = new MobState();
+  skeleton.id = id;
+  skeleton.kind = "skeleton";
+  skeleton.texture = "skeleton";
+  skeleton.name = "Skeleton";
+  skeleton.x = x;
+  skeleton.y = y;
+  skeleton.targetX = x;
+  skeleton.targetY = y;
+  skeleton.spawnX = x;
+  skeleton.spawnY = y;
+  skeleton.moveSpeed = 58;
+  skeleton.aggroRange = 999;
+  skeleton.leashRange = 240;
+  skeleton.attackRange = 28;
+  skeleton.attackDamage = 0;
+  skeleton.attackCooldownMs = 1100;
+  skeleton.health = 52;
+  skeleton.maxHealth = 52;
+  skeleton.experienceReward = 36;
+  return skeleton;
+}
+
+describe("world room", () => {
+  let colyseus: ColyseusTestServer<ReturnType<typeof createAppConfig>>;
+
+  before(async () => (colyseus = await boot(createAppConfig())));
+  after(async () => {
+    await colyseus.cleanup();
+    await colyseus.shutdown();
+  });
   beforeEach(async () => await colyseus.cleanup());
 
   it("puts multiple players into one shared world and syncs movement", async () => {
@@ -32,8 +119,6 @@ describe("world room", () => {
 
     const client1 = await colyseus.connectTo(room, {
       name: "Mage One",
-      bodyItem: "robe_tunic",
-      headItem: "magic_hat",
     });
     const client2 = await colyseus.connectTo(room, {
       name: "Mage Two",
@@ -47,8 +132,6 @@ describe("world room", () => {
     const localPlayer = room.state.players.get(client1.sessionId);
     assert.ok(localPlayer);
     assert.strictEqual(localPlayer?.name, "Mage One");
-    assert.strictEqual(localPlayer?.bodyItem, "robe_tunic");
-    assert.strictEqual(localPlayer?.headItem, "magic_hat");
 
     const startX = localPlayer?.x ?? 0;
     client1.send("move", { x: 1, y: 0 });
@@ -61,7 +144,7 @@ describe("world room", () => {
     assert.ok((movedPlayer?.x ?? 0) > startX);
   });
 
-  it("does not spawn static enemies in the world lobby", async () => {
+  it("loads configured static skeletons in the world lobby without legacy rat or bat ids", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", { worldOwner: "tester" });
     await colyseus.connectTo(room, {
       worldOwner: "tester",
@@ -74,7 +157,8 @@ describe("world room", () => {
     const bat = room.state.mobs.get(BAT_ID);
     assert.strictEqual(rat, undefined);
     assert.strictEqual(bat, undefined);
-    assert.strictEqual(room.state.mobs.size, 0);
+    assert.strictEqual(room.state.mobs.size, 1);
+    assert.strictEqual([...room.state.mobs.values()][0]?.kind, "skeleton");
   });
 
   it("spawns a rat mob with balance-driven health and patrol movement", async () => {
@@ -134,6 +218,100 @@ describe("world room", () => {
     assert.strictEqual(updatedRat?.aggroTargetId, client.sessionId);
     assert.ok((updatedRat?.x ?? startingRatX) > startingRatX);
     assert.ok((updatedPlayer?.health ?? startingHealth) < startingHealth);
+  });
+
+  it("starts a skeleton dash skill cast with a visible cast window and a 2s cooldown", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const client = await colyseus.connectTo(room, {
+      name: "Dash Target",
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    if (!player) {
+      assert.fail("Expected player to exist");
+    }
+
+    const skeleton = createTestSkeleton("test-skeleton-cast", 300, 300);
+    room.state.mobs.set(skeleton.id, skeleton);
+    player.x = skeleton.x + 96;
+    player.y = skeleton.y;
+    const startingHealth = player.health;
+
+    await waitForNextSimulation(room, 180);
+
+    assert.strictEqual(skeleton.castingSkillId, SKELETON_DASH_SKILL_ID);
+    assert.strictEqual(skeleton.castEndsAt - skeleton.castStartedAt, SKELETON_DASH_SKILL.castMs);
+    assert.strictEqual(
+      skeleton.attackCooldownEndsAt - skeleton.castStartedAt,
+      SKELETON_DASH_SKILL.cooldownMs,
+    );
+    assert.strictEqual(player.health, startingHealth);
+    assert.strictEqual(skeleton.skillLungeStartedAt, 0);
+  });
+
+  it("keeps skeletons from using generic melee while dash is on cooldown", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const client = await colyseus.connectTo(room, {
+      name: "Melee Immune Target",
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    if (!player) {
+      assert.fail("Expected player to exist");
+    }
+
+    const skeleton = createTestSkeleton("test-skeleton-cooldown", 360, 300);
+    skeleton.attackCooldownEndsAt = Date.now() + 2000;
+    room.state.mobs.set(skeleton.id, skeleton);
+    player.x = skeleton.x + 8;
+    player.y = skeleton.y;
+    const startingHealth = player.health;
+
+    await waitForNextSimulation(room, 520);
+
+    assert.strictEqual(skeleton.castingSkillId, "");
+    assert.strictEqual(player.health, startingHealth);
+  });
+
+  it("stops a skeleton dash skill lunge at the collision edge and deals 35 damage once", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const client = await colyseus.connectTo(room, {
+      name: "Collision Target",
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    if (!player) {
+      assert.fail("Expected player to exist");
+    }
+
+    const skeleton = createTestSkeleton("test-skeleton-lunge", 300, 300);
+    room.state.mobs.set(skeleton.id, skeleton);
+    player.x = skeleton.x + 96;
+    player.y = skeleton.y;
+    const startingHealth = player.health;
+
+    await waitForNextSimulation(room, 1450);
+
+    assert.strictEqual(skeleton.castingSkillId, "");
+    assert.strictEqual(startingHealth - player.health, SKELETON_DASH_SKILL.damage);
+    assert.ok(skeleton.x < player.x);
+    assert.ok(Math.hypot(player.x - skeleton.x, player.y - skeleton.y) >= 20);
+
+    const healthAfterDash = player.health;
+    await waitForNextSimulation(room, 280);
+    assert.strictEqual(player.health, healthAfterDash);
   });
 
   it("rejects fireball casts without the required weapon", async () => {

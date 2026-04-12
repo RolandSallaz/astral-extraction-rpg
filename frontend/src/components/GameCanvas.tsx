@@ -2,7 +2,13 @@
 
 import { useEffect, useRef } from 'react';
 import type { Room } from '@colyseus/sdk';
+import { COMMON_DEATH_ANIMATION } from '@mmorpg/shared';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import {
+  DEFAULT_PLAYER_VISUALS,
+  type PlayerAnimationState,
+  type PlayerEyeLookDirection,
+} from '@mmorpg/shared/player/visuals';
 import type {
   AdminUpdateMobBalanceMessage,
   AdminUpdateSkillBalanceMessage,
@@ -26,16 +32,19 @@ import type {
   WorldRoomJoinOptions,
 } from '@mmorpg/shared/realtime/contracts';
 import { FIREBALL_BASE_CAST_TIME_MS } from '@mmorpg/shared/skills/fireball';
+import { SKELETON_DASH_SKILL_ID } from '@mmorpg/shared/mobs/skills';
 import {
   createDefaultMeadowMapAsset,
   createMeadowDecorations,
   createMeadowDecorationsFromAsset,
   createMeadowMap,
   createMeadowMapFromAsset,
+  createMeadowMobsFromAsset,
   createMeadowStampsFromAsset,
   createMeadowTradersFromAsset,
   isBlockedMeadowTile,
   type MeadowMapAsset,
+  type MeadowMobAsset,
   type MeadowOverlayAsset,
   type MeadowTile,
   type MeadowTraderAsset,
@@ -48,6 +57,7 @@ import {
   type EquippableItemId,
   type EquipmentItemId,
 } from '@/lib/items/equipmentItems';
+import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
 import {
   DEFAULT_SKILL_EFFECT_OVERRIDES,
   type SkillEffectConfig,
@@ -62,20 +72,105 @@ import {
   DEFAULT_MOB_BALANCE_CONFIG,
   type MobBalanceConfig,
 } from '@/lib/mobBalance';
+import {
+  createDefaultMobVisualConfig,
+  type MobAnimationState,
+  type MobAnimationClipDefinition,
+  type MobVisualConfig,
+} from '@mmorpg/shared/mobs/visuals';
+import type { MobKind } from '@mmorpg/shared/mobs/catalog';
+import {
+  getAnimationFrameAtState,
+  isDeathAnimationComplete,
+  syncAnimationState,
+  syncDeathState,
+} from '@/lib/animations/entities';
+import {
+  getSpriteSheetAnimationDurationMs,
+  getSpriteSheetAnimationFrame,
+  getSpriteSheetAnimationFrameOffset,
+  loadSpriteSheetAnimation,
+  resolveSpriteSheetAnimationColumns,
+  type SpriteSheetAnimation,
+} from '@/lib/animations/runtime';
 
 type PhaserGame = import('phaser').Game;
 type PhaserImage = Phaser.GameObjects.Image;
-type SheetAnimation = {
+const PLAYER_BODY_TEXTURE_KEY = DEFAULT_PLAYER_VISUALS.body.key;
+const PLAYER_HEAD_TEXTURE_KEY = DEFAULT_PLAYER_VISUALS.head.key;
+const PLAYER_BODY_DEFAULT_FRAME = DEFAULT_PLAYER_VISUALS.body.defaultFrame;
+const PLAYER_HEAD_DEFAULT_FRAME = DEFAULT_PLAYER_VISUALS.head.defaultFrame;
+const PLAYER_HANDS_TEXTURE_KEY = 'player-hands';
+const PLAYER_HANDS_TEXTURE_PATH = '/character/character_hand.png';
+const PLAYER_HANDS_FRAME_WIDTH = 4;
+const PLAYER_HANDS_FRAME_HEIGHT = 4;
+const PLAYER_HANDS_DEFAULT_FRAME = 0;
+const PLAYER_HAND_BASE_OFFSETS = {
+  right: { x: 1, y: 11 },
+  left: { x: 11, y: 11 },
+};
+const TRADER_BODY_TEXTURE_KEY = 'body-torso-8x8';
+const TRADER_HEAD_TEXTURE_KEY = 'body-head-8x8';
+type SheetAnimation = SpriteSheetAnimation & {
   skillId?: SkillEffectId;
-  textureKey: string;
-  texturePath: string;
-  frameWidth: number;
-  frameHeight: number;
-  startFrame: number;
-  startRowFrames: number;
-  frameCount: number;
-  fps: number;
-  columns: number;
+};
+
+type PlayerSheetAnimation = SheetAnimation & {
+  headOffsetYFrames?: number[];
+};
+
+type HandAnimationOffsets = {
+  leftX: number[];
+  leftY: number[];
+  rightX: number[];
+  rightY: number[];
+};
+
+const PLAYER_ANIMATIONS: Partial<Record<PlayerAnimationState, PlayerSheetAnimation>> =
+  Object.fromEntries(
+    Object.entries(DEFAULT_PLAYER_VISUALS.animations).map(([state, clip]) => [
+      state,
+      {
+        textureKey: clip.textureKey,
+        texturePath: clip.texturePath,
+        frameWidth: clip.frameWidth,
+        frameHeight: clip.frameHeight,
+        startFrame: clip.startFrame,
+        startRowFrames: 0,
+        frameCount: clip.frameCount,
+        fps: 1000 / clip.frameMs,
+        columns: 1,
+        loop: clip.loop,
+        headOffsetYFrames: clip.headOffsetYFrames,
+      },
+    ]),
+  ) as Partial<Record<PlayerAnimationState, PlayerSheetAnimation>>;
+const PLAYER_EYE_COLOR = Number.parseInt(DEFAULT_PLAYER_VISUALS.eyes.color.replace('#', ''), 16);
+const PLAYER_HAND_ANIMATION_OFFSETS: Partial<Record<PlayerAnimationState, HandAnimationOffsets>> = {
+  idle: {
+    leftX: [0, 0, -1, 0],
+    leftY: [-1, 0, 1, 0],
+    rightX: [0, 0, 1, 0],
+    rightY: [-1, 0, 1, 0],
+  },
+  move: {
+    leftX: [0, -2, 0, 2],
+    leftY: [0, 0, -1, 0],
+    rightX: [0, 2, 0, -2],
+    rightY: [0, -1, 0, -1],
+  },
+};
+const SHARED_DEATH_ANIMATION: SheetAnimation = {
+  textureKey: COMMON_DEATH_ANIMATION.textureKey,
+  texturePath: COMMON_DEATH_ANIMATION.texturePath,
+  frameWidth: COMMON_DEATH_ANIMATION.frameWidth,
+  frameHeight: COMMON_DEATH_ANIMATION.frameHeight,
+  startFrame: COMMON_DEATH_ANIMATION.startFrame,
+  startRowFrames: 0,
+  frameCount: COMMON_DEATH_ANIMATION.frameCount,
+  fps: 1000 / COMMON_DEATH_ANIMATION.frameMs,
+  columns: 1,
+  loop: COMMON_DEATH_ANIMATION.loop,
 };
 
 type MovementBlocker = {
@@ -203,6 +298,13 @@ type NetworkMobState = {
   maxHealth: number;
   burnTicksRemaining: number;
   burnEndsAt: number;
+  castingSkillId: string;
+  castStartedAt: number;
+  castEndsAt: number;
+  skillLungeStartedAt: number;
+  skillLungeEndsAt: number;
+  attackCooldownMs: number;
+  attackCooldownEndsAt: number;
   dead: boolean;
 };
 
@@ -250,12 +352,27 @@ type CharacterStatusIconVisual = {
 type WorldTraderVisual = {
   shadow: Phaser.GameObjects.Ellipse;
   container: Phaser.GameObjects.Container;
-  bodyBase: Phaser.GameObjects.Image;
-  bodyLayer: Phaser.GameObjects.Image;
-  headBase: Phaser.GameObjects.Image;
-  headLayer: Phaser.GameObjects.Image;
+  actor?: Phaser.GameObjects.GameObject;
+  body?: PhaserImage;
+  bodyOverlay?: PhaserImage;
+  bodyOverlayAnimation?: PlayerSheetAnimation;
+  head?: PhaserImage;
+  rightHand?: PhaserImage;
+  leftHand?: PhaserImage;
+  hairOverlay?: PhaserImage;
+  headOverlay?: PhaserImage;
+  leftEye?: Phaser.GameObjects.Rectangle;
+  rightEye?: Phaser.GameObjects.Rectangle;
+  animationStartedAt?: number;
   nameplate: Phaser.GameObjects.Text;
   questMarker: Phaser.GameObjects.Text;
+};
+
+type WorldMobVisual = {
+  kind: MobKind;
+  shadow: Phaser.GameObjects.Ellipse;
+  sprite: Phaser.GameObjects.Image;
+  nameplate: Phaser.GameObjects.Text;
 };
 
 type ObjectiveTarget = {
@@ -345,12 +462,16 @@ type MobVisual = {
   shadow: Phaser.GameObjects.Ellipse;
   burnAura: Phaser.GameObjects.Ellipse;
   sprite: Phaser.GameObjects.Image;
+  deathEffect: PhaserImage;
   burnEffect: PhaserImage;
   burnStatusIcon: CharacterStatusIconVisual;
   nameplate: Phaser.GameObjects.Text;
   healthBarFrame: Phaser.GameObjects.Rectangle;
   healthBarBack: Phaser.GameObjects.Rectangle;
   healthBarFill: Phaser.GameObjects.Rectangle;
+  castBarFrame: Phaser.GameObjects.Rectangle;
+  castBarBack: Phaser.GameObjects.Rectangle;
+  castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
   targetX: number;
@@ -363,6 +484,7 @@ type MobVisual = {
   burnScale: number;
   baseTexture: string;
   currentTexture: string;
+  currentFrame?: number;
   currentName: string;
   currentHealth: number;
   currentMaxHealth: number;
@@ -370,6 +492,18 @@ type MobVisual = {
   currentBurnEndsAt: number;
   currentBurnStartedAt: number;
   currentBurnDurationMs: number;
+  currentAttackCooldownEndsAt: number;
+  currentAttackCooldownMs: number;
+  currentCastingSkillId: string;
+  currentCastStartedAt: number;
+  currentCastEndsAt: number;
+  currentSkillLungeStartedAt: number;
+  currentSkillLungeEndsAt: number;
+  lastMovedAt: number;
+  currentAnimationState: MobAnimationState;
+  animationStartedAt: number;
+  deathStartedAt: number;
+  isDead: boolean;
   isVisible?: boolean;
 };
 
@@ -377,8 +511,10 @@ type CharacterVisual = {
   shadow: Phaser.GameObjects.Ellipse;
   burnAura: Phaser.GameObjects.Ellipse;
   container: Phaser.GameObjects.Container;
+  deathEffect: PhaserImage;
   body: PhaserImage;
-  bodyItem: PhaserImage;
+  rightHand: PhaserImage;
+  leftHand: PhaserImage;
   weaponItem: PhaserImage;
   castItem: PhaserImage;
   burnEffect: PhaserImage;
@@ -391,7 +527,8 @@ type CharacterVisual = {
     animation?: SheetAnimation;
   }>;
   head: PhaserImage;
-  headItem: PhaserImage;
+  leftEye: Phaser.GameObjects.Rectangle;
+  rightEye: Phaser.GameObjects.Rectangle;
   nameplate: Phaser.GameObjects.Text;
   burnStatusIcon: CharacterStatusIconVisual;
   healingStatusIcon: CharacterStatusIconVisual;
@@ -413,14 +550,13 @@ type CharacterVisual = {
   currentName: string;
   currentHealth: number;
   currentMaxHealth: number;
-  currentBodyOffsetX: number;
-  currentBodyOffsetY: number;
-  currentHeadOffsetX: number;
-  currentHeadOffsetY: number;
+  currentAnimationState: PlayerAnimationState;
+  animationStartedAt: number;
+  lastMovedAt: number;
   currentWeaponOffsetX: number;
   currentWeaponOffsetY: number;
-  currentBodyItem?: EquipmentItemId;
-  currentHeadItem?: EquipmentItemId;
+  currentBodyTextureKey?: string;
+  currentBodyFrame?: number;
   currentWeaponItem?: EquipmentItemId;
   currentCastItemId?: ConsumableItemId;
   isFollowTarget: boolean;
@@ -435,12 +571,23 @@ type CharacterVisual = {
   currentCastingSkillId: string;
   currentCastStartedAt: number;
   currentCastEndsAt: number;
+  deathStartedAt: number;
+  interpPrevX: number;
+  interpPrevY: number;
+  interpPrevAt: number;
+  interpNextX: number;
+  interpNextY: number;
+  interpNextAt: number;
+  simPrevX: number;
+  simPrevY: number;
+  simX: number;
+  simY: number;
+  idleGraceUntil: number;
+  isDead: boolean;
   isVisible?: boolean;
 };
 
 type PlayerVisualRefs = {
-  bodyItem: PhaserImage;
-  headItem: PhaserImage;
   weaponItem: PhaserImage;
 };
 
@@ -601,24 +748,101 @@ function resolveCryptTexture(tile: string) {
   }
 }
 
-function loadSheetAnimation(scene: Phaser.Scene, animation: SheetAnimation) {
-  if (scene.textures.exists(animation.textureKey)) {
-    return;
+function getPlayerHeadOffsetY(
+  animation: PlayerSheetAnimation | undefined,
+  animationStartedAt: number,
+  now: number,
+  worldPixelSize: number,
+) {
+  if (!animation?.headOffsetYFrames || animation.headOffsetYFrames.length === 0) {
+    return 0;
   }
 
-  scene.load.spritesheet(animation.textureKey, animation.texturePath, {
-    frameWidth: animation.frameWidth,
-    frameHeight: animation.frameHeight,
-  });
+  const frameOffset = getSpriteSheetAnimationFrameOffset(animation, Math.max(0, now - animationStartedAt));
+  const offsetPixels =
+    animation.headOffsetYFrames[frameOffset % animation.headOffsetYFrames.length] ?? 0;
+  return offsetPixels * worldPixelSize;
 }
 
-function getAnimationFrame(animation: SheetAnimation, timeMs: number, phaseOffsetMs = 0) {
-  const frameDurationMs = 1000 / Math.max(1, animation.fps);
-  return (
-    animation.startRowFrames * animation.columns +
-    animation.startFrame +
-    (Math.floor((timeMs + phaseOffsetMs) / frameDurationMs) % animation.frameCount)
-  );
+function getVisualPixelSize(
+  visual: Pick<typeof DEFAULT_PLAYER_VISUALS.body, 'frameWidth' | 'displayScale'>,
+  tileSize: number,
+) {
+  const frameWidth = visual.frameWidth ?? 16;
+  const rawPixelSize = (tileSize * visual.displayScale) / Math.max(1, frameWidth);
+  return Math.max(1, Math.round(rawPixelSize));
+}
+
+function getVisualDisplaySize(
+  visual: Pick<typeof DEFAULT_PLAYER_VISUALS.body, 'frameWidth' | 'frameHeight' | 'displayScale'>,
+  tileSize: number,
+) {
+  const pixelSize = getVisualPixelSize(visual, tileSize);
+  const frameWidth = visual.frameWidth ?? 16;
+  const frameHeight = visual.frameHeight ?? 16;
+  return {
+    width: frameWidth * pixelSize,
+    height: frameHeight * pixelSize,
+  };
+}
+
+function getEyeLookDirection(targetY: number | null | undefined, sourceY: number): PlayerEyeLookDirection {
+  if (typeof targetY !== 'number' || !Number.isFinite(targetY)) {
+    return 'down';
+  }
+
+  return targetY < sourceY ? 'up' : 'down';
+}
+
+function getEyeLocalPosition(
+  direction: PlayerEyeLookDirection,
+  side: 'left' | 'right',
+  tileSize: number,
+) {
+  const pixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, tileSize);
+  const frameWidth = DEFAULT_PLAYER_VISUALS.head.frameWidth ?? 16;
+  const frameHeight = DEFAULT_PLAYER_VISUALS.head.frameHeight ?? 16;
+  const eye = DEFAULT_PLAYER_VISUALS.eyes.positions[direction][side];
+
+  return {
+    x: DEFAULT_PLAYER_VISUALS.head.offsetX + (eye.x + 0.5 - frameWidth / 2) * pixelSize,
+    y: DEFAULT_PLAYER_VISUALS.head.offsetY + (eye.y + 0.5 - frameHeight / 2) * pixelSize,
+  };
+}
+
+function getHandLocalPosition(
+  base: { x: number; y: number },
+  offset: { x: number; y: number },
+  tileSize: number,
+) {
+  const pixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+  const frameWidth = PLAYER_HANDS_FRAME_WIDTH;
+  const frameHeight = PLAYER_HANDS_FRAME_HEIGHT;
+  const bodyFrameWidth = DEFAULT_PLAYER_VISUALS.body.frameWidth ?? 16;
+  const bodyFrameHeight = DEFAULT_PLAYER_VISUALS.body.frameHeight ?? 16;
+  const centerX = base.x + offset.x + frameWidth / 2;
+  const centerY = base.y + offset.y + frameHeight / 2;
+
+  return {
+    x: DEFAULT_PLAYER_VISUALS.body.offsetX + (centerX - bodyFrameWidth / 2) * pixelSize,
+    y: DEFAULT_PLAYER_VISUALS.body.offsetY + (centerY - bodyFrameHeight / 2) * pixelSize,
+  };
+}
+
+function getHandDisplaySize(tileSize: number) {
+  const pixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+  return {
+    width: PLAYER_HANDS_FRAME_WIDTH * pixelSize,
+    height: PLAYER_HANDS_FRAME_HEIGHT * pixelSize,
+  };
+}
+
+function getSharedDeathAnimationScale(tileSize: number) {
+  return getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+}
+
+function getMobDeathAnimationCenterY(mob: Pick<MobVisual, 'sprite'>) {
+  return mob.sprite.y + (0.5 - mob.sprite.originY) * mob.sprite.displayHeight;
 }
 
 function createSkillAnimation(skillId: SkillEffectId, config: SkillEffectConfig): SheetAnimation {
@@ -633,14 +857,8 @@ function createSkillAnimation(skillId: SkillEffectId, config: SkillEffectConfig)
     frameCount: config.frameCount,
     fps: config.fps,
     columns: 1,
+    loop: true,
   };
-}
-
-function resolveAnimationColumns(scene: Phaser.Scene, animation: SheetAnimation) {
-  const texture = scene.textures.get(animation.textureKey);
-  const source = texture?.getSourceImage() as { width?: number } | undefined;
-  const width = typeof source?.width === 'number' ? source.width : animation.frameWidth;
-  animation.columns = Math.max(1, Math.floor(width / animation.frameWidth));
 }
 
 function canMoveToWorldPosition(
@@ -980,13 +1198,7 @@ function applyEquipmentToVisual(
       baseAlpha: number;
       animation?: SheetAnimation;
     }>;
-    currentBodyItem?: EquipmentItemId;
-    currentHeadItem?: EquipmentItemId;
     currentWeaponItem?: EquipmentItemId;
-    currentBodyOffsetX: number;
-    currentBodyOffsetY: number;
-    currentHeadOffsetX: number;
-    currentHeadOffsetY: number;
     currentWeaponOffsetX: number;
     currentWeaponOffsetY: number;
   }) | null,
@@ -996,42 +1208,8 @@ function applyEquipmentToVisual(
     return;
   }
 
-  const bodyItemId = equipment.body;
-  const headItemId = equipment.head;
   const weaponItemId = equipment.weapon;
-  const bodyItem = bodyItemId ? EQUIPMENT_ITEMS[bodyItemId] : undefined;
-  const headItem = headItemId ? EQUIPMENT_ITEMS[headItemId] : undefined;
   const weaponItem = weaponItemId ? EQUIPMENT_ITEMS[weaponItemId] : undefined;
-
-  if (bodyItemId !== visual.currentBodyItem) {
-    if (bodyItemId) {
-      visual.bodyItem.setTexture(bodyItem!.textureKey);
-      visual.bodyItem.setVisible(true);
-    } else {
-      visual.bodyItem.setVisible(false);
-    }
-    visual.currentBodyItem = bodyItemId;
-  } else if (bodyItemId) {
-    visual.bodyItem.setTexture(bodyItem!.textureKey);
-    visual.bodyItem.setVisible(true);
-  }
-  visual.currentBodyOffsetX = bodyItem?.equippedOffsetX ?? 0;
-  visual.currentBodyOffsetY = bodyItem?.equippedOffsetY ?? 0;
-
-  if (headItemId !== visual.currentHeadItem) {
-    if (headItemId) {
-      visual.headItem.setTexture(headItem!.textureKey);
-      visual.headItem.setVisible(true);
-    } else {
-      visual.headItem.setVisible(false);
-    }
-    visual.currentHeadItem = headItemId;
-  } else if (headItemId) {
-    visual.headItem.setTexture(headItem!.textureKey);
-    visual.headItem.setVisible(true);
-  }
-  visual.currentHeadOffsetX = headItem?.equippedOffsetX ?? 0;
-  visual.currentHeadOffsetY = headItem?.equippedOffsetY ?? 0;
 
   if (weaponItemId !== visual.currentWeaponItem) {
     visual.weaponEffects.forEach(({ image, aura }) => {
@@ -1080,6 +1258,7 @@ function applyEquipmentToVisual(
                 frameCount: effect.frameCount,
                 fps: 1000 / effect.frameDurationMs,
                 columns: 1,
+                loop: true,
               }
               : undefined,
         });
@@ -1343,18 +1522,6 @@ function getCharacterCastTimeMs(equipment: PlayerEquipment) {
     castTimeMs *= 0.65;
   }
 
-  const focusGemCount = [
-    equipment['head-gem-1'],
-    equipment['head-gem-2'],
-    equipment['head-gem-3'],
-    equipment['body-gem-1'],
-    equipment['body-gem-2'],
-    equipment['body-gem-3'],
-  ].filter((gemId) => gemId === 'focus_gem').length;
-  if (focusGemCount > 0) {
-    castTimeMs *= Math.pow(0.9, focusGemCount);
-  }
-
   if (
     equipment['weapon-gem-1'] === 'fire_burst_gem' ||
     equipment['weapon-gem-2'] === 'fire_burst_gem' ||
@@ -1489,6 +1656,10 @@ async function loadWorldMapAsset(): Promise<MeadowMapAsset> {
 }
 
 function getMobRenderScale(texture: string) {
+  if (texture === 'skeleton') {
+    return SKELETON_RENDER_SCALE;
+  }
+
   if (texture === 'skeleton-npc-16x16') {
     return SKELETON_RENDER_SCALE;
   }
@@ -1511,6 +1682,62 @@ function getAnimatedMobTexture(texture: string, timeMs: number) {
   }
 
   return texture;
+}
+
+function getMobClipTextureKey(spritesheet: string) {
+  return `mob-clip:${encodeURIComponent(spritesheet)}`;
+}
+
+function getMobVisualKind(texture: string) {
+  return texture === 'bat' || texture === 'rat' || texture === 'skeleton' ? texture : null;
+}
+
+function toRuntimeAnimationFromMobClip(clip: MobAnimationClipDefinition): SheetAnimation {
+  return {
+    textureKey: getMobClipTextureKey(clip.spritesheet),
+    texturePath: clip.spritesheet,
+    frameWidth: clip.frameWidth,
+    frameHeight: clip.frameHeight,
+    startFrame: clip.startFrame,
+    startRowFrames: 0,
+    frameCount: Math.max(1, clip.endFrame - clip.startFrame + 1),
+    fps: Math.max(1, clip.frameRate),
+    columns: Math.max(1, clip.columns),
+    loop: clip.repeat !== 0,
+  };
+}
+
+function getWorldTraderSpriteSheetKey(texturePath: string) {
+  return `world-trader-sheet:${texturePath}`;
+}
+
+function getWorldTraderBodyOverlayTextureKey(texturePath: string) {
+  return `world-trader-body-overlay:${encodeURIComponent(texturePath)}`;
+}
+
+function isAnimatedWorldTraderBodyOverlay(texturePath: string | undefined) {
+  return typeof texturePath === 'string' && /^\/character\/equipment\/.+_idle\.(png|jpg|jpeg|webp|gif)$/i.test(texturePath);
+}
+
+function getWorldTraderBodyOverlayAnimation(texturePath: string | undefined): PlayerSheetAnimation | null {
+  if (!texturePath || !isAnimatedWorldTraderBodyOverlay(texturePath)) {
+    return null;
+  }
+
+  const idleAnimation = PLAYER_ANIMATIONS.idle;
+  if (!idleAnimation) {
+    return null;
+  }
+
+  return {
+    ...idleAnimation,
+    textureKey: getWorldTraderBodyOverlayTextureKey(texturePath),
+    texturePath,
+  };
+}
+
+function getWorldTraderAnimationKey(traderId: string) {
+  return `world-trader-anim:${traderId}`;
 }
 
 function getProjectileAnimation(
@@ -1607,6 +1834,7 @@ export function GameCanvas({
   onSkillBalanceConfigChange,
   mobBalanceConfig = DEFAULT_MOB_BALANCE_CONFIG,
   onMobBalanceConfigChange,
+  mobVisualConfig = createDefaultMobVisualConfig(),
   keyboardInputEnabled = true,
   activeRoomName = 'world',
   activeRoomOptions,
@@ -1616,7 +1844,8 @@ export function GameCanvas({
   selectedWorldTile = 'grassGround',
   selectedWorldOverlay = { texture: 'ground-grass-edge-8x8', rotation: 0, flipX: false },
   selectedWorldSprite = { texturePath: '', rotation: 0, flipX: false, scale: 1 },
-  selectedWorldTrader = { name: 'Trader', bodyTexturePath: '', headTexturePath: '' },
+  selectedWorldMob = { kind: 'rat' },
+  selectedWorldTrader = { bodyItemId: '', headItemId: '', hairTexturePath: '', hairOffsetX: 0, hairOffsetY: 0 },
   onWorldEditPaint,
   onWorldEditHoverChange,
   onWorldEditDebugChange,
@@ -1676,12 +1905,13 @@ export function GameCanvas({
   onSkillBalanceConfigChange?: (config: SkillBalanceConfig) => void;
   mobBalanceConfig?: MobBalanceConfig;
   onMobBalanceConfigChange?: (config: MobBalanceConfig) => void;
+  mobVisualConfig?: MobVisualConfig;
   keyboardInputEnabled?: boolean;
   activeRoomName?: 'world' | 'raid';
   activeRoomOptions?: Record<string, string | number>;
   worldMapAssetOverride?: MeadowMapAsset | null;
   worldEditorEnabled?: boolean;
-  worldEditorMode?: 'tile' | 'sprite' | 'spawn' | 'trader';
+  worldEditorMode?: 'tile' | 'sprite' | 'mob' | 'spawn' | 'trader';
   selectedWorldTile?: MeadowTile;
   selectedWorldOverlay?: {
     texture: MeadowOverlayAsset['texture'];
@@ -1694,10 +1924,15 @@ export function GameCanvas({
     flipX: boolean;
     scale: number;
   };
+  selectedWorldMob?: {
+    kind: MobKind;
+  };
   selectedWorldTrader?: {
-    name: string;
-    bodyTexturePath: MeadowTraderAsset['bodyTexturePath'];
-    headTexturePath: MeadowTraderAsset['headTexturePath'];
+    bodyItemId: string;
+    headItemId: string;
+    hairTexturePath: MeadowTraderAsset['hairTexturePath'];
+    hairOffsetX: number;
+    hairOffsetY: number;
   };
   onWorldEditPaint?: (tileX: number, tileY: number, eraseOverlay?: boolean) => void;
   onWorldEditHoverChange?: (tile: { x: number; y: number } | null) => void;
@@ -1738,6 +1973,7 @@ export function GameCanvas({
   const skillBalanceConfigChangeRef = useRef(onSkillBalanceConfigChange);
   const mobBalanceConfigRef = useRef(mobBalanceConfig);
   const mobBalanceConfigChangeRef = useRef(onMobBalanceConfigChange);
+  const mobVisualConfigRef = useRef(mobVisualConfig);
   const worldEditPaintRef = useRef(onWorldEditPaint);
   const worldEditHoverChangeRef = useRef(onWorldEditHoverChange);
   const worldEditDebugChangeRef = useRef(onWorldEditDebugChange);
@@ -1746,6 +1982,7 @@ export function GameCanvas({
   const selectedWorldTileRef = useRef(selectedWorldTile);
   const selectedWorldOverlayRef = useRef(selectedWorldOverlay);
   const selectedWorldSpriteRef = useRef(selectedWorldSprite);
+  const selectedWorldMobRef = useRef(selectedWorldMob);
   const selectedWorldTraderRef = useRef(selectedWorldTrader);
   const worldMapAssetOverrideRef = useRef(worldMapAssetOverride);
   const worldMapAssetOverrideSerializedRef = useRef(JSON.stringify(worldMapAssetOverride));
@@ -1886,6 +2123,9 @@ export function GameCanvas({
     selectedWorldSpriteRef.current = selectedWorldSprite;
   }, [selectedWorldSprite]);
   useEffect(() => {
+    selectedWorldMobRef.current = selectedWorldMob;
+  }, [selectedWorldMob]);
+  useEffect(() => {
     selectedWorldTraderRef.current = selectedWorldTrader;
   }, [selectedWorldTrader]);
   useEffect(() => {
@@ -1920,6 +2160,10 @@ export function GameCanvas({
   useEffect(() => {
     mobBalanceConfigRef.current = mobBalanceConfig;
   }, [mobBalanceConfig]);
+
+  useEffect(() => {
+    mobVisualConfigRef.current = mobVisualConfig;
+  }, [mobVisualConfig]);
 
   useEffect(() => {
     skillBalanceConfigChangeRef.current = onSkillBalanceConfigChange;
@@ -2132,31 +2376,54 @@ export function GameCanvas({
           this.load.image('flower-pink-8x8', '/sprites/decor/flower-pink-8x8.png');
           this.load.image('flower-yellow-8x8', '/sprites/decor/flower-yellow-8x8.png');
           this.load.image('flower-blue-8x8', '/sprites/decor/flower-blue-8x8.png');
-          this.load.image('body-head-8x8', '/sprites/characters/body-head-8x8.png');
-          this.load.image('body-torso-8x8', '/sprites/characters/body-torso-8x8.png');
+          if (DEFAULT_PLAYER_VISUALS.body.frameWidth && DEFAULT_PLAYER_VISUALS.body.frameHeight) {
+            this.load.spritesheet(PLAYER_BODY_TEXTURE_KEY, DEFAULT_PLAYER_VISUALS.body.texturePath, {
+              frameWidth: DEFAULT_PLAYER_VISUALS.body.frameWidth,
+              frameHeight: DEFAULT_PLAYER_VISUALS.body.frameHeight,
+            });
+          } else {
+            this.load.image(PLAYER_BODY_TEXTURE_KEY, DEFAULT_PLAYER_VISUALS.body.texturePath);
+          }
+          this.load.spritesheet(PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_TEXTURE_PATH, {
+            frameWidth: PLAYER_HANDS_FRAME_WIDTH,
+            frameHeight: PLAYER_HANDS_FRAME_HEIGHT,
+          });
+          if (DEFAULT_PLAYER_VISUALS.head.frameWidth && DEFAULT_PLAYER_VISUALS.head.frameHeight) {
+            this.load.spritesheet(PLAYER_HEAD_TEXTURE_KEY, DEFAULT_PLAYER_VISUALS.head.texturePath, {
+              frameWidth: DEFAULT_PLAYER_VISUALS.head.frameWidth,
+              frameHeight: DEFAULT_PLAYER_VISUALS.head.frameHeight,
+            });
+          } else {
+            this.load.image(PLAYER_HEAD_TEXTURE_KEY, DEFAULT_PLAYER_VISUALS.head.texturePath);
+          }
+          this.load.image(TRADER_HEAD_TEXTURE_KEY, '/sprites/characters/body-head-8x8.png');
+          this.load.image(TRADER_BODY_TEXTURE_KEY, '/sprites/characters/body-torso-8x8.png');
+          Object.values(PLAYER_ANIMATIONS).forEach((animation) => {
+            loadSpriteSheetAnimation(this, animation);
+          });
+          loadSpriteSheetAnimation(this, SHARED_DEATH_ANIMATION);
+          this.load.spritesheet('skeleton', '/npc/skeleton/skeleton.png', {
+            frameWidth: 32,
+            frameHeight: 32,
+          });
           this.load.image('skeleton-npc-16x16', '/sprites/characters/skeleton-npc-16x16.png');
           this.load.image('bat_1', '/npc/bat/bat_1.png');
           this.load.image('bat_2', '/npc/bat/bat_2.png');
           this.load.image('rat_1', '/npc/rat/rat_1.png');
           this.load.image('rat_2', '/npc/rat/rat_2.png');
-          loadSheetAnimation(this, projectileAnimations.fireball);
-          loadSheetAnimation(this, projectileAnimations.fireNova);
-          loadSheetAnimation(this, groundAnimation);
+          loadSpriteSheetAnimation(this, projectileAnimations.fireball);
+          loadSpriteSheetAnimation(this, projectileAnimations.fireNova);
+          loadSpriteSheetAnimation(this, groundAnimation);
 
           equipmentItems.forEach((item) => {
             this.load.image(item.textureKey, item.texturePath);
             item.worldEffects?.forEach((effect) => {
               if (effect.frameCount && effect.frameDurationMs) {
-                loadSheetAnimation(this, {
+                loadSpriteSheetAnimation(this, {
                   textureKey: effect.textureKey,
                   texturePath: effect.texturePath,
                   frameWidth: effect.frameWidth ?? 32,
                   frameHeight: effect.frameHeight ?? 32,
-                  startFrame: 0,
-                  startRowFrames: 0,
-                  frameCount: effect.frameCount,
-                  fps: 1000 / effect.frameDurationMs,
-                  columns: 1,
                 });
               } else {
                 this.load.image(effect.textureKey, effect.texturePath);
@@ -2167,10 +2434,15 @@ export function GameCanvas({
 
         create() {
           let sceneActive = true;
-          resolveAnimationColumns(this, projectileAnimations.fireball);
-          resolveAnimationColumns(this, projectileAnimations.fireNova);
-          resolveAnimationColumns(this, groundAnimation);
+          resolveSpriteSheetAnimationColumns(this, projectileAnimations.fireball);
+          resolveSpriteSheetAnimationColumns(this, projectileAnimations.fireNova);
+          resolveSpriteSheetAnimationColumns(this, groundAnimation);
+          resolveSpriteSheetAnimationColumns(this, SHARED_DEATH_ANIMATION);
+          Object.values(PLAYER_ANIMATIONS).forEach((animation) => {
+            resolveSpriteSheetAnimationColumns(this, animation);
+          });
           const camera = this.cameras.main;
+          camera.roundPixels = true;
           this.input.keyboard?.disableGlobalCapture();
           const cursors = this.input.keyboard
             ? {
@@ -2197,6 +2469,8 @@ export function GameCanvas({
           const networkClient = new Client(getRealtimeEndpoint());
           const characters = new Map<string, CharacterVisual>();
           const mobs = new Map<string, MobVisual>();
+          const completedDeadPlayerIds = new Set<string>();
+          const completedDeadMobIds = new Set<string>();
           const groundEffects = new Map<string, GroundEffectVisual>();
           const projectileSprites = new Map<string, ProjectileVisual>();
           const chestSprites = new Map<string, Phaser.GameObjects.Image>();
@@ -2216,10 +2490,14 @@ export function GameCanvas({
           const worldDecorationSprites: Phaser.GameObjects.Image[] = [];
           const worldStampSprites: Phaser.GameObjects.Image[] = [];
           const worldStampSpritesByTile = new Map<string, Phaser.GameObjects.Image>();
+          const worldMobVisuals = new Map<string, WorldMobVisual>();
           const worldTraderVisuals = new Map<string, WorldTraderVisual>();
           const worldTradersById = new Map<string, MeadowTraderAsset>();
           const pendingWorldTextureKeys = new Set<string>();
+          const pendingWorldTraderSheetKeys = new Set<string>();
+          const pendingMobClipKeys = new Set<string>();
           let worldSpawnMarker: Phaser.GameObjects.Container | null = null;
+          let currentWorldAsset = meadowAsset;
           let appliedWorldAssetSerialized = worldMapAssetOverrideSerializedRef.current;
           let raidTilesData: string[] = [];
           const exploredRaidTiles = new Set<number>();
@@ -2330,32 +2608,56 @@ export function GameCanvas({
             .setVisible(false)
             .setDepth(38.8);
           const worldEditTraderContainer = this.add.container(0, 0, []).setVisible(false).setDepth(39.3);
+          const worldEditTraderEyePixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, tileSize);
+          const worldEditTraderBodyDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+          const worldEditTraderHeadDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, tileSize);
           const worldEditTraderBodyBase = this.add
-            .image(0, 0, 'body-torso-8x8')
-            .setDisplaySize(tileSize, tileSize)
-            .setOrigin(0.5)
+            .image(0, 0, PLAYER_ANIMATIONS.idle?.textureKey ?? PLAYER_BODY_TEXTURE_KEY, PLAYER_BODY_DEFAULT_FRAME)
+            .setDisplaySize(worldEditTraderBodyDisplay.width, worldEditTraderBodyDisplay.height)
+            .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.body.anchorY)
             .setAlpha(0.82);
           const worldEditTraderBodyLayer = this.add
-            .image(0, 0, 'body-torso-8x8')
+            .image(0, 0, TRADER_BODY_TEXTURE_KEY)
             .setDisplaySize(tileSize, tileSize)
             .setOrigin(0.5)
             .setVisible(false)
             .setAlpha(0.92);
           const worldEditTraderHeadBase = this.add
-            .image(0, 0, 'body-head-8x8')
+            .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
+            .setDisplaySize(worldEditTraderHeadDisplay.width, worldEditTraderHeadDisplay.height)
+            .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.head.anchorY)
+            .setAlpha(0.82);
+          const worldEditTraderHairLayer = this.add
+            .image(0, 0, TRADER_HEAD_TEXTURE_KEY)
             .setDisplaySize(tileSize, tileSize)
             .setOrigin(0.5)
-            .setAlpha(0.82);
+            .setVisible(false)
+            .setAlpha(0.94);
           const worldEditTraderHeadLayer = this.add
-            .image(0, 0, 'body-head-8x8')
+            .image(0, 0, TRADER_HEAD_TEXTURE_KEY)
             .setDisplaySize(tileSize, tileSize)
             .setOrigin(0.5)
             .setVisible(false)
             .setAlpha(0.96);
+          const worldEditTraderLeftEye = this.add
+            .rectangle(0, 0, worldEditTraderEyePixelSize, worldEditTraderEyePixelSize, PLAYER_EYE_COLOR, 1)
+            .setOrigin(0.5)
+            .setAlpha(0.92);
+          const worldEditTraderRightEye = this.add
+            .rectangle(0, 0, worldEditTraderEyePixelSize, worldEditTraderEyePixelSize, PLAYER_EYE_COLOR, 1)
+            .setOrigin(0.5)
+            .setAlpha(0.92);
+          const worldEditLeftEyePosition = getEyeLocalPosition('down', 'left', tileSize);
+          const worldEditRightEyePosition = getEyeLocalPosition('down', 'right', tileSize);
+          worldEditTraderLeftEye.setPosition(worldEditLeftEyePosition.x, worldEditLeftEyePosition.y);
+          worldEditTraderRightEye.setPosition(worldEditRightEyePosition.x, worldEditRightEyePosition.y);
           worldEditTraderContainer.add([
             worldEditTraderBodyBase,
             worldEditTraderBodyLayer,
             worldEditTraderHeadBase,
+            worldEditTraderHairLayer,
+            worldEditTraderLeftEye,
+            worldEditTraderRightEye,
             worldEditTraderHeadLayer,
           ]);
           const castRangeIndicator = this.add
@@ -2463,9 +2765,8 @@ export function GameCanvas({
                 this.textures.addImage(textureKey, image);
               }
               pendingWorldTextureKeys.delete(textureKey);
-              const latestAsset = worldMapAssetOverrideRef.current;
-              if (latestAsset && !isRaidScene) {
-                renderWorldMap(latestAsset);
+              if (!isRaidScene) {
+                renderWorldMap(worldMapAssetOverrideRef.current ?? currentWorldAsset);
               }
             };
             image.onerror = () => {
@@ -2475,7 +2776,121 @@ export function GameCanvas({
             return textureKey;
           };
 
+          const ensureWorldTraderBodyOverlayLoaded = (texturePath: string) => {
+            const overlayAnimation = getWorldTraderBodyOverlayAnimation(texturePath);
+            if (!overlayAnimation) {
+              return ensureWorldTextureLoaded(texturePath);
+            }
+
+            const textureKey = overlayAnimation.textureKey;
+            if (this.textures.exists(textureKey) || pendingWorldTraderSheetKeys.has(textureKey)) {
+              return textureKey;
+            }
+
+            pendingWorldTraderSheetKeys.add(textureKey);
+            loadSpriteSheetAnimation(this, overlayAnimation);
+            this.load.once('complete', () => {
+              pendingWorldTraderSheetKeys.delete(textureKey);
+              if (!isRaidScene) {
+                renderWorldMap(worldMapAssetOverrideRef.current ?? currentWorldAsset);
+              }
+            });
+            this.load.start();
+            return textureKey;
+          };
+
+          const ensureWorldTraderSpriteSheetLoaded = (trader: MeadowTraderAsset) => {
+            if (!trader.spriteSheetPath || !trader.frameWidth || !trader.frameHeight) {
+              return '';
+            }
+
+            const textureKey = getWorldTraderSpriteSheetKey(trader.spriteSheetPath);
+            if (this.textures.exists(textureKey) || pendingWorldTraderSheetKeys.has(textureKey)) {
+              return textureKey;
+            }
+
+            pendingWorldTraderSheetKeys.add(textureKey);
+            this.load.spritesheet(textureKey, trader.spriteSheetPath, {
+              frameWidth: trader.frameWidth,
+              frameHeight: trader.frameHeight,
+            });
+            this.load.once('complete', () => {
+              pendingWorldTraderSheetKeys.delete(textureKey);
+              if (!isRaidScene) {
+                renderWorldMap(worldMapAssetOverrideRef.current ?? currentWorldAsset);
+              }
+            });
+            this.load.start();
+            return textureKey;
+          };
+
+          const getPreferredMobClip = (texture: string, state?: MobAnimationState) => {
+            const kind = getMobVisualKind(texture);
+            if (!kind) {
+              return null;
+            }
+
+            const definition = mobVisualConfigRef.current[kind];
+            const clipKey =
+              (state ? definition.states[state] : undefined) ??
+              definition.states.move ??
+              definition.states.idle ??
+              Object.keys(definition.clips)[0];
+            return clipKey ? definition.clips[clipKey] ?? null : null;
+          };
+
+          const ensureMobClipLoaded = (clip: MobAnimationClipDefinition) => {
+            const runtimeClip = toRuntimeAnimationFromMobClip(clip);
+            const textureKey = runtimeClip.textureKey;
+            if (this.textures.exists(textureKey) || pendingMobClipKeys.has(textureKey)) {
+              return textureKey;
+            }
+
+            pendingMobClipKeys.add(textureKey);
+            loadSpriteSheetAnimation(this, runtimeClip);
+            this.load.once('complete', () => {
+              pendingMobClipKeys.delete(textureKey);
+            });
+            this.load.start();
+            return textureKey;
+          };
+
+          const resolveMobRenderState = (
+            texture: string,
+            timeMs: number,
+            state?: MobAnimationState,
+            animationStartedAt?: number,
+          ) => {
+            const kind = getMobVisualKind(texture);
+            const clip = getPreferredMobClip(texture, state);
+            if (kind && clip) {
+              const runtimeClip = toRuntimeAnimationFromMobClip(clip);
+              const textureKey = ensureMobClipLoaded(clip);
+              if (this.textures.exists(textureKey)) {
+                const animationTimeMs =
+                  typeof animationStartedAt === 'number' && animationStartedAt > 0
+                    ? Math.max(0, timeMs - animationStartedAt)
+                    : timeMs;
+                const frame = getSpriteSheetAnimationFrame(runtimeClip, animationTimeMs);
+                return {
+                  textureKey,
+                  frame,
+                  renderScale: mobVisualConfigRef.current[kind].spriteScale,
+                  anchorY: mobVisualConfigRef.current[kind].anchorY,
+                };
+              }
+            }
+
+            return {
+              textureKey: getAnimatedMobTexture(texture, timeMs),
+              frame: undefined,
+              renderScale: getMobRenderScale(texture),
+              anchorY: 0.5,
+            };
+          };
+
           const renderWorldMap = (asset: MeadowMapAsset) => {
+            currentWorldAsset = asset;
             worldTileSprites.forEach((sprite) => sprite.destroy());
             worldTileSprites.length = 0;
             worldOverlaySprites.forEach((sprite) => sprite.destroy());
@@ -2485,6 +2900,12 @@ export function GameCanvas({
             worldStampSprites.forEach((sprite) => sprite.destroy());
             worldStampSprites.length = 0;
             worldStampSpritesByTile.clear();
+            worldMobVisuals.forEach((mobVisual) => {
+              mobVisual.shadow.destroy();
+              mobVisual.sprite.destroy();
+              mobVisual.nameplate.destroy();
+            });
+            worldMobVisuals.clear();
             worldTraderVisuals.forEach((traderVisual) => {
               traderVisual.shadow.destroy();
               traderVisual.container.destroy();
@@ -2501,6 +2922,7 @@ export function GameCanvas({
             const worldMap = createMeadowMapFromAsset(asset);
             const worldDecorations = createMeadowDecorationsFromAsset(asset);
             const worldStamps = createMeadowStampsFromAsset(asset);
+            const worldMobs = createMeadowMobsFromAsset(asset);
             const worldTraders = createMeadowTradersFromAsset(asset);
             const worldStampsByTile = new Map(worldStamps.map((stamp) => [`${stamp.x}:${stamp.y}`, stamp] as const));
             worldTraders.forEach((trader) => {
@@ -2544,35 +2966,170 @@ export function GameCanvas({
             };
 
             const placeWorldTrader = (trader: MeadowTraderAsset) => {
-              const bodyTextureKey = ensureWorldTextureLoaded(trader.bodyTexturePath);
-              const headTextureKey = ensureWorldTextureLoaded(trader.headTexturePath);
-              if (!this.textures.exists(bodyTextureKey) || !this.textures.exists(headTextureKey)) {
-                return;
-              }
-
               const worldX = trader.x * tileSize + tileSize / 2;
               const worldY = trader.y * tileSize + tileSize / 2;
               const shadow = this.add
                 .ellipse(worldX, worldY + 15, 24, 8, 0x000000, 0.18)
                 .setDepth(1.05);
               const container = this.add.container(worldX, worldY).setDepth(1.6);
-              const bodyBase = this.add
-                .image(0, 0, 'body-torso-8x8')
-                .setDisplaySize(tileSize, tileSize)
-                .setOrigin(0.5);
-              const bodyLayer = this.add
-                .image(0, 0, bodyTextureKey)
-                .setDisplaySize(tileSize, tileSize)
-                .setOrigin(0.5);
-              const headBase = this.add
-                .image(0, 0, 'body-head-8x8')
-                .setDisplaySize(tileSize, tileSize)
-                .setOrigin(0.5);
-              const headLayer = this.add
-                .image(0, 0, headTextureKey)
-                .setDisplaySize(tileSize, tileSize)
-                .setOrigin(0.5);
-              container.add([bodyBase, bodyLayer, headBase, headLayer]);
+              let actor: Phaser.GameObjects.GameObject | undefined;
+              let bodyBase: PhaserImage | undefined;
+              let bodyLayer: PhaserImage | undefined;
+              let bodyOverlayAnimation: PlayerSheetAnimation | undefined;
+              let headBase: PhaserImage | undefined;
+              let rightHand: PhaserImage | undefined;
+              let leftHand: PhaserImage | undefined;
+              let hairLayer: PhaserImage | undefined;
+              let headLayer: PhaserImage | undefined;
+              let leftEye: Phaser.GameObjects.Rectangle | undefined;
+              let rightEye: Phaser.GameObjects.Rectangle | undefined;
+              let animationStartedAt: number | undefined;
+
+              if (trader.spriteSheetPath) {
+                const sheetTextureKey = ensureWorldTraderSpriteSheetLoaded(trader);
+                if (!sheetTextureKey || !this.textures.exists(sheetTextureKey)) {
+                  shadow.destroy();
+                  container.destroy();
+                  return;
+                }
+
+                const sprite = this.add
+                  .sprite(0, 0, sheetTextureKey, trader.animationStartFrame ?? 0)
+                  .setOrigin(0.5)
+                  .setScale(
+                    ((trader.renderScale ?? 1) * tileSize) /
+                    Math.max(1, trader.frameWidth ?? tileSize),
+                  );
+                const animationKey = getWorldTraderAnimationKey(trader.id);
+                if (!this.anims.exists(animationKey)) {
+                  this.anims.create({
+                    key: animationKey,
+                    frames: this.anims.generateFrameNumbers(sheetTextureKey, {
+                      start: trader.animationStartFrame ?? 0,
+                      end: (trader.animationStartFrame ?? 0) + Math.max(0, (trader.frameCount ?? 1) - 1),
+                    }),
+                    frameRate: Math.max(1, trader.animationFps ?? 4),
+                    repeat: -1,
+                  });
+                }
+                if ((trader.frameCount ?? 1) > 1) {
+                  sprite.play(animationKey);
+                }
+                container.add(sprite);
+                actor = sprite;
+              } else {
+                const resolvedBodyTexturePath =
+                  (trader.bodyItemId ? getEquipmentBodyTexturePath(trader.bodyItemId) : undefined) ??
+                  trader.bodyTexturePath ??
+                  '';
+                const resolvedHeadTexturePath =
+                  (trader.headItemId ? getEquipmentBodyTexturePath(trader.headItemId) : undefined) ??
+                  trader.headTexturePath ??
+                  '';
+                bodyOverlayAnimation = getWorldTraderBodyOverlayAnimation(resolvedBodyTexturePath) ?? undefined;
+                const bodyTextureKey = resolvedBodyTexturePath
+                  ? bodyOverlayAnimation
+                    ? ensureWorldTraderBodyOverlayLoaded(resolvedBodyTexturePath)
+                    : ensureWorldTextureLoaded(resolvedBodyTexturePath)
+                  : '';
+                const hairTextureKey = trader.hairTexturePath ? ensureWorldTextureLoaded(trader.hairTexturePath) : '';
+                const headTextureKey = resolvedHeadTexturePath ? ensureWorldTextureLoaded(resolvedHeadTexturePath) : '';
+                if (
+                  (bodyTextureKey && !this.textures.exists(bodyTextureKey)) ||
+                  (hairTextureKey && !this.textures.exists(hairTextureKey)) ||
+                  (headTextureKey && !this.textures.exists(headTextureKey))
+                ) {
+                  shadow.destroy();
+                  container.destroy();
+                  return;
+                }
+
+                const traderBodyAnimation = PLAYER_ANIMATIONS.idle;
+                const traderEyePixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, tileSize);
+                const traderBodyDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+                const traderHeadDisplay = getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, tileSize);
+                const handDisplay = getHandDisplaySize(tileSize);
+                bodyBase = this.add
+                  .image(
+                    0,
+                    0,
+                    traderBodyAnimation?.textureKey ?? PLAYER_BODY_TEXTURE_KEY,
+                    traderBodyAnimation ? traderBodyAnimation.startFrame : PLAYER_BODY_DEFAULT_FRAME,
+                  )
+                  .setDisplaySize(traderBodyDisplay.width, traderBodyDisplay.height)
+                  .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.body.anchorY);
+                rightHand = this.add
+                  .image(0, 0, PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_DEFAULT_FRAME)
+                  .setDisplaySize(handDisplay.width, handDisplay.height)
+                  .setOrigin(0.5);
+                leftHand = this.add
+                  .image(0, 0, PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_DEFAULT_FRAME)
+                  .setDisplaySize(handDisplay.width, handDisplay.height)
+                  .setOrigin(0.5);
+                if (bodyTextureKey) {
+                  bodyLayer = this.add
+                    .image(
+                      0,
+                      0,
+                      bodyTextureKey,
+                      bodyOverlayAnimation ? bodyOverlayAnimation.startFrame : undefined,
+                    )
+                    .setDisplaySize(tileSize, tileSize)
+                    .setOrigin(0.5);
+                }
+                headBase = this.add
+                  .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
+                  .setDisplaySize(traderHeadDisplay.width, traderHeadDisplay.height)
+                  .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.head.anchorY);
+                if (hairTextureKey) {
+                  hairLayer = this.add
+                    .image(trader.hairOffsetX ?? 0, trader.hairOffsetY ?? 0, hairTextureKey)
+                    .setDisplaySize(tileSize, tileSize)
+                    .setOrigin(0.5);
+                }
+                if (headTextureKey) {
+                  headLayer = this.add
+                    .image(0, 0, headTextureKey)
+                    .setDisplaySize(tileSize, tileSize)
+                    .setOrigin(0.5);
+                }
+                leftEye = this.add
+                  .rectangle(0, 0, traderEyePixelSize, traderEyePixelSize, PLAYER_EYE_COLOR, 1)
+                  .setOrigin(0.5);
+                rightEye = this.add
+                  .rectangle(0, 0, traderEyePixelSize, traderEyePixelSize, PLAYER_EYE_COLOR, 1)
+                  .setOrigin(0.5);
+                const defaultLeftEye = getEyeLocalPosition('down', 'left', tileSize);
+                const defaultRightEye = getEyeLocalPosition('down', 'right', tileSize);
+                leftEye.setPosition(defaultLeftEye.x, defaultLeftEye.y);
+                rightEye.setPosition(defaultRightEye.x, defaultRightEye.y);
+                const defaultRightHand = getHandLocalPosition(
+                  PLAYER_HAND_BASE_OFFSETS.right,
+                  { x: 0, y: 0 },
+                  tileSize,
+                );
+                const defaultLeftHand = getHandLocalPosition(
+                  PLAYER_HAND_BASE_OFFSETS.left,
+                  { x: 0, y: 0 },
+                  tileSize,
+                );
+                rightHand.setPosition(defaultRightHand.x, defaultRightHand.y);
+                leftHand.setPosition(defaultLeftHand.x, defaultLeftHand.y);
+                container.add([
+                  leftHand,
+                  bodyBase,
+                  ...(bodyLayer ? [bodyLayer] : []),
+                  rightHand,
+                  headBase,
+                  ...(hairLayer ? [hairLayer] : []),
+                  leftEye,
+                  rightEye,
+                  ...(headLayer ? [headLayer] : []),
+                ]);
+                actor = bodyLayer ?? bodyBase;
+                animationStartedAt = this.time.now;
+              }
+
               const nameplate = this.add
                 .text(worldX, worldY - 24, trader.name || 'Trader', {
                   color: '#f4f1e4',
@@ -2602,12 +3159,54 @@ export function GameCanvas({
               worldTraderVisuals.set(trader.id, {
                 shadow,
                 container,
-                bodyBase,
-                bodyLayer,
-                headBase,
-                headLayer,
+                actor,
+                body: bodyBase,
+                bodyOverlay: trader.spriteSheetPath ? undefined : bodyLayer,
+                bodyOverlayAnimation,
+                head: headBase,
+                rightHand,
+                leftHand,
+                hairOverlay: trader.spriteSheetPath ? undefined : hairLayer,
+                headOverlay: trader.spriteSheetPath ? undefined : headLayer,
+                leftEye,
+                rightEye,
+                animationStartedAt,
                 nameplate,
                 questMarker,
+              });
+            };
+
+            const placeWorldMob = (mob: MeadowMobAsset) => {
+              const renderState = resolveMobRenderState(mob.kind, this.time.now);
+              const worldX = mob.spawn.x * tileSize + tileSize / 2;
+              const worldY = mob.spawn.y * tileSize + tileSize / 2;
+              const shadow = this.add
+                .ellipse(worldX, worldY + 15, 22, 8, 0x000000, 0.18)
+                .setDepth(1.05);
+              const sprite = this.add
+                .image(worldX, worldY, renderState.textureKey, renderState.frame)
+                .setScale(renderState.renderScale)
+                .setOrigin(0.5, renderState.anchorY)
+                .setDepth(1.6);
+              const nameplate = this.add
+                .text(worldX, worldY - 24, mob.kind, {
+                  color: '#f4f1e4',
+                  fontFamily: 'monospace',
+                  fontSize: '16px',
+                  fontStyle: 'bold',
+                  stroke: '#1f140e',
+                  strokeThickness: 2,
+                })
+                .setOrigin(0.5)
+                .setScale(0.45)
+                .setDepth(1.75)
+                .setVisible(playerRole.toLowerCase() === 'admin');
+
+              worldMobVisuals.set(mob.id, {
+                kind: mob.kind,
+                shadow,
+                sprite,
+                nameplate,
               });
             };
 
@@ -2684,6 +3283,10 @@ export function GameCanvas({
               placeWorldTrader(trader);
             }
 
+            for (const mob of worldMobs) {
+              placeWorldMob(mob);
+            }
+
           };
 
           if (isRaidScene) {
@@ -2708,16 +3311,29 @@ export function GameCanvas({
               .ellipse(x, y + 4, 36, 44, 0xff8f2a, 0.32)
               .setDepth(1.5)
               .setVisible(false);
+            const deathEffect = this.add
+              .image(x, y, SHARED_DEATH_ANIMATION.textureKey, SHARED_DEATH_ANIMATION.startFrame)
+              .setScale(getSharedDeathAnimationScale(meadowMap.tileSize))
+              .setOrigin(0.5)
+              .setDepth(2.05)
+              .setVisible(false);
             const container = this.add.container(x, y).setDepth(2);
             const body = this.add
-              .image(0, 0, 'body-torso-8x8')
-              .setDisplaySize(meadowMap.tileSize, meadowMap.tileSize)
+              .image(0, 0, PLAYER_BODY_TEXTURE_KEY, PLAYER_BODY_DEFAULT_FRAME)
+              .setDisplaySize(
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, meadowMap.tileSize).width,
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.body, meadowMap.tileSize).height,
+              )
+              .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.body.anchorY);
+            const handDisplay = getHandDisplaySize(meadowMap.tileSize);
+            const rightHand = this.add
+              .image(0, 0, PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_DEFAULT_FRAME)
+              .setDisplaySize(handDisplay.width, handDisplay.height)
               .setOrigin(0.5);
-            const bodyItem = this.add
-              .image(0, 0, EQUIPMENT_ITEMS.robe_tunic.textureKey)
-              .setDisplaySize(meadowMap.tileSize, meadowMap.tileSize)
-              .setOrigin(0.5)
-              .setVisible(false);
+            const leftHand = this.add
+              .image(0, 0, PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_DEFAULT_FRAME)
+              .setDisplaySize(handDisplay.width, handDisplay.height)
+              .setOrigin(0.5);
             const weaponItem = this.add
               .image(10, 2, EQUIPMENT_ITEMS.default_staff.textureKey)
               .setDisplaySize(meadowMap.tileSize, meadowMap.tileSize)
@@ -2736,19 +3352,38 @@ export function GameCanvas({
               .setAlpha(0.9)
               .setVisible(false);
             const head = this.add
-              .image(0, 0, 'body-head-8x8')
-              .setDisplaySize(meadowMap.tileSize, meadowMap.tileSize)
+              .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
+              .setDisplaySize(
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, meadowMap.tileSize).width,
+                getVisualDisplaySize(DEFAULT_PLAYER_VISUALS.head, meadowMap.tileSize).height,
+              )
+              .setOrigin(0.5, DEFAULT_PLAYER_VISUALS.head.anchorY);
+            const eyePixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.head, meadowMap.tileSize);
+            const leftEye = this.add
+              .rectangle(0, 0, eyePixelSize, eyePixelSize, PLAYER_EYE_COLOR, 1)
               .setOrigin(0.5);
-            const headItem = this.add
-              .image(0, 0, EQUIPMENT_ITEMS.magic_hat.textureKey)
-              .setDisplaySize(meadowMap.tileSize, meadowMap.tileSize)
-              .setOrigin(0.5)
-              .setVisible(false);
+            const rightEye = this.add
+              .rectangle(0, 0, eyePixelSize, eyePixelSize, PLAYER_EYE_COLOR, 1)
+              .setOrigin(0.5);
+            const rightHandPosition = getHandLocalPosition(
+              PLAYER_HAND_BASE_OFFSETS.right,
+              { x: 0, y: 0 },
+              meadowMap.tileSize,
+            );
+            const leftHandPosition = getHandLocalPosition(
+              PLAYER_HAND_BASE_OFFSETS.left,
+              { x: 0, y: 0 },
+              meadowMap.tileSize,
+            );
+            rightHand.setPosition(rightHandPosition.x, rightHandPosition.y);
+            leftHand.setPosition(leftHandPosition.x, leftHandPosition.y);
 
+            container.add(leftHand);
             container.add(body);
-            container.add(bodyItem);
+            container.add(rightHand);
             container.add(head);
-            container.add(headItem);
+            container.add(leftEye);
+            container.add(rightEye);
             container.add(weaponItem);
             container.add(castItem);
             container.add(burnEffect);
@@ -2876,14 +3511,17 @@ export function GameCanvas({
               shadow,
               burnAura,
               container,
+              deathEffect,
               body,
-              bodyItem,
+              rightHand,
+              leftHand,
               weaponItem,
               castItem,
               burnEffect,
               weaponEffects: [],
               head,
-              headItem,
+              leftEye,
+              rightEye,
               nameplate,
               burnStatusIcon: {
                 back: burnStatusBack,
@@ -2911,18 +3549,17 @@ export function GameCanvas({
               lastY: y,
               motionPhase: 0,
               effectPhase: 0,
-              facingX: 1 as 1,
+              facingX: 1 as const,
               currentName: name,
               currentHealth: health,
               currentMaxHealth: maxHealth,
-              currentBodyOffsetX: 0,
-              currentBodyOffsetY: 0,
-              currentHeadOffsetX: 0,
-              currentHeadOffsetY: 0,
+              currentAnimationState: 'idle' as PlayerAnimationState,
+              animationStartedAt: this.time.now,
+              lastMovedAt: 0,
               currentWeaponOffsetX: 0,
               currentWeaponOffsetY: 0,
-              currentBodyItem: undefined,
-              currentHeadItem: undefined,
+              currentBodyTextureKey: PLAYER_BODY_TEXTURE_KEY,
+              currentBodyFrame: PLAYER_BODY_DEFAULT_FRAME,
               currentWeaponItem: undefined,
               currentCastItemId: undefined,
               isFollowTarget: false,
@@ -2937,6 +3574,19 @@ export function GameCanvas({
               currentCastingSkillId: '',
               currentCastStartedAt: 0,
               currentCastEndsAt: 0,
+              deathStartedAt: 0,
+              interpPrevX: x,
+              interpPrevY: y,
+              interpPrevAt: this.time.now,
+              interpNextX: x,
+              interpNextY: y,
+              interpNextAt: this.time.now,
+              simPrevX: x,
+              simPrevY: y,
+              simX: x,
+              simY: y,
+              idleGraceUntil: 0,
+              isDead: false,
             };
 
             applyCharacterHealthToVisual(character, health, maxHealth);
@@ -2954,19 +3604,25 @@ export function GameCanvas({
             health: number,
             maxHealth: number,
           ): MobVisual => {
-            const renderScale = getMobRenderScale(texture);
+            const initialRender = resolveMobRenderState(texture, this.time.now);
+            const renderScale = initialRender.renderScale;
             const burnScale = Math.max(DEFAULT_MOB_BURN_SCALE, renderScale * 0.18);
-            const initialTexture = getAnimatedMobTexture(texture, this.time.now);
             const shadow = this.add.ellipse(x, y + 15, 24, 8, 0x000000, 0.18).setDepth(1);
             const burnAura = this.add
               .ellipse(x, y + 6, 24 * renderScale, 30 * renderScale, 0xff8f2a, 0.24)
               .setDepth(1.5)
               .setVisible(false);
             const sprite = this.add
-              .image(x, y, initialTexture)
+              .image(x, y, initialRender.textureKey, initialRender.frame)
+              .setScale(renderScale)
+              .setOrigin(0.5, initialRender.anchorY)
+              .setDepth(2);
+            const deathEffect = this.add
+              .image(x, y, SHARED_DEATH_ANIMATION.textureKey, SHARED_DEATH_ANIMATION.startFrame)
               .setScale(renderScale)
               .setOrigin(0.5)
-              .setDepth(2);
+              .setDepth(2.05)
+              .setVisible(false);
             const burnEffect = this.add
               .image(x, y - 3, 'effect-fire-sheet', 0)
               .setScale(burnScale)
@@ -3028,6 +3684,21 @@ export function GameCanvas({
               .setOrigin(0, 0.5)
               .setDepth(6.2)
               .setVisible(false);
+            const castBarFrame = this.add
+              .rectangle(x, y + 30, 30, 8, 0x101010, 0.95)
+              .setOrigin(0.5)
+              .setDepth(5)
+              .setVisible(false);
+            const castBarBack = this.add
+              .rectangle(x, y + 30, 24, 3, 0x1d220f, 0.95)
+              .setOrigin(0.5)
+              .setDepth(6)
+              .setVisible(false);
+            const castBarFill = this.add
+              .rectangle(x - 12, y + 30, 24, 3, 0xf4c96b, 1)
+              .setOrigin(0, 0.5)
+              .setDepth(6.2)
+              .setVisible(false);
             const healthSegments = Array.from({ length: 10 }, (_, index) =>
               this.add
                 .rectangle(x - 10.8 + index * 2.4, y + 22, 2, 4, 0xef4444, 1)
@@ -3052,6 +3723,7 @@ export function GameCanvas({
               shadow,
               burnAura,
               sprite,
+              deathEffect,
               burnEffect,
               burnStatusIcon: {
                 back: burnStatusBack,
@@ -3063,6 +3735,9 @@ export function GameCanvas({
               healthBarFrame,
               healthBarBack,
               healthBarFill,
+              castBarFrame,
+              castBarBack,
+              castBarFill,
               healthText,
               healthSegments,
               targetX: x,
@@ -3070,11 +3745,12 @@ export function GameCanvas({
               lastX: x,
               lastY: y,
               bobPhase: 0,
-              facingX: 1 as 1,
+              facingX: 1 as const,
               renderScale,
               burnScale,
               baseTexture: texture,
-              currentTexture: initialTexture,
+              currentTexture: initialRender.textureKey,
+              currentFrame: initialRender.frame,
               currentName: name,
               currentHealth: health,
               currentMaxHealth: maxHealth,
@@ -3082,6 +3758,18 @@ export function GameCanvas({
               currentBurnEndsAt: 0,
               currentBurnStartedAt: 0,
               currentBurnDurationMs: 0,
+              currentAttackCooldownEndsAt: 0,
+              currentAttackCooldownMs: 0,
+              currentCastingSkillId: "",
+              currentCastStartedAt: 0,
+              currentCastEndsAt: 0,
+              currentSkillLungeStartedAt: 0,
+              currentSkillLungeEndsAt: 0,
+              lastMovedAt: 0,
+              currentAnimationState: 'idle' as MobAnimationState,
+              animationStartedAt: this.time.now,
+              deathStartedAt: 0,
+              isDead: false,
             };
 
             applyMobHealthToVisual(mob, health, maxHealth);
@@ -3098,6 +3786,7 @@ export function GameCanvas({
             character.shadow.destroy();
             character.burnAura.destroy();
             character.container.destroy();
+            character.deathEffect.destroy();
             character.nameplate.destroy();
             character.burnStatusIcon.back.destroy();
             character.burnStatusIcon.cooldownOverlay.destroy();
@@ -3132,6 +3821,7 @@ export function GameCanvas({
             mob.shadow.destroy();
             mob.burnAura.destroy();
             mob.sprite.destroy();
+            mob.deathEffect.destroy();
             mob.burnEffect.destroy();
             mob.burnStatusIcon.back.destroy();
             mob.burnStatusIcon.cooldownOverlay.destroy();
@@ -3141,6 +3831,9 @@ export function GameCanvas({
             mob.healthBarFrame.destroy();
             mob.healthBarBack.destroy();
             mob.healthBarFill.destroy();
+            mob.castBarFrame.destroy();
+            mob.castBarBack.destroy();
+            mob.castBarFill.destroy();
             mob.healthText.destroy();
             mob.healthSegments.forEach((segment) => segment.destroy());
             mobs.delete(mobId);
@@ -3150,11 +3843,73 @@ export function GameCanvas({
             character: CharacterVisual,
             isMoving: boolean,
             deltaSeconds: number,
+            now: number,
+            lookTargetY?: number,
           ) => {
             character.motionPhase += deltaSeconds * (isMoving ? 12 : 4);
             character.effectPhase += deltaSeconds * 4;
 
-            const bob = isMoving ? Math.cos(character.motionPhase * 2) * 0.8 : 0;
+            const nextAnimationState: PlayerAnimationState = isMoving ? 'move' : 'idle';
+            syncAnimationState(character, nextAnimationState, now);
+
+            const bodyAnimation =
+              PLAYER_ANIMATIONS[character.currentAnimationState] ?? PLAYER_ANIMATIONS.idle;
+            if (bodyAnimation) {
+              const bodyFrame = getAnimationFrameAtState(bodyAnimation, character, now);
+              if (
+                character.currentBodyTextureKey !== bodyAnimation.textureKey ||
+                character.currentBodyFrame !== bodyFrame
+              ) {
+                character.body.setTexture(bodyAnimation.textureKey, bodyFrame);
+                character.currentBodyTextureKey = bodyAnimation.textureKey;
+                character.currentBodyFrame = bodyFrame;
+              }
+            }
+
+            const animationElapsedMs = Math.max(0, now - character.animationStartedAt);
+            const handOffsets =
+              PLAYER_HAND_ANIMATION_OFFSETS[character.currentAnimationState] ??
+              PLAYER_HAND_ANIMATION_OFFSETS.idle;
+            const handFrameOffset = bodyAnimation
+              ? getSpriteSheetAnimationFrameOffset(bodyAnimation, animationElapsedMs)
+              : 0;
+            const handFrameIndex =
+              handOffsets && handOffsets.leftX.length > 0
+                ? handFrameOffset % handOffsets.leftX.length
+                : 0;
+            const leftHandPosition = getHandLocalPosition(
+              PLAYER_HAND_BASE_OFFSETS.left,
+              {
+                x: handOffsets?.leftX[handFrameIndex] ?? 0,
+                y: handOffsets?.leftY[handFrameIndex] ?? 0,
+              },
+              meadowMap.tileSize,
+            );
+            const rightHandPosition = getHandLocalPosition(
+              PLAYER_HAND_BASE_OFFSETS.right,
+              {
+                x: handOffsets?.rightX[handFrameIndex] ?? 0,
+                y: handOffsets?.rightY[handFrameIndex] ?? 0,
+              },
+              meadowMap.tileSize,
+            );
+            character.leftHand.x = leftHandPosition.x;
+            character.leftHand.y = leftHandPosition.y;
+            character.rightHand.x = rightHandPosition.x;
+            character.rightHand.y = rightHandPosition.y;
+
+            const bodyPixelSize =
+              getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, meadowMap.tileSize);
+            const headAnimationOffsetY = getPlayerHeadOffsetY(
+              bodyAnimation,
+              character.animationStartedAt,
+              now,
+              bodyPixelSize,
+            );
+            const eyeDirection = getEyeLookDirection(lookTargetY, character.container.y);
+            const leftEyePosition = getEyeLocalPosition(eyeDirection, 'left', meadowMap.tileSize);
+            const rightEyePosition = getEyeLocalPosition(eyeDirection, 'right', meadowMap.tileSize);
+            const weaponBob = isMoving ? Math.cos(character.motionPhase * 2) * 0.4 : 0;
             const heldCastItemId = getHeldCastConsumableItemId(character);
             const heldCastItem = heldCastItemId ? EQUIPMENT_ITEMS[heldCastItemId] : undefined;
             const showHeldCastItem = Boolean(heldCastItem);
@@ -3179,15 +3934,13 @@ export function GameCanvas({
               character.currentCastItemId = heldCastItemId;
             }
 
-            character.body.x = 0;
-            character.body.y = bob * 0.4;
-            character.bodyItem.x = character.currentBodyOffsetX;
-            character.bodyItem.y = bob * 0.4 + character.currentBodyOffsetY;
+            character.body.x = DEFAULT_PLAYER_VISUALS.body.offsetX;
+            character.body.y = DEFAULT_PLAYER_VISUALS.body.offsetY;
             character.weaponItem.x = 10 + character.currentWeaponOffsetX;
-            character.weaponItem.y = 2 + bob * 0.15 + character.currentWeaponOffsetY;
+            character.weaponItem.y = 2 + weaponBob + character.currentWeaponOffsetY;
             character.weaponItem.setVisible(showWeapon);
             character.castItem.x = 10 + character.currentWeaponOffsetX;
-            character.castItem.y = 2 + bob * 0.15 + character.currentWeaponOffsetY;
+            character.castItem.y = 2 + weaponBob + character.currentWeaponOffsetY;
             character.castItem.setVisible(showHeldCastItem);
             if (showHeldCastItem) {
               character.container.bringToTop(character.castItem);
@@ -3214,14 +3967,14 @@ export function GameCanvas({
               effect.image.setAlpha(effect.baseAlpha + Math.sin(character.effectPhase * 2.6 + index) * 0.06);
               if (effect.animation) {
                 effect.image.setFrame(
-                  getAnimationFrame(effect.animation, character.effectPhase * 1000, index * 60),
+                  getSpriteSheetAnimationFrame(effect.animation, character.effectPhase * 1000, index * 60),
                 );
               }
             });
             if (character.currentBurnTicksRemaining > 0 && character.currentBurnEndsAt > Date.now()) {
               character.burnAura.setPosition(
                 character.container.x,
-                character.container.y + 4 + bob * 0.2,
+                character.container.y + 4,
               );
               character.burnAura.setSize(
                 36 + Math.sin(character.effectPhase * 3.4) * 5,
@@ -3230,18 +3983,16 @@ export function GameCanvas({
               character.burnAura.setFillStyle(0xff962f, 0.28 + Math.sin(character.effectPhase * 5.2) * 0.07);
               character.body.setTint(0xffd37a);
               character.head.setTint(0xffd37a);
-              character.bodyItem.setTint(0xffb45c);
-              character.headItem.setTint(0xffb45c);
             } else {
               character.body.clearTint();
               character.head.clearTint();
-              character.bodyItem.clearTint();
-              character.headItem.clearTint();
             }
-            character.head.x = 0;
-            character.head.y = bob * 0.2 - 2;
-            character.headItem.x = character.currentHeadOffsetX;
-            character.headItem.y = bob * 0.2 - 2 + character.currentHeadOffsetY;
+            character.head.x = DEFAULT_PLAYER_VISUALS.head.offsetX;
+            character.head.y = DEFAULT_PLAYER_VISUALS.head.offsetY + headAnimationOffsetY;
+            character.leftEye.x = leftEyePosition.x;
+            character.leftEye.y = leftEyePosition.y + headAnimationOffsetY;
+            character.rightEye.x = rightEyePosition.x;
+            character.rightEye.y = rightEyePosition.y + headAnimationOffsetY;
             character.shadow.width = 22;
           };
 
@@ -3307,7 +4058,7 @@ export function GameCanvas({
               const tileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(worldPoint.y / tileSize)));
               const currentEditorMode = worldEditorModeRef.current;
               const canEraseWorldEdit =
-                currentEditorMode === 'sprite' || currentEditorMode === 'trader';
+                currentEditorMode === 'sprite' || currentEditorMode === 'trader' || currentEditorMode === 'mob';
 
               if (pointer.button === 2 || pointer.button === 0) {
                 pointer.event?.preventDefault();
@@ -3456,22 +4207,16 @@ export function GameCanvas({
               const networkPlayerState = networkPlayer as Partial<NetworkPlayerState> & RaidNetworkPlayerState;
               seen.add(sessionId);
 
-              if (networkPlayerState.dead) {
-                if (sessionId === localSessionId) {
-                  playerVitalsChangeRef.current?.({
-                    health: networkPlayerState.health,
-                    maxHealth: networkPlayerState.maxHealth,
-                  });
-                  playerProgressChangeRef.current?.({
-                    level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
-                    experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
-                  });
-                }
-                destroyCharacter(sessionId);
-                return;
+              if (networkPlayerState.dead !== true) {
+                completedDeadPlayerIds.delete(sessionId);
               }
 
               let character = characters.get(sessionId);
+              if (!character) {
+                if (networkPlayerState.dead === true && completedDeadPlayerIds.has(sessionId)) {
+                  return;
+                }
+              }
               const equipment = {
                 body: toEquipmentItemId(networkPlayerState.bodyItem ?? ''),
                 head: toEquipmentItemId(networkPlayerState.headItem ?? ''),
@@ -3499,8 +4244,46 @@ export function GameCanvas({
                 characters.set(sessionId, character);
               }
 
+              const wasDead = character.isDead;
+              syncDeathState(character, networkPlayerState.dead === true, this.time.now);
+              if (wasDead !== character.isDead) {
+                setCharacterVisibility(
+                  character,
+                  character.isVisible ?? true,
+                  sessionId === localSessionId,
+                );
+              }
+
               character.targetX = networkPlayerState.x;
               character.targetY = networkPlayerState.y;
+              if (sessionId !== localSessionId) {
+                const now = this.time.now;
+                const distance = Phaser.Math.Distance.Between(
+                  character.interpNextX,
+                  character.interpNextY,
+                  character.targetX,
+                  character.targetY,
+                );
+                if (distance > 64) {
+                  character.container.setPosition(character.targetX, character.targetY);
+                  character.interpPrevX = character.targetX;
+                  character.interpPrevY = character.targetY;
+                  character.interpPrevAt = now;
+                  character.interpNextX = character.targetX;
+                  character.interpNextY = character.targetY;
+                  character.interpNextAt = now;
+                } else if (
+                  character.targetX !== character.interpNextX ||
+                  character.targetY !== character.interpNextY
+                ) {
+                  character.interpPrevX = character.interpNextX;
+                  character.interpPrevY = character.interpNextY;
+                  character.interpPrevAt = character.interpNextAt;
+                  character.interpNextX = character.targetX;
+                  character.interpNextY = character.targetY;
+                  character.interpNextAt = now;
+                }
+              }
               if (character.currentName !== networkPlayerState.name) {
                 character.nameplate.setText(networkPlayerState.name);
                 character.currentName = networkPlayerState.name;
@@ -3547,8 +4330,6 @@ export function GameCanvas({
 
               if (sessionId === localSessionId && !character.isFollowTarget) {
                 playerVisualRef.current = {
-                  bodyItem: character.bodyItem,
-                  headItem: character.headItem,
                   weaponItem: character.weaponItem,
                 };
                 lastSyncedPositionX = networkPlayerState.x;
@@ -3724,8 +4505,8 @@ export function GameCanvas({
             });
 
             const reconciliationDistance = Phaser.Math.Distance.Between(
-              character.container.x,
-              character.container.y,
+              character.simX,
+              character.simY,
               resolvedX,
               resolvedY,
             );
@@ -3735,12 +4516,19 @@ export function GameCanvas({
             }
 
             if (reconciliationDistance > 18) {
-              character.container.setPosition(resolvedX, resolvedY);
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
               return;
             }
 
-            character.container.x = Phaser.Math.Linear(character.container.x, resolvedX, 0.35);
-            character.container.y = Phaser.Math.Linear(character.container.y, resolvedY, 0.35);
+            const correctedX = Phaser.Math.Linear(character.simX, resolvedX, 0.35);
+            const correctedY = Phaser.Math.Linear(character.simY, resolvedY, 0.35);
+            character.simPrevX = character.simX;
+            character.simPrevY = character.simY;
+            character.simX = correctedX;
+            character.simY = correctedY;
           };
 
           const reconcileWorldLocalCharacter = (
@@ -3770,8 +4558,8 @@ export function GameCanvas({
             });
 
             const reconciliationDistance = Phaser.Math.Distance.Between(
-              character.container.x,
-              character.container.y,
+              character.simX,
+              character.simY,
               resolvedX,
               resolvedY,
             );
@@ -3781,31 +4569,49 @@ export function GameCanvas({
             }
 
             if (reconciliationDistance > 18) {
-              character.container.setPosition(resolvedX, resolvedY);
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
               return;
             }
 
-            character.container.x = Phaser.Math.Linear(character.container.x, resolvedX, 0.35);
-            character.container.y = Phaser.Math.Linear(character.container.y, resolvedY, 0.35);
+            const correctedX = Phaser.Math.Linear(character.simX, resolvedX, 0.35);
+            const correctedY = Phaser.Math.Linear(character.simY, resolvedY, 0.35);
+            character.simPrevX = character.simX;
+            character.simPrevY = character.simY;
+            character.simX = correctedX;
+            character.simY = correctedY;
           };
 
           const setCharacterVisibility = (character: CharacterVisual, visible: boolean, isLocalPlayer = false) => {
-            const alpha = visible || isLocalPlayer ? 1 : 0;
-            character.shadow.setVisible(visible || isLocalPlayer);
-            character.container.setVisible(visible || isLocalPlayer);
-            character.nameplate.setVisible(visible || isLocalPlayer);
-            character.healthBarFrame.setVisible(visible || isLocalPlayer);
-            character.healthBarBack.setVisible(visible || isLocalPlayer);
-            character.healthBarFill.setVisible(visible || isLocalPlayer);
+            const shouldShowActor = visible || isLocalPlayer;
+            const shouldShowAliveVisuals = shouldShowActor && !character.isDead;
+            const alpha = shouldShowAliveVisuals ? 1 : 0;
+            character.shadow.setVisible(shouldShowAliveVisuals);
+            character.container.setVisible(shouldShowAliveVisuals);
+            character.deathEffect.setVisible(shouldShowActor && character.isDead);
+            character.nameplate.setVisible(shouldShowAliveVisuals);
+            character.healthBarFrame.setVisible(shouldShowAliveVisuals);
+            character.healthBarBack.setVisible(shouldShowAliveVisuals);
+            character.healthBarFill.setVisible(shouldShowAliveVisuals);
+            character.castBarFrame.setVisible(false);
+            character.castBarBack.setVisible(false);
+            character.castBarFill.setVisible(false);
             character.healthText.setVisible(false);
-            character.healthSegments.forEach((segment) => segment.setVisible(visible || isLocalPlayer));
+            character.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
             character.burnAura.setVisible(
-              (visible || isLocalPlayer) &&
+              shouldShowAliveVisuals &&
                 character.currentBurnTicksRemaining > 0 &&
                 character.currentBurnEndsAt > Date.now(),
             );
+            if (!shouldShowAliveVisuals) {
+              hideStatusIcon(character.burnStatusIcon);
+              hideStatusIcon(character.healingStatusIcon);
+            }
             character.container.setAlpha(alpha);
-            character.shadow.setAlpha((visible || isLocalPlayer) ? 0.18 : 0);
+            character.shadow.setAlpha(shouldShowAliveVisuals ? 0.18 : 0);
+            character.deathEffect.setAlpha(shouldShowActor && character.isDead ? 1 : 0);
             character.nameplate.setAlpha(alpha);
             character.burnStatusIcon.back.setAlpha(alpha);
             character.burnStatusIcon.cooldownOverlay.setAlpha(alpha);
@@ -3818,28 +4624,45 @@ export function GameCanvas({
             character.healthBarFrame.setAlpha(alpha);
             character.healthBarBack.setAlpha(alpha);
             character.healthBarFill.setAlpha(alpha);
+            character.castBarFrame.setAlpha(alpha);
+            character.castBarBack.setAlpha(alpha);
+            character.castBarFill.setAlpha(alpha);
             character.healthText.setAlpha(0);
             character.healthSegments.forEach((segment) => segment.setAlpha(alpha));
           };
 
           const setMobVisibility = (mob: MobVisual, visible: boolean) => {
-            mob.shadow.setVisible(visible);
-            mob.sprite.setVisible(visible);
+            const shouldShowAliveVisuals = visible && !mob.isDead;
+            mob.shadow.setVisible(shouldShowAliveVisuals);
+            mob.sprite.setVisible(shouldShowAliveVisuals);
+            mob.deathEffect.setVisible(visible && mob.isDead);
             mob.nameplate.setVisible(false);
-            mob.healthBarFrame.setVisible(visible);
-            mob.healthBarBack.setVisible(visible);
-            mob.healthBarFill.setVisible(visible);
+            mob.healthBarFrame.setVisible(shouldShowAliveVisuals);
+            mob.healthBarBack.setVisible(shouldShowAliveVisuals);
+            mob.healthBarFill.setVisible(shouldShowAliveVisuals);
+            const shouldShowCastBar =
+              shouldShowAliveVisuals &&
+              mob.currentCastingSkillId.length > 0 &&
+              mob.currentCastEndsAt > Date.now() &&
+              mob.currentCastEndsAt > mob.currentCastStartedAt;
+            mob.castBarFrame.setVisible(shouldShowCastBar);
+            mob.castBarBack.setVisible(shouldShowCastBar);
+            mob.castBarFill.setVisible(shouldShowCastBar);
             mob.healthText.setVisible(false);
-            mob.healthSegments.forEach((segment) => segment.setVisible(visible));
+            mob.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
             mob.burnAura.setVisible(
-              visible &&
+              shouldShowAliveVisuals &&
                 mob.currentBurnTicksRemaining > 0 &&
                 mob.currentBurnEndsAt > Date.now(),
             );
-            const alpha = visible ? 1 : 0;
-            mob.shadow.setAlpha(visible ? 0.18 : 0);
+            const alpha = shouldShowAliveVisuals ? 1 : 0;
+            mob.shadow.setAlpha(shouldShowAliveVisuals ? 0.18 : 0);
             mob.sprite.setAlpha(alpha);
+            mob.deathEffect.setAlpha(visible && mob.isDead ? 1 : 0);
             mob.nameplate.setAlpha(0);
+            if (!shouldShowAliveVisuals) {
+              hideStatusIcon(mob.burnStatusIcon);
+            }
             mob.burnStatusIcon.back.setAlpha(alpha);
             mob.burnStatusIcon.cooldownOverlay.setAlpha(alpha);
             mob.burnStatusIcon.icon.setAlpha(alpha);
@@ -3847,6 +4670,9 @@ export function GameCanvas({
             mob.healthBarFrame.setAlpha(alpha);
             mob.healthBarBack.setAlpha(alpha);
             mob.healthBarFill.setAlpha(alpha);
+            mob.castBarFrame.setAlpha(alpha);
+            mob.castBarBack.setAlpha(alpha);
+            mob.castBarFill.setAlpha(alpha);
             mob.healthText.setAlpha(0);
             mob.healthSegments.forEach((segment) => segment.setAlpha(alpha));
           };
@@ -4064,13 +4890,16 @@ export function GameCanvas({
             room.state.mobs.forEach((networkMob, mobId) => {
               seen.add(mobId);
 
-              if (networkMob.dead) {
-                destroyMob(mobId);
-                return;
+              if (networkMob.dead !== true) {
+                completedDeadMobIds.delete(mobId);
               }
 
               let mob = mobs.get(mobId);
               if (!mob) {
+                if (networkMob.dead === true && completedDeadMobIds.has(mobId)) {
+                  return;
+                }
+
                 mob = createMob(
                   networkMob.x,
                   networkMob.y,
@@ -4082,8 +4911,27 @@ export function GameCanvas({
                 mobs.set(mobId, mob);
               }
 
+              if (
+                Math.abs(networkMob.x - mob.targetX) > 0.25 ||
+                Math.abs(networkMob.y - mob.targetY) > 0.25
+              ) {
+                mob.lastMovedAt = this.time.now;
+              }
+
               mob.targetX = networkMob.x;
               mob.targetY = networkMob.y;
+              const wasDead = mob.isDead;
+              syncDeathState(mob, networkMob.dead === true, this.time.now);
+              if (wasDead !== mob.isDead) {
+                setMobVisibility(mob, mob.isVisible ?? true);
+              }
+              mob.currentAttackCooldownEndsAt = networkMob.attackCooldownEndsAt ?? 0;
+              mob.currentAttackCooldownMs = networkMob.attackCooldownMs ?? 0;
+              mob.currentCastingSkillId = networkMob.castingSkillId ?? "";
+              mob.currentCastStartedAt = networkMob.castStartedAt ?? 0;
+              mob.currentCastEndsAt = networkMob.castEndsAt ?? 0;
+              mob.currentSkillLungeStartedAt = networkMob.skillLungeStartedAt ?? 0;
+              mob.currentSkillLungeEndsAt = networkMob.skillLungeEndsAt ?? 0;
               if (mob.currentName !== networkMob.name) {
                 mob.nameplate.setText(networkMob.name);
                 mob.currentName = networkMob.name;
@@ -4307,7 +5155,7 @@ export function GameCanvas({
                 ),
               );
               projectileVisual.sprite.setFrame(
-                getAnimationFrame(
+                getSpriteSheetAnimationFrame(
                   projectileVisual.animation,
                   Math.max(0, projectile.lifetime * 1000),
                 ),
@@ -4693,10 +5541,12 @@ export function GameCanvas({
             const localCharacter = localSessionId
               ? characters.get(localSessionId)
               : undefined;
+            let localLookTargetY: number | undefined;
 
             if (localCharacter) {
               const pointer = this.input.activePointer;
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
+              localLookTargetY = pointerWorld.y;
               const pointerDeltaX = pointerWorld.x - localCharacter.container.x;
               const pointerDeltaY = pointerWorld.y - localCharacter.container.y;
               const pointerDistance = Math.hypot(pointerDeltaX, pointerDeltaY);
@@ -4730,11 +5580,15 @@ export function GameCanvas({
               const inputChanged = inputSignature !== previousInput;
               const hasMotion = normalizedX !== 0 || normalizedY !== 0;
               const shouldSendInput = hasMotion || inputChanged;
-              const mobBlockers = Array.from(mobs.values(), (mob) => ({
-                x: mob.sprite.x,
-                y: mob.sprite.y,
-                radius: 22,
-              }));
+              const mobBlockers = Array.from(mobs.values()).flatMap((mob) =>
+                mob.isDead
+                  ? []
+                  : [{
+                    x: mob.sprite.x,
+                    y: mob.sprite.y,
+                    radius: 22,
+                  }],
+              );
 
               if (room && shouldSendInput) {
                 previousInput = inputSignature;
@@ -4788,8 +5642,8 @@ export function GameCanvas({
 
               if (isRaidScene) {
                 const replayed = applyRaidPredictedMovement(
-                  localCharacter.container.x,
-                  localCharacter.container.y,
+                  localCharacter.simX,
+                  localCharacter.simY,
                   normalizedX,
                   normalizedY,
                   CLIENT_SIMULATION_STEP_MS / 1000,
@@ -4803,11 +5657,14 @@ export function GameCanvas({
                   CLIENT_RAID_PLAYER_SPEED,
                   mobBlockers,
                 );
-                localCharacter.container.setPosition(replayed.x, replayed.y);
+                localCharacter.simPrevX = localCharacter.simX;
+                localCharacter.simPrevY = localCharacter.simY;
+                localCharacter.simX = replayed.x;
+                localCharacter.simY = replayed.y;
               } else {
                 const replayed = applyWorldPredictedMovement(
-                  localCharacter.container.x,
-                  localCharacter.container.y,
+                  localCharacter.simX,
+                  localCharacter.simY,
                   normalizedX,
                   normalizedY,
                   CLIENT_SIMULATION_STEP_MS,
@@ -4819,18 +5676,34 @@ export function GameCanvas({
                   CLIENT_PLAYER_SPEED,
                   mobBlockers,
                 );
-                localCharacter.container.setPosition(replayed.x, replayed.y);
+                localCharacter.simPrevX = localCharacter.simX;
+                localCharacter.simPrevY = localCharacter.simY;
+                localCharacter.simX = replayed.x;
+                localCharacter.simY = replayed.y;
               }
             }
 
+            const localInterpolationAlpha = localCharacter
+              ? Phaser.Math.Clamp(
+                movementSimulationAccumulatorMs / CLIENT_SIMULATION_STEP_MS,
+                0,
+                1,
+              )
+              : 0;
+
             characters.forEach((character, sessionId) => {
               const isLocalPlayer = sessionId === localSessionId;
+              let localMovementSignal = false;
               if (isLocalPlayer) {
                 const hasInput = normalizedX !== 0 || normalizedY !== 0;
+                const pendingInputs = isRaidScene ? pendingRaidInputs.length : pendingWorldInputs.length;
+                const pendingHasMotion = isRaidScene
+                  ? pendingRaidInputs.some((input) => input.x !== 0 || input.y !== 0)
+                  : pendingWorldInputs.some((input) => input.x !== 0 || input.y !== 0);
 
                 const correctionDistance = Phaser.Math.Distance.Between(
-                  character.container.x,
-                  character.container.y,
+                  character.simX,
+                  character.simY,
                   character.targetX,
                   character.targetY,
                 );
@@ -4838,40 +5711,57 @@ export function GameCanvas({
                 if (isRaidScene) {
                   if (pendingRaidInputs.length === 0) {
                     if (correctionDistance > 48) {
-                      character.container.setPosition(character.targetX, character.targetY);
+                      character.simPrevX = character.targetX;
+                      character.simPrevY = character.targetY;
+                      character.simX = character.targetX;
+                      character.simY = character.targetY;
                     } else if (correctionDistance > 0.8) {
                       const correctionLerp = Math.min(1, deltaSeconds * 14);
-                      character.container.x = Phaser.Math.Linear(
-                        character.container.x,
-                        character.targetX,
-                        correctionLerp,
-                      );
-                      character.container.y = Phaser.Math.Linear(
-                        character.container.y,
-                        character.targetY,
-                        correctionLerp,
-                      );
+                      const correctedX = Phaser.Math.Linear(character.simX, character.targetX, correctionLerp);
+                      const correctedY = Phaser.Math.Linear(character.simY, character.targetY, correctionLerp);
+                      character.simPrevX = character.simX;
+                      character.simPrevY = character.simY;
+                      character.simX = correctedX;
+                      character.simY = correctedY;
                     }
                   }
                 } else if (pendingWorldInputs.length === 0) {
                   if (correctionDistance > 48) {
-                    character.container.setPosition(character.targetX, character.targetY);
+                    character.simPrevX = character.targetX;
+                    character.simPrevY = character.targetY;
+                    character.simX = character.targetX;
+                    character.simY = character.targetY;
                   } else if (!hasInput && correctionDistance > 0.8) {
                     const correctionLerp = Math.min(1, deltaSeconds * 10);
-                    character.container.x = Phaser.Math.Linear(
-                      character.container.x,
-                      character.targetX,
-                      correctionLerp,
-                    );
-                    character.container.y = Phaser.Math.Linear(
-                      character.container.y,
-                      character.targetY,
-                      correctionLerp,
-                    );
+                    const correctedX = Phaser.Math.Linear(character.simX, character.targetX, correctionLerp);
+                    const correctedY = Phaser.Math.Linear(character.simY, character.targetY, correctionLerp);
+                    character.simPrevX = character.simX;
+                    character.simPrevY = character.simY;
+                    character.simX = correctedX;
+                    character.simY = correctedY;
                   }
                 }
+
+                if (!hasInput && pendingInputs === 0) {
+                  character.simPrevX = character.simX;
+                  character.simPrevY = character.simY;
+                }
+
+                const stepDistance = Phaser.Math.Distance.Between(
+                  character.simPrevX,
+                  character.simPrevY,
+                  character.simX,
+                  character.simY,
+                );
+                if (hasInput || pendingHasMotion || stepDistance > 0.6) {
+                  character.idleGraceUntil = this.time.now + 140;
+                }
+                localMovementSignal = this.time.now <= character.idleGraceUntil;
+                character.container.setPosition(
+                  Phaser.Math.Linear(character.simPrevX, character.simX, localInterpolationAlpha),
+                  Phaser.Math.Linear(character.simPrevY, character.simY, localInterpolationAlpha),
+                );
               } else {
-                const lerpFactor = Math.min(1, deltaSeconds * 12);
                 const distanceToTarget = Phaser.Math.Distance.Between(
                   character.container.x,
                   character.container.y,
@@ -4885,15 +5775,23 @@ export function GameCanvas({
                     character.targetY,
                   );
                 } else {
+                  const interpolationDelayMs = 160;
+                  const renderTime = this.time.now - interpolationDelayMs;
+                  const span = Math.max(1, character.interpNextAt - character.interpPrevAt);
+                  const t = Phaser.Math.Clamp(
+                    (renderTime - character.interpPrevAt) / span,
+                    0,
+                    1,
+                  );
                   character.container.x = Phaser.Math.Linear(
-                    character.container.x,
-                    character.targetX,
-                    lerpFactor,
+                    character.interpPrevX,
+                    character.interpNextX,
+                    t,
                   );
                   character.container.y = Phaser.Math.Linear(
-                    character.container.y,
-                    character.targetY,
-                    lerpFactor,
+                    character.interpPrevY,
+                    character.interpNextY,
+                    t,
                   );
                 }
               }
@@ -4947,6 +5845,28 @@ export function GameCanvas({
                 );
               });
 
+              if (character.isDead) {
+                setCharacterVisibility(character, character.isVisible ?? true, isLocalPlayer);
+                character.deathEffect
+                  .setPosition(character.container.x, character.container.y)
+                  .setScale(getSharedDeathAnimationScale(meadowMap.tileSize))
+                  .setFrame(
+                    getSpriteSheetAnimationFrame(
+                      SHARED_DEATH_ANIMATION,
+                      Math.max(0, this.time.now - character.deathStartedAt),
+                    ),
+                  );
+                if (isDeathAnimationComplete(SHARED_DEATH_ANIMATION, character, this.time.now)) {
+                  completedDeadPlayerIds.add(sessionId);
+                  destroyCharacter(sessionId);
+                  return;
+                }
+
+                character.lastX = character.container.x;
+                character.lastY = character.container.y;
+                return;
+              }
+
               const isCasting =
                 character.currentCastingSkillId.length > 0 &&
                 character.currentCastEndsAt > Date.now() &&
@@ -4971,8 +5891,20 @@ export function GameCanvas({
               const moved =
                 Math.abs(character.container.x - character.lastX) > 0.1 ||
                 Math.abs(character.container.y - character.lastY) > 0.1;
+              const movementSignal = isLocalPlayer ? localMovementSignal : moved;
+              if (movementSignal) {
+                character.lastMovedAt = this.time.now;
+              }
+              const shouldAnimateMove =
+                movementSignal || this.time.now - character.lastMovedAt <= 120;
 
-              updateCharacterPose(character, moved, deltaSeconds);
+              updateCharacterPose(
+                character,
+                shouldAnimateMove,
+                deltaSeconds,
+                this.time.now,
+                isLocalPlayer ? localLookTargetY : undefined,
+              );
               character.burnAura.setVisible(
                 character.currentBurnTicksRemaining > 0 &&
                   character.currentBurnEndsAt > Date.now() &&
@@ -5027,7 +5959,7 @@ export function GameCanvas({
                 const flamePhase = phase + offset.phaseOffset;
                 effectVisual.flames[index]
                   .setFrame(
-                    getAnimationFrame(groundAnimation, this.time.now, index * 90),
+                    getSpriteSheetAnimationFrame(groundAnimation, this.time.now, index * 90),
                   )
                   .setAlpha(offset.alpha + Math.sin(flamePhase * 2.1) * 0.05)
                   .setScale(offset.scale + Math.sin(flamePhase * 1.6) * 0.035)
@@ -5079,7 +6011,7 @@ export function GameCanvas({
               );
             });
 
-            mobs.forEach((mob) => {
+            mobs.forEach((mob, mobId) => {
               const distanceToTarget = Phaser.Math.Distance.Between(
                 mob.sprite.x,
                 mob.sprite.y,
@@ -5104,11 +6036,94 @@ export function GameCanvas({
 
               mob.bobPhase += deltaSeconds * 6;
               const bobOffset = Math.sin(mob.bobPhase) * 0.6;
-              const animatedTexture = getAnimatedMobTexture(mob.baseTexture, this.time.now);
-              if (mob.currentTexture !== animatedTexture) {
-                mob.sprite.setTexture(animatedTexture);
-                mob.currentTexture = animatedTexture;
+              const serverNow = Date.now();
+              const attackStartedAt = mob.currentAttackCooldownEndsAt - mob.currentAttackCooldownMs;
+              const attackClip = getPreferredMobClip(mob.baseTexture, 'attack');
+              const attackDurationMs = attackClip
+                ? getSpriteSheetAnimationDurationMs(toRuntimeAnimationFromMobClip(attackClip))
+                : 0;
+              const isSkeletonDashLunging =
+                mob.currentCastingSkillId === SKELETON_DASH_SKILL_ID &&
+                mob.currentSkillLungeStartedAt > 0 &&
+                serverNow < mob.currentSkillLungeEndsAt;
+              const usesGenericAttackWindow = mob.baseTexture !== 'skeleton';
+              const isAttacking =
+                !mob.isDead &&
+                (
+                  isSkeletonDashLunging ||
+                  (
+                    usesGenericAttackWindow &&
+                    mob.currentAttackCooldownEndsAt > 0 &&
+                    serverNow >= attackStartedAt &&
+                    serverNow <= attackStartedAt + Math.max(150, attackDurationMs)
+                  )
+                );
+              const isMovingNow =
+                distanceToTarget > 6 ||
+                Math.abs(mob.sprite.x - mob.lastX) > 0.25 ||
+                Math.abs(mob.sprite.y - mob.lastY) > 0.25;
+              if (!mob.isDead && isMovingNow) {
+                mob.lastMovedAt = this.time.now;
               }
+              const isMoving =
+                !mob.isDead &&
+                (isMovingNow || this.time.now - mob.lastMovedAt <= 140);
+              const animationState: MobAnimationState = isAttacking
+                  ? 'attack'
+                  : isMoving
+                    ? 'move'
+                    : 'idle';
+
+              if (!mob.isDead) {
+                syncAnimationState(mob, animationState, this.time.now);
+              }
+
+              if (mob.isDead) {
+                mob.deathEffect
+                  .setPosition(mob.sprite.x, getMobDeathAnimationCenterY(mob))
+                  .setScale(mob.renderScale)
+                  .setFrame(
+                    getSpriteSheetAnimationFrame(
+                      SHARED_DEATH_ANIMATION,
+                      Math.max(0, this.time.now - mob.deathStartedAt),
+                    ),
+                  );
+                if (isDeathAnimationComplete(SHARED_DEATH_ANIMATION, mob, this.time.now)) {
+                  completedDeadMobIds.add(mobId);
+                  destroyMob(mobId);
+                  return;
+                }
+
+                mob.lastX = mob.sprite.x;
+                mob.lastY = mob.sprite.y;
+                return;
+              }
+              const renderState = resolveMobRenderState(
+                mob.baseTexture,
+                this.time.now,
+                animationState,
+                mob.animationStartedAt,
+              );
+              if (animationState === 'attack' && attackClip) {
+                if (isSkeletonDashLunging) {
+                  const totalFrames = Math.max(1, attackClip.endFrame - attackClip.startFrame + 1);
+                  const lungeDuration = Math.max(1, mob.currentSkillLungeEndsAt - mob.currentSkillLungeStartedAt);
+                  const lungeProgress = Phaser.Math.Clamp(
+                    (serverNow - mob.currentSkillLungeStartedAt) / lungeDuration,
+                    0,
+                    1,
+                  );
+                  const lungeFrameOffset = Math.min(totalFrames - 1, Math.floor(lungeProgress * totalFrames));
+                  renderState.frame = attackClip.startFrame + lungeFrameOffset;
+                }
+              }
+              if (mob.currentTexture !== renderState.textureKey || mob.currentFrame !== renderState.frame) {
+                mob.sprite.setTexture(renderState.textureKey, renderState.frame);
+                mob.currentTexture = renderState.textureKey;
+                mob.currentFrame = renderState.frame;
+              }
+              mob.renderScale = renderState.renderScale;
+              mob.sprite.setOrigin(0.5, renderState.anchorY);
               if (mob.currentBurnTicksRemaining > 0 && mob.currentBurnEndsAt > Date.now()) {
                 mob.burnAura.setPosition(mob.sprite.x, mob.sprite.y + 6 + bobOffset * 0.2);
                 mob.burnAura.setSize(
@@ -5125,9 +6140,32 @@ export function GameCanvas({
               mob.healthBarFrame.setPosition(mob.sprite.x, mob.sprite.y + 22 + bobOffset);
               mob.healthBarBack.setPosition(mob.sprite.x, mob.sprite.y + 22 + bobOffset);
               mob.healthBarFill.setPosition(mob.sprite.x - 12, mob.sprite.y + 22 + bobOffset);
+              mob.castBarFrame.setPosition(mob.sprite.x, mob.sprite.y + 30 + bobOffset);
+              mob.castBarBack.setPosition(mob.sprite.x, mob.sprite.y + 30 + bobOffset);
+              mob.castBarFill.setPosition(mob.sprite.x - 12, mob.sprite.y + 30 + bobOffset);
               mob.healthSegments.forEach((segment, index) => {
                 segment.setPosition(mob.sprite.x - 10.8 + index * 2.4, mob.sprite.y + 22 + bobOffset);
               });
+              const isCasting =
+                mob.currentCastingSkillId.length > 0 &&
+                mob.currentCastEndsAt > serverNow &&
+                mob.currentCastEndsAt > mob.currentCastStartedAt;
+              if (isCasting) {
+                const castDuration = Math.max(1, mob.currentCastEndsAt - mob.currentCastStartedAt);
+                const castProgress = Phaser.Math.Clamp(
+                  (serverNow - mob.currentCastStartedAt) / castDuration,
+                  0,
+                  1,
+                );
+                mob.castBarFill.width = 24 * castProgress;
+                mob.castBarFrame.setVisible(mob.sprite.visible);
+                mob.castBarBack.setVisible(mob.sprite.visible);
+                mob.castBarFill.setVisible(mob.sprite.visible);
+              } else {
+                mob.castBarFrame.setVisible(false);
+                mob.castBarBack.setVisible(false);
+                mob.castBarFill.setVisible(false);
+              }
               updateMobEffectDisplay(mob, mob.sprite.x, mob.sprite.y - 30 + bobOffset * 0.25);
               mob.lastX = mob.sprite.x;
               mob.lastY = mob.sprite.y;
@@ -5330,6 +6368,95 @@ export function GameCanvas({
                   const traderVisual = worldTraderVisuals.get(trader.id);
                   const questMarker = traderQuestMarkerRef.current?.(trader) ?? null;
                   if (traderVisual) {
+                    if (
+                      traderVisual.body &&
+                      traderVisual.head &&
+                      traderVisual.leftEye &&
+                      traderVisual.rightEye &&
+                      traderVisual.leftHand &&
+                      traderVisual.rightHand
+                    ) {
+                      const traderBodyAnimation = PLAYER_ANIMATIONS.idle;
+                      const traderAnimationStartedAt = traderVisual.animationStartedAt ?? this.time.now;
+                      if (traderBodyAnimation) {
+                        const bodyFrame = getAnimationFrameAtState(
+                          traderBodyAnimation,
+                          { animationStartedAt: traderAnimationStartedAt },
+                          this.time.now,
+                        );
+                        traderVisual.body.setTexture(traderBodyAnimation.textureKey, bodyFrame);
+                        if (traderVisual.bodyOverlay && traderVisual.bodyOverlayAnimation) {
+                          const overlayFrame = getAnimationFrameAtState(
+                            traderVisual.bodyOverlayAnimation,
+                            { animationStartedAt: traderAnimationStartedAt },
+                            this.time.now,
+                          );
+                          traderVisual.bodyOverlay.setTexture(
+                            traderVisual.bodyOverlayAnimation.textureKey,
+                            overlayFrame,
+                          );
+                        }
+                        const bodyPixelSize = getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, tileSize);
+                        const headAnimationOffsetY = getPlayerHeadOffsetY(
+                          traderBodyAnimation,
+                          traderAnimationStartedAt,
+                          this.time.now,
+                          bodyPixelSize,
+                        );
+                        traderVisual.head.y = DEFAULT_PLAYER_VISUALS.head.offsetY + headAnimationOffsetY;
+                        if (traderVisual.hairOverlay) {
+                          traderVisual.hairOverlay.x = trader.hairOffsetX ?? 0;
+                          traderVisual.hairOverlay.y =
+                            DEFAULT_PLAYER_VISUALS.head.offsetY +
+                            headAnimationOffsetY +
+                            (trader.hairOffsetY ?? 0);
+                        }
+                        if (traderVisual.headOverlay) {
+                          traderVisual.headOverlay.y = DEFAULT_PLAYER_VISUALS.head.offsetY + headAnimationOffsetY;
+                        }
+                        const traderEyeDirection = getEyeLookDirection(
+                          localCharacter?.container.y,
+                          traderVisual.container.y,
+                        );
+                        const leftEyePosition = getEyeLocalPosition(traderEyeDirection, 'left', tileSize);
+                        const rightEyePosition = getEyeLocalPosition(traderEyeDirection, 'right', tileSize);
+                        traderVisual.leftEye.setPosition(
+                          leftEyePosition.x,
+                          leftEyePosition.y + headAnimationOffsetY,
+                        );
+                        traderVisual.rightEye.setPosition(
+                          rightEyePosition.x,
+                          rightEyePosition.y + headAnimationOffsetY,
+                        );
+                        const handOffsets = PLAYER_HAND_ANIMATION_OFFSETS.idle;
+                        const handFrameOffset = getSpriteSheetAnimationFrameOffset(
+                          traderBodyAnimation,
+                          Math.max(0, this.time.now - traderAnimationStartedAt),
+                        );
+                        const handFrameIndex =
+                          handOffsets && handOffsets.leftX.length > 0
+                            ? handFrameOffset % handOffsets.leftX.length
+                            : 0;
+                        const leftHandPosition = getHandLocalPosition(
+                          PLAYER_HAND_BASE_OFFSETS.left,
+                          {
+                            x: handOffsets?.leftX[handFrameIndex] ?? 0,
+                            y: handOffsets?.leftY[handFrameIndex] ?? 0,
+                          },
+                          tileSize,
+                        );
+                        const rightHandPosition = getHandLocalPosition(
+                          PLAYER_HAND_BASE_OFFSETS.right,
+                          {
+                            x: handOffsets?.rightX[handFrameIndex] ?? 0,
+                            y: handOffsets?.rightY[handFrameIndex] ?? 0,
+                          },
+                          tileSize,
+                        );
+                        traderVisual.leftHand.setPosition(leftHandPosition.x, leftHandPosition.y);
+                        traderVisual.rightHand.setPosition(rightHandPosition.x, rightHandPosition.y);
+                      }
+                    }
                     const markerVisible = Boolean(questMarker);
                     const bounceOffset = markerVisible ? Math.sin(this.time.now / 180) * 3 : 0;
                     const pulseScale = markerVisible ? 0.6 + (Math.sin(this.time.now / 180) + 1) * 0.04 : 0.6;
@@ -5508,6 +6635,7 @@ export function GameCanvas({
               const currentEditorMode = worldEditorModeRef.current;
               const currentSelectedWorldTile = selectedWorldTileRef.current;
               const currentSelectedWorldSprite = selectedWorldSpriteRef.current;
+              const currentSelectedWorldMob = selectedWorldMobRef.current;
               const currentSelectedWorldTrader = selectedWorldTraderRef.current;
               const hoverTileKey = `${tileX}:${tileY}`;
               if (lastWorldHoverTileRef.current !== hoverTileKey) {
@@ -5527,12 +6655,28 @@ export function GameCanvas({
                   lastWorldEditDebugRef.current = nextDebugSerialized;
                   worldEditDebugChangeRef.current?.(nextDebug);
                 }
+              } else if (currentEditorMode === 'mob') {
+                const nextDebug = {
+                  textureKey: currentSelectedWorldMob.kind,
+                  textureLoaded: this.textures.exists(currentSelectedWorldMob.kind),
+                };
+                const nextDebugSerialized = JSON.stringify(nextDebug);
+                if (lastWorldEditDebugRef.current !== nextDebugSerialized) {
+                  lastWorldEditDebugRef.current = nextDebugSerialized;
+                  worldEditDebugChangeRef.current?.(nextDebug);
+                }
               } else if (currentEditorMode === 'trader') {
-                const bodyTextureKey = currentSelectedWorldTrader.bodyTexturePath
-                  ? getWorldStampTextureKey(currentSelectedWorldTrader.bodyTexturePath)
+                const resolvedBodyTexturePath = currentSelectedWorldTrader.bodyItemId
+                  ? getEquipmentBodyTexturePath(currentSelectedWorldTrader.bodyItemId)
+                  : undefined;
+                const resolvedHeadTexturePath = currentSelectedWorldTrader.headItemId
+                  ? getEquipmentBodyTexturePath(currentSelectedWorldTrader.headItemId)
+                  : undefined;
+                const bodyTextureKey = resolvedBodyTexturePath
+                  ? getWorldStampTextureKey(resolvedBodyTexturePath)
                   : '';
-                const headTextureKey = currentSelectedWorldTrader.headTexturePath
-                  ? getWorldStampTextureKey(currentSelectedWorldTrader.headTexturePath)
+                const headTextureKey = resolvedHeadTexturePath
+                  ? getWorldStampTextureKey(resolvedHeadTexturePath)
                   : '';
                 const nextDebug = {
                   textureKey: [bodyTextureKey, headTextureKey].filter(Boolean).join(' + '),
@@ -5597,30 +6741,81 @@ export function GameCanvas({
                 worldEditPreviewSprite.setVisible(false);
               }
               if (currentEditorMode === 'trader') {
-                const bodyTextureKey = currentSelectedWorldTrader.bodyTexturePath
-                  ? getWorldStampTextureKey(currentSelectedWorldTrader.bodyTexturePath)
+                const resolvedBodyTexturePath = currentSelectedWorldTrader.bodyItemId
+                  ? getEquipmentBodyTexturePath(currentSelectedWorldTrader.bodyItemId)
+                  : undefined;
+                const resolvedHeadTexturePath = currentSelectedWorldTrader.headItemId
+                  ? getEquipmentBodyTexturePath(currentSelectedWorldTrader.headItemId)
+                  : undefined;
+                const traderBodyOverlayAnimation = getWorldTraderBodyOverlayAnimation(
+                  resolvedBodyTexturePath,
+                );
+                const bodyTextureKey = resolvedBodyTexturePath
+                  ? traderBodyOverlayAnimation
+                    ? traderBodyOverlayAnimation.textureKey
+                    : getWorldStampTextureKey(resolvedBodyTexturePath)
                   : '';
-                const headTextureKey = currentSelectedWorldTrader.headTexturePath
-                  ? getWorldStampTextureKey(currentSelectedWorldTrader.headTexturePath)
+                const hairTextureKey = currentSelectedWorldTrader.hairTexturePath
+                  ? getWorldStampTextureKey(currentSelectedWorldTrader.hairTexturePath)
                   : '';
-                if (bodyTextureKey && !this.textures.exists(bodyTextureKey) && !pendingWorldTextureKeys.has(bodyTextureKey)) {
-                  ensureWorldTextureLoaded(currentSelectedWorldTrader.bodyTexturePath);
-                }
-                if (headTextureKey && !this.textures.exists(headTextureKey) && !pendingWorldTextureKeys.has(headTextureKey)) {
-                  ensureWorldTextureLoaded(currentSelectedWorldTrader.headTexturePath);
-                }
+                const headTextureKey = resolvedHeadTexturePath
+                  ? getWorldStampTextureKey(resolvedHeadTexturePath)
+                  : '';
                 if (
                   bodyTextureKey &&
-                  headTextureKey &&
-                  this.textures.exists(bodyTextureKey) &&
-                  this.textures.exists(headTextureKey)
+                  !this.textures.exists(bodyTextureKey) &&
+                  !pendingWorldTextureKeys.has(bodyTextureKey) &&
+                  !pendingWorldTraderSheetKeys.has(bodyTextureKey)
                 ) {
-                  worldEditTraderBodyLayer
-                    .setTexture(bodyTextureKey)
-                    .setVisible(true);
-                  worldEditTraderHeadLayer
-                    .setTexture(headTextureKey)
-                    .setVisible(true);
+                  if (resolvedBodyTexturePath) {
+                    if (traderBodyOverlayAnimation) {
+                      ensureWorldTraderBodyOverlayLoaded(resolvedBodyTexturePath);
+                    } else {
+                      ensureWorldTextureLoaded(resolvedBodyTexturePath);
+                    }
+                  }
+                }
+                if (headTextureKey && !this.textures.exists(headTextureKey) && !pendingWorldTextureKeys.has(headTextureKey)) {
+                  if (resolvedHeadTexturePath) {
+                    ensureWorldTextureLoaded(resolvedHeadTexturePath);
+                  }
+                }
+                if (hairTextureKey && !this.textures.exists(hairTextureKey) && !pendingWorldTextureKeys.has(hairTextureKey)) {
+                  ensureWorldTextureLoaded(currentSelectedWorldTrader.hairTexturePath ?? '');
+                }
+                if (
+                  (!bodyTextureKey || this.textures.exists(bodyTextureKey)) &&
+                  (!hairTextureKey || this.textures.exists(hairTextureKey)) &&
+                  (!headTextureKey || this.textures.exists(headTextureKey))
+                ) {
+                  if (bodyTextureKey) {
+                    worldEditTraderBodyLayer
+                      .setTexture(
+                        bodyTextureKey,
+                        traderBodyOverlayAnimation ? traderBodyOverlayAnimation.startFrame : undefined,
+                      )
+                      .setVisible(true);
+                  } else {
+                    worldEditTraderBodyLayer.setVisible(false);
+                  }
+                  if (hairTextureKey) {
+                    worldEditTraderHairLayer
+                      .setTexture(hairTextureKey)
+                      .setPosition(
+                        currentSelectedWorldTrader.hairOffsetX ?? 0,
+                        currentSelectedWorldTrader.hairOffsetY ?? 0,
+                      )
+                      .setVisible(true);
+                  } else {
+                    worldEditTraderHairLayer.setVisible(false);
+                  }
+                  if (headTextureKey) {
+                    worldEditTraderHeadLayer
+                      .setTexture(headTextureKey)
+                      .setVisible(true);
+                  } else {
+                    worldEditTraderHeadLayer.setVisible(false);
+                  }
                   worldEditTraderShadow
                     .setPosition(previewX, previewY + 15)
                     .setVisible(true);
@@ -5629,10 +6824,12 @@ export function GameCanvas({
                     .setVisible(true);
                 } else {
                   worldEditTraderBodyLayer.setVisible(false);
+                  worldEditTraderHairLayer.setVisible(false);
                   worldEditTraderHeadLayer.setVisible(false);
                 }
               } else {
                 worldEditTraderBodyLayer.setVisible(false);
+                worldEditTraderHairLayer.setVisible(false);
                 worldEditTraderHeadLayer.setVisible(false);
               }
               worldEditPreviewOverlay.setVisible(false);
@@ -5706,6 +6903,17 @@ export function GameCanvas({
               targetingPreviewTiles.forEach((tile) => tile.setVisible(false));
             }
 
+            if (!isRaidScene) {
+              worldMobVisuals.forEach((mobVisual) => {
+                const renderState = resolveMobRenderState(mobVisual.kind, this.time.now);
+                mobVisual.sprite.setTexture(renderState.textureKey, renderState.frame);
+                mobVisual.sprite.setScale(renderState.renderScale);
+                mobVisual.sprite.setOrigin(0.5, renderState.anchorY);
+                mobVisual.shadow.setPosition(mobVisual.sprite.x, mobVisual.sprite.y + 15);
+                mobVisual.nameplate.setPosition(mobVisual.sprite.x, mobVisual.sprite.y - 24);
+              });
+            }
+
             if (
               keyboardEnabled &&
               activeSkillTargetingRef.current === null &&
@@ -5764,6 +6972,12 @@ export function GameCanvas({
               traderVisual.questMarker.destroy();
             });
             worldTraderVisuals.clear();
+            worldMobVisuals.forEach((mobVisual) => {
+              mobVisual.shadow.destroy();
+              mobVisual.sprite.destroy();
+              mobVisual.nameplate.destroy();
+            });
+            worldMobVisuals.clear();
             minimapChangeRef.current?.(null);
             castRangeIndicator.destroy();
             targetingPreviewTiles.forEach((tile) => tile.destroy());

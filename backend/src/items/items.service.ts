@@ -4,7 +4,7 @@ import { ITEM_CATALOG, type ItemCatalogEntry } from './item-catalog';
 @Injectable()
 export class ItemsService {
   private readonly itemCatalog = new Map<string, ItemCatalogEntry>(
-    Object.values(ITEM_CATALOG).map((entry) => [entry.code, entry]),
+    Object.values(ITEM_CATALOG).map((entry) => [entry.id, entry]),
   );
 
   async findByCodes(codes: string[]) {

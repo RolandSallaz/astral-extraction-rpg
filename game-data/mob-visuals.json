@@ -12,5 +12,74 @@
     "anchorY": 1,
     "clips": {},
     "states": {}
+  },
+  "skeleton": {
+    "kind": "skeleton",
+    "spriteScale": 2,
+    "anchorY": 0.75,
+    "clips": {
+      "default": {
+        "key": "default",
+        "spritesheet": "/npc/skeleton/skeleton.png",
+        "frameWidth": 32,
+        "frameHeight": 32,
+        "columns": 5,
+        "startFrame": 0,
+        "endFrame": 4,
+        "frameRate": 8,
+        "repeat": -1
+      },
+      "idle": {
+        "key": "idle",
+        "spritesheet": "/npc/skeleton/skeleton.png",
+        "frameWidth": 32,
+        "frameHeight": 32,
+        "columns": 5,
+        "startFrame": 0,
+        "endFrame": 3,
+        "frameRate": 8,
+        "repeat": -1
+      },
+      "move": {
+        "key": "move",
+        "spritesheet": "/npc/skeleton/skeleton.png",
+        "frameWidth": 32,
+        "frameHeight": 32,
+        "columns": 5,
+        "startFrame": 5,
+        "endFrame": 8,
+        "frameRate": 8,
+        "repeat": -1
+      },
+      "attack": {
+        "key": "attack",
+        "spritesheet": "/npc/skeleton/skeleton.png",
+        "frameWidth": 32,
+        "frameHeight": 32,
+        "columns": 5,
+        "startFrame": 10,
+        "endFrame": 13,
+        "frameRate": 8,
+        "repeat": -1
+      },
+      "death": {
+        "key": "death",
+        "spritesheet": "/npc/skeleton/skeleton.png",
+        "frameWidth": 32,
+        "frameHeight": 32,
+        "columns": 5,
+        "startFrame": 25,
+        "endFrame": 29,
+        "frameRate": 8,
+        "repeat": 0
+      }
+    },
+    "states": {
+      "idle": "idle",
+      "move": "move",
+      "attack": "attack",
+      "hit": "default",
+      "death": "death"
+    }
   }
 }

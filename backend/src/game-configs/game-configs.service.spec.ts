@@ -81,6 +81,9 @@ describe('GameConfigsService', () => {
           clips: {
             idle_basic: {
               spritesheet: 'mobs/rat.png',
+              frameWidth: 0,
+              frameHeight: 24.7,
+              columns: 0,
               startFrame: -2,
               endFrame: 3.9,
               frameRate: 0,
@@ -100,6 +103,9 @@ describe('GameConfigsService', () => {
     expect(result.rat.clips.idle_basic).toEqual({
       key: 'idle_basic',
       spritesheet: 'mobs/rat.png',
+      frameWidth: 1,
+      frameHeight: 24,
+      columns: 1,
       startFrame: 0,
       endFrame: 3,
       frameRate: 1,

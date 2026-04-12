@@ -7,6 +7,9 @@ export const MOB_ANIMATION_STATES: MobAnimationState[] = ['idle', 'move', 'attac
 export type MobAnimationClipDefinition = {
   key: string;
   spritesheet: string;
+  frameWidth: number;
+  frameHeight: number;
+  columns: number;
   startFrame: number;
   endFrame: number;
   frameRate: number;
@@ -58,6 +61,18 @@ export function normalizeMobAnimationClipDefinition(
   return {
     key,
     spritesheet,
+    frameWidth:
+      typeof candidate.frameWidth === 'number' && Number.isFinite(candidate.frameWidth)
+        ? Math.max(1, Math.floor(candidate.frameWidth))
+        : 16,
+    frameHeight:
+      typeof candidate.frameHeight === 'number' && Number.isFinite(candidate.frameHeight)
+        ? Math.max(1, Math.floor(candidate.frameHeight))
+        : 16,
+    columns:
+      typeof candidate.columns === 'number' && Number.isFinite(candidate.columns)
+        ? Math.max(1, Math.floor(candidate.columns))
+        : 1,
     startFrame:
       typeof candidate.startFrame === 'number' && Number.isFinite(candidate.startFrame)
         ? Math.max(0, Math.floor(candidate.startFrame))

@@ -2,6 +2,7 @@ import type { CharacterProfile } from '@/lib/playerProfile';
 import type { ItemBalanceConfig } from '@/lib/itemBalance';
 import type { SkillBalanceConfig } from '@/lib/skillBalance';
 import type { MobBalanceConfig } from '@/lib/mobBalance';
+import type { MobVisualConfig } from '@mmorpg/shared/mobs/visuals';
 
 export type PartyView = {
   id: string;
@@ -107,6 +108,10 @@ function getSessionToken() {
   }
 
   return window.localStorage.getItem(SESSION_TOKEN_KEY);
+}
+
+export function getStoredSessionToken() {
+  return getSessionToken();
 }
 
 async function request<T>(path: string, init?: RequestInit, authenticated = false): Promise<T> {
@@ -275,6 +280,21 @@ export async function loadMobBalanceConfig() {
 export async function saveMobBalanceConfig(config: MobBalanceConfig) {
   return request<MobBalanceConfig>(
     '/game-configs/mob-balance',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(config),
+    },
+    true,
+  );
+}
+
+export async function loadMobVisualConfig() {
+  return request<MobVisualConfig>('/game-configs/mob-visuals', undefined, true);
+}
+
+export async function saveMobVisualConfig(config: MobVisualConfig) {
+  return request<MobVisualConfig>(
+    '/game-configs/mob-visuals',
     {
       method: 'PATCH',
       body: JSON.stringify(config),

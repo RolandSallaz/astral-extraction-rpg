@@ -15,7 +15,7 @@ import {
   applyHealingMultiplier,
   getSharedFireballCastTimeMs,
 } from "../projectileSkills.js";
-import { type ProjectileState } from "../schema/ProjectileState.js";
+import { type ProjectileState, type ProjectileServerData } from "../schema/ProjectileState.js";
 import { type SkillBalanceConfig } from "../skillBalance.js";
 import {
   getProjectileDamageScale as getSharedProjectileDamageScale,
@@ -135,18 +135,20 @@ export function getRoomSkillBurnDamage(
   return skillBalance[getRoomSkillBalanceKey(skillId)].burnDamage;
 }
 
-export function getRoomProjectileDamageScale(projectile: ProjectileState) {
-  return getSharedProjectileDamageScale(projectile);
+export function getRoomProjectileDamageScale(projectile: ProjectileState, serverData: ProjectileServerData) {
+  return getSharedProjectileDamageScale(projectile, serverData);
 }
 
 export function getRoomProjectileDirectDamage(
   skillBalance: SkillBalanceConfig,
   projectile: ProjectileState,
+  serverData: ProjectileServerData,
   targetHealth: number,
   targetMaxHealth: number,
 ) {
   return getSharedProjectileDirectDamage(
     projectile,
+    serverData,
     getRoomSkillDirectDamage(skillBalance, projectile.skillId),
     targetHealth,
     targetMaxHealth,

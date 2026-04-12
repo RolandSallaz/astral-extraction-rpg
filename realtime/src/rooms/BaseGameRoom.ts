@@ -8,6 +8,10 @@ import {
   MOB_KINDS,
   type MobKind,
 } from "@mmorpg/shared/mobs/catalog";
+import {
+  SKELETON_DASH_SKILL,
+  SKELETON_DASH_SKILL_ID,
+} from "@mmorpg/shared/mobs/skills";
 import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import { type SkillBalanceConfig } from "./skillBalance.js";
@@ -28,6 +32,7 @@ import {
   getFireballCastRange,
   getFireballCooldownMs,
 } from "./fireballGems.js";
+import { createSkillHandlers, type SkillCastContext, type SkillHandler } from "./skills/index.js";
 import {
   getEffectiveMobAttackRange,
   getMobDesiredTargetPosition,
@@ -74,7 +79,7 @@ import {
 import { BurnService } from "./services/BurnService.js";
 import { HealingService } from "./services/HealingService.js";
 import { SpatialGrid } from "./services/SpatialGrid.js";
-import { BalancePoller } from "./services/BalancePoller.js";
+import { ContentSnapshotPoller } from "./services/ContentSnapshotPoller.js";
 import { canCastSkill, type SkillId } from "@mmorpg/shared/skills/registry";
 import {
   applyRoomProjectileLifesteal,
@@ -118,8 +123,9 @@ import type { BasePlayerState } from "./schema/BasePlayerState.js";
 import type { MobState } from "./schema/MobState.js";
 import type { ChestState } from "./schema/ChestState.js";
 import { GroundEffectState } from "./schema/GroundEffectState.js";
-import type { ProjectileState } from "./schema/ProjectileState.js";
+import { type ProjectileState, type ProjectileServerData, createDefaultProjectileServerData } from "./schema/ProjectileState.js";
 import { applyDamageToPlayer as applyDamageToPlayerService } from "./services/CombatService.js";
+import { SharedCombatTickSystem } from "./systems/RoomTickSystems.js";
 
 // Re-export types subclasses need
 export type { DamageType } from "./projectileSkills.js";
@@ -182,6 +188,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     targetY?: number;
   }>();
   protected readonly projectileHitHistory = new Map<string, Set<string>>();
+  protected readonly projectileServerData = new Map<string, ProjectileServerData>();
   protected readonly pendingBurstSpawns: {
     ownerId: string;
     x: number;
@@ -200,17 +207,43 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected readonly consumableCooldownEndsAt = new Map<string, number>();
   protected readonly pendingTeleportScrollCasts = new Set<string>();
   protected readonly mobPathCache = new Map<string, MobPathCacheEntry>();
+  protected readonly losCache = new Map<string, boolean>();
   protected readonly itemFireResistance = createDefaultItemFireResistanceMap();
+  protected readonly mobSkillHitTargets = new Map<string, Set<string>>();
   protected readonly playerSpatialGrid = new SpatialGrid<BasePlayerState>(64);
   protected readonly mobSpatialGrid = new SpatialGrid<MobState>(64);
   protected readonly playerSpatialOrder = new Map<string, number>();
   protected readonly mobSpatialOrder = new Map<string, number>();
-  protected readonly balancePoller = new BalancePoller({
-    onSkillBalance: (data) => this.applyBackendSkillBalance(data),
-    onMobBalance: (data) => this.applyBackendMobBalance(data),
-    onItemBalance: (data) => this.applyBackendItemBalance(data),
+  protected readonly contentSnapshotPoller = new ContentSnapshotPoller({
+    onSnapshot: (snapshot) => {
+      this.applyBackendSkillBalance(snapshot.skillBalance);
+      this.applyBackendMobBalance(snapshot.mobBalance);
+      this.applyBackendItemBalance(snapshot.itemBalance);
+    },
   });
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
+  protected readonly skillHandlers = createSkillHandlers();
+  protected readonly sharedCombatTickSystem = new SharedCombatTickSystem({
+    updatePendingCasts: (now) => this.updatePendingCasts(now),
+    updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
+    updatePendingAftershocks: (now) => this.updatePendingAftershocks(now),
+    updateBurningTargets: (now) => this.updateBurningTargets(now),
+    updateHealingTargets: (now) => this.updateHealingTargets(now),
+    updateGroundEffects: (now) => this.updateGroundEffects(now),
+    updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
+  });
+  protected readonly sharedRaidCombatTickSystem = new SharedCombatTickSystem(
+    {
+      updatePendingCasts: (now) => this.updatePendingCasts(now),
+      updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
+      updatePendingAftershocks: (now) => this.updatePendingAftershocks(now),
+      updateBurningTargets: (now) => this.updateBurningTargets(now),
+      updateHealingTargets: (now) => this.updateHealingTargets(now),
+      updateGroundEffects: (now) => this.updateGroundEffects(now),
+      updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
+      updateBurningMobs: (now) => this.updateBurningMobs(now),
+    },
+  );
 
   // ── Auth (identical in both rooms) ───────────────────────────────
   protected async verifyAuth(options?: Record<string, unknown>) {
@@ -227,12 +260,14 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
   // ── Dispose (identical in both rooms) ────────────────────────────
   protected disposeShared() {
-    this.balancePoller.stop();
+    this.contentSnapshotPoller.stop();
     this.playerBurns.clear();
     this.mobBurns.clear();
     this.playerHealing.clear();
     this.playerSpatialGrid.clear();
     this.mobSpatialGrid.clear();
+    this.projectileServerData.clear();
+    this.mobSkillHitTargets.clear();
   }
 
   // ── Shared message handlers ──────────────────────────────────────
@@ -262,97 +297,70 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
 
-    const p = this.profile;
-
-    if (skillId === "fireball") {
-      if (player.fireballCooldownEndsAt > now) {
-        return;
-      }
-
-      const requestedTargetX = Number.isFinite(message.targetX) ? message.targetX! : player.x;
-      const requestedTargetY = Number.isFinite(message.targetY) ? message.targetY! : player.y;
-      const clampedTarget = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
-      if (!this.canPerformFireballCast(player, clampedTarget.x, clampedTarget.y)) {
-        return;
-      }
-
-      player.fireballCooldownEndsAt = now + getFireballCooldownMs(p.fireballCooldownMs, player);
-      const castTimeMs = this.getPlayerCastTimeMs(player);
-      if (castTimeMs > 0) {
-        player.castingSkillId = "fireball";
-        player.castStartedAt = now;
-        player.castEndsAt = now + castTimeMs;
-        this.clearPlayerMovement(sessionId);
-        this.pendingSkillCasts.set(sessionId, {
-          skillId: "fireball",
-          targetX: clampedTarget.x,
-          targetY: clampedTarget.y,
-        });
-      } else {
-        const postCastLockMs = this.performFireballCast(sessionId, player, clampedTarget.x, clampedTarget.y);
-        if (postCastLockMs > 0) {
-          player.castingSkillId = "fireball";
-          player.castStartedAt = now;
-          player.castEndsAt = now + postCastLockMs;
-        }
-      }
+    const handler = this.skillHandlers.get(skillId);
+    if (!handler) {
       return;
     }
 
-    if (skillId === "fireNova") {
-      if (player.fireNovaCooldownEndsAt > now) {
-        return;
-      }
-
-      player.fireNovaCooldownEndsAt = now + p.fireNovaCooldownMs;
-      const castTimeMs = this.getPlayerCastTimeMs(player);
-      if (castTimeMs > 0) {
-        player.castingSkillId = "fireNova";
-        player.castStartedAt = now;
-        player.castEndsAt = now + castTimeMs;
-        this.clearPlayerMovement(sessionId);
-        this.pendingSkillCasts.set(sessionId, { skillId: "fireNova" });
-      } else {
-        const postCastLockMs = this.performFireNovaCast(sessionId, player);
-        if (postCastLockMs > 0) {
-          player.castingSkillId = "fireNova";
-          player.castStartedAt = now;
-          player.castEndsAt = now + postCastLockMs;
-        }
-      }
+    if (handler.getCooldownEndsAt(player) > now) {
       return;
     }
 
-    if (skillId === "fireField") {
-      if (player.fireFieldCooldownEndsAt > now) {
-        return;
-      }
+    const ctx = this.createSkillCastContext(sessionId, player, now);
 
+    let targetX = player.x;
+    let targetY = player.y;
+    if (handler.needsTarget) {
       const requestedTargetX = Number.isFinite(message.targetX) ? message.targetX! : player.x;
       const requestedTargetY = Number.isFinite(message.targetY) ? message.targetY! : player.y;
-      const clampedTarget = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
+      const clamped = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
+      targetX = clamped.x;
+      targetY = clamped.y;
+    }
 
-      player.fireFieldCooldownEndsAt = now + p.fireFieldCooldownMs;
-      const castTimeMs = this.getPlayerCastTimeMs(player);
-      if (castTimeMs > 0) {
-        player.castingSkillId = "fireField";
+    if (handler.canPerform && !handler.canPerform(ctx, targetX, targetY)) {
+      return;
+    }
+
+    handler.setCooldownEndsAt(player, now + handler.getCooldownMs(ctx));
+    const castTimeMs = this.getPlayerCastTimeMs(player);
+
+    if (castTimeMs > 0) {
+      player.castingSkillId = skillId;
+      player.castStartedAt = now;
+      player.castEndsAt = now + castTimeMs;
+      this.clearPlayerMovement(sessionId);
+      this.pendingSkillCasts.set(sessionId, {
+        skillId: skillId as SkillId,
+        targetX,
+        targetY,
+      });
+    } else {
+      const postCastLockMs = handler.performCast(ctx, targetX, targetY);
+      if (postCastLockMs > 0) {
+        player.castingSkillId = skillId;
         player.castStartedAt = now;
-        player.castEndsAt = now + castTimeMs;
-        this.clearPlayerMovement(sessionId);
-        this.pendingSkillCasts.set(sessionId, {
-          skillId: "fireField",
-          targetX: clampedTarget.x,
-          targetY: clampedTarget.y,
-        });
-      } else {
-        const postCastLockMs = this.performFireFieldCast(player, clampedTarget.x, clampedTarget.y, now);
-        if (postCastLockMs > 0) {
-          player.castingSkillId = "fireField";
-          player.castStartedAt = now;
-          player.castEndsAt = now + postCastLockMs;
-        }
+        player.castEndsAt = now + postCastLockMs;
       }
     }
+  }
+
+  protected createSkillCastContext(sessionId: string, player: BasePlayerState, now: number): SkillCastContext {
+    return {
+      sessionId,
+      player,
+      profile: this.profile,
+      now,
+      getPlayerCastTimeMs: (p) => this.getPlayerCastTimeMs(p),
+      clampTargetToCastRange: (p, ox, oy, tx, ty) => this.clampTargetToCastRange(p, ox, oy, tx, ty),
+      clearPlayerMovement: (sid) => this.clearPlayerMovement(sid),
+      getOwnerProjectileGemConfig: (oid, sid) => this.getOwnerProjectileGemConfig(oid, sid),
+      hasSplitProjectileGem: (oid) => this.hasSplitProjectileGem(oid),
+      spawnProjectile: (oid, sid, x, y, dx, dy, lt, ds, ss) =>
+        this.spawnProjectile(oid, sid, x, y, dx, dy, lt, ds, ss),
+      pendingBurstSpawns: this.pendingBurstSpawns,
+      createFireField: (p, tx, ty, n) => this.createFireField(p, tx, ty, n),
+    };
   }
 
   // ── Consumables ──────────────────────────────────────────────────
@@ -436,24 +444,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
 
-      let postCastLockMs = 0;
-      if (cast.skillId === "fireball") {
-        postCastLockMs = this.performFireballCast(
-          playerId,
-          player,
-          cast.targetX ?? player.x,
-          cast.targetY ?? player.y,
-        );
-      } else if (cast.skillId === "fireNova") {
-        postCastLockMs = this.performFireNovaCast(playerId, player);
-      } else if (cast.skillId === "fireField") {
-        postCastLockMs = this.performFireFieldCast(
-          player,
-          cast.targetX ?? player.x,
-          cast.targetY ?? player.y,
-          now,
-        );
-      }
+      const handler = this.skillHandlers.get(cast.skillId);
+      const ctx = this.createSkillCastContext(playerId, player, now);
+      const postCastLockMs = handler
+        ? handler.performCast(ctx, cast.targetX ?? player.x, cast.targetY ?? player.y)
+        : 0;
 
       this.pendingSkillCasts.delete(playerId);
       if (postCastLockMs > 0) {
@@ -671,6 +666,10 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     now = Date.now(),
   ) {
     const tileSize = this.profile.tileSize;
+    // Rebuild mob spatial grid before movement so canMobMoveTo uses it
+    rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());
+    // Clear LOS cache each tick — same tile-pair lookups within the tick are still cached
+    this.losCache.clear();
 
     for (const mob of this.roomMobs.values()) {
       if (mob.dead) {
@@ -682,24 +681,40 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
 
+      const mobTileX = Math.floor(mob.x / tileSize);
+      const mobTileY = Math.floor(mob.y / tileSize);
       const targetPlayer = resolveMobAggroTarget(mob, players, {
         now,
-        canAcquireTarget: (player) =>
-          hasGridLineOfSight(
-            { x: Math.floor(mob.x / tileSize), y: Math.floor(mob.y / tileSize) },
-            { x: Math.floor(player.x / tileSize), y: Math.floor(player.y / tileSize) },
+        canAcquireTarget: (player) => {
+          const playerTileX = Math.floor(player.x / tileSize);
+          const playerTileY = Math.floor(player.y / tileSize);
+          const cacheKey = `${mobTileX}:${mobTileY}:${playerTileX}:${playerTileY}`;
+          const cached = this.losCache.get(cacheKey);
+          if (cached !== undefined) {
+            return cached;
+          }
+          const result = hasGridLineOfSight(
+            { x: mobTileX, y: mobTileY },
+            { x: playerTileX, y: playerTileY },
             {
               tileSize,
               width: this.getMapWidthTiles(),
               height: this.getMapHeightTiles(),
               isBlocked: (tx, ty) => this.isBlockedTile(tx, ty),
             },
-          ),
+          );
+          this.losCache.set(cacheKey, result);
+          return result;
+        },
       });
+
+      if (this.tryRunSkeletonDash(mob, targetPlayer, players, now)) {
+        continue;
+      }
 
       if (targetPlayer) {
         const distance = Math.hypot(targetPlayer.x - mob.x, targetPlayer.y - mob.y);
-        if (distance <= getEffectiveMobAttackRange(mob)) {
+        if (this.resolveMobKind(mob) !== "skeleton" && distance <= getEffectiveMobAttackRange(mob)) {
           this.attackPlayerFromMob(mob, targetPlayer, now);
           continue;
         }
@@ -741,13 +756,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return false;
     }
 
-    for (const mob of this.roomMobs.values()) {
-      if (mob.id === mobId || mob.dead) {
+    const hitRadius = this.profile.mobHitRadius;
+    for (const nearby of this.mobSpatialGrid.queryRadius(clampedX, clampedY, hitRadius)) {
+      if (nearby.id === mobId) {
         continue;
       }
-      if (Math.hypot(mob.x - clampedX, mob.y - clampedY) < this.profile.mobHitRadius) {
-        return false;
-      }
+      return false;
     }
 
     return true;
@@ -770,6 +784,312 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
+  protected clearMobSkillState(mob: MobState) {
+    mob.castingSkillId = "";
+    mob.castStartedAt = 0;
+    mob.castEndsAt = 0;
+    mob.skillLungeStartedAt = 0;
+    mob.skillLungeEndsAt = 0;
+    mob.skillLungeFromX = 0;
+    mob.skillLungeFromY = 0;
+    mob.skillLungeToX = 0;
+    mob.skillLungeToY = 0;
+    this.mobSkillHitTargets.delete(mob.id);
+  }
+
+  protected startSkeletonDashCast(mob: MobState, now: number) {
+    mob.castingSkillId = SKELETON_DASH_SKILL_ID;
+    mob.castStartedAt = now;
+    mob.castEndsAt = now + SKELETON_DASH_SKILL.castMs;
+    mob.skillLungeStartedAt = 0;
+    mob.skillLungeEndsAt = 0;
+    mob.skillLungeFromX = mob.x;
+    mob.skillLungeFromY = mob.y;
+    mob.skillLungeToX = mob.x;
+    mob.skillLungeToY = mob.y;
+    mob.targetX = mob.x;
+    mob.targetY = mob.y;
+    mob.attackCooldownEndsAt = now + SKELETON_DASH_SKILL.cooldownMs;
+  }
+
+  protected resolveSkeletonDashDestination(mob: MobState, target: BasePlayerState | null) {
+    const tileSize = this.profile.tileSize;
+    const maxDistance = tileSize * SKELETON_DASH_SKILL.lungeDistanceTiles;
+    const desiredX = target ? target.x : mob.targetX;
+    const desiredY = target ? target.y : mob.targetY;
+    const deltaX = desiredX - mob.x;
+    const deltaY = desiredY - mob.y;
+    const length = Math.hypot(deltaX, deltaY);
+    const directionX = length > 0.001 ? deltaX / length : 1;
+    const directionY = length > 0.001 ? deltaY / length : 0;
+    const stepDistance = Math.max(4, tileSize / 4);
+    const steps = Math.max(1, Math.ceil(maxDistance / stepDistance));
+    let resolvedX = mob.x;
+    let resolvedY = mob.y;
+
+    for (let step = 1; step <= steps; step += 1) {
+      const travelled = Math.min(maxDistance, step * stepDistance);
+      const candidateX = mob.x + directionX * travelled;
+      const candidateY = mob.y + directionY * travelled;
+      if (!this.canMobMoveTo(candidateX, candidateY, mob.id)) {
+        break;
+      }
+      resolvedX = candidateX;
+      resolvedY = candidateY;
+    }
+
+    return {
+      x: resolvedX,
+      y: resolvedY,
+      directionX,
+      directionY,
+    };
+  }
+
+  protected getDistanceToSegment(
+    pointX: number,
+    pointY: number,
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+  ) {
+    const segmentX = endX - startX;
+    const segmentY = endY - startY;
+    const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+    if (lengthSquared <= 0.0001) {
+      return Math.hypot(pointX - startX, pointY - startY);
+    }
+
+    const projection = ((pointX - startX) * segmentX + (pointY - startY) * segmentY) / lengthSquared;
+    const clamped = Math.max(0, Math.min(1, projection));
+    const closestX = startX + segmentX * clamped;
+    const closestY = startY + segmentY * clamped;
+    return Math.hypot(pointX - closestX, pointY - closestY);
+  }
+
+  protected getSegmentCircleCollisionT(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    centerX: number,
+    centerY: number,
+    radius: number,
+  ) {
+    const deltaX = endX - startX;
+    const deltaY = endY - startY;
+    const lengthSquared = deltaX * deltaX + deltaY * deltaY;
+    if (lengthSquared <= 0.0001) {
+      return Math.hypot(startX - centerX, startY - centerY) <= radius ? 0 : null;
+    }
+
+    const offsetX = startX - centerX;
+    const offsetY = startY - centerY;
+    const c = offsetX * offsetX + offsetY * offsetY - radius * radius;
+    if (c <= 0) {
+      return 0;
+    }
+
+    const b = 2 * (offsetX * deltaX + offsetY * deltaY);
+    const discriminant = b * b - 4 * lengthSquared * c;
+    if (discriminant < 0) {
+      return null;
+    }
+
+    const root = Math.sqrt(discriminant);
+    const first = (-b - root) / (2 * lengthSquared);
+    const second = (-b + root) / (2 * lengthSquared);
+    if (first >= 0 && first <= 1) {
+      return first;
+    }
+    if (second >= 0 && second <= 1) {
+      return second;
+    }
+
+    return null;
+  }
+
+  protected resolvePlayerMobOverlap(player: BasePlayerState, mob: MobState) {
+    const minDistance = this.profile.playerMobCollisionRadius + 2;
+    const deltaX = player.x - mob.x;
+    const deltaY = player.y - mob.y;
+    const distance = Math.hypot(deltaX, deltaY);
+    if (distance >= minDistance) {
+      return;
+    }
+
+    const directionX = distance > 0.001 ? deltaX / distance : 1;
+    const directionY = distance > 0.001 ? deltaY / distance : 0;
+    const targetX = mob.x + directionX * minDistance;
+    const targetY = mob.y + directionY * minDistance;
+    if (this.canTeleportTo(targetX, targetY, player.id)) {
+      player.x = targetX;
+      player.y = targetY;
+    }
+  }
+
+  protected applySkeletonDashHits(
+    mob: MobState,
+    players: BasePlayerState[],
+    fromX: number,
+    fromY: number,
+    toX: number,
+    toY: number,
+  ) {
+    const hitTargets = this.mobSkillHitTargets.get(mob.id) ?? new Set<string>();
+    const collisionRadius = this.profile.playerMobCollisionRadius;
+    let firstCollision:
+      | {
+        player: BasePlayerState;
+        t: number;
+      }
+      | null = null;
+
+    for (const player of players) {
+      if (player.dead || hitTargets.has(player.id)) {
+        continue;
+      }
+
+      const collisionT = this.getSegmentCircleCollisionT(
+        fromX,
+        fromY,
+        toX,
+        toY,
+        player.x,
+        player.y,
+        collisionRadius,
+      );
+      if (collisionT === null) {
+        continue;
+      }
+
+      if (!firstCollision || collisionT < firstCollision.t) {
+        firstCollision = { player, t: collisionT };
+      }
+    }
+
+    if (!firstCollision) {
+      this.mobSkillHitTargets.set(mob.id, hitTargets);
+      return false;
+    }
+
+    const collisionX = fromX + (toX - fromX) * firstCollision.t;
+    const collisionY = fromY + (toY - fromY) * firstCollision.t;
+    mob.x = collisionX;
+    mob.y = collisionY;
+    mob.targetX = collisionX;
+    mob.targetY = collisionY;
+
+    const resolvedDamage = this.applyDamageToPlayer(
+      firstCollision.player,
+      SKELETON_DASH_SKILL.damage,
+      SKELETON_DASH_SKILL.damageType,
+    );
+    hitTargets.add(firstCollision.player.id);
+    this.onCombatLog(
+      `${mob.name} uses ${SKELETON_DASH_SKILL.name} on ${firstCollision.player.name} for ${resolvedDamage}.`,
+    );
+
+    if (firstCollision.player.health <= 0) {
+      this.handlePlayerKilled(firstCollision.player);
+    }
+
+    const knockbackDistance = this.profile.tileSize; // 1 tile
+    const tileSize = this.profile.tileSize;
+    const widthPx = this.getMapWidthPx();
+    const heightPx = this.getMapHeightPx();
+    this.pushTargetByKnockback(collisionX, collisionY, firstCollision.player, knockbackDistance, (nx, ny) => {
+      firstCollision!.player.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
+      firstCollision!.player.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
+    });
+
+    this.resolvePlayerMobOverlap(firstCollision.player, mob);
+    this.mobSkillHitTargets.set(mob.id, hitTargets);
+    return true;
+  }
+
+  protected tryRunSkeletonDash(
+    mob: MobState,
+    targetPlayer: BasePlayerState | null,
+    players: BasePlayerState[],
+    now: number,
+  ) {
+    if (this.resolveMobKind(mob) !== "skeleton") {
+      return false;
+    }
+
+    if (mob.skillLungeEndsAt > now && mob.skillLungeStartedAt > 0) {
+      const duration = Math.max(1, mob.skillLungeEndsAt - mob.skillLungeStartedAt);
+      const progress = Math.max(0, Math.min(1, (now - mob.skillLungeStartedAt) / duration));
+      const previousX = mob.x;
+      const previousY = mob.y;
+      mob.x = mob.skillLungeFromX + (mob.skillLungeToX - mob.skillLungeFromX) * progress;
+      mob.y = mob.skillLungeFromY + (mob.skillLungeToY - mob.skillLungeFromY) * progress;
+      mob.targetX = mob.skillLungeToX;
+      mob.targetY = mob.skillLungeToY;
+      const hitAnyTarget = this.applySkeletonDashHits(mob, players, previousX, previousY, mob.x, mob.y);
+      if (hitAnyTarget) {
+        this.clearMobSkillState(mob);
+      }
+      return true;
+    }
+
+    if (mob.skillLungeEndsAt > 0 && now >= mob.skillLungeEndsAt) {
+      const previousX = mob.x;
+      const previousY = mob.y;
+      mob.x = mob.skillLungeToX;
+      mob.y = mob.skillLungeToY;
+      this.applySkeletonDashHits(mob, players, previousX, previousY, mob.x, mob.y);
+      this.clearMobSkillState(mob);
+      return true;
+    }
+
+    if (mob.castingSkillId === SKELETON_DASH_SKILL_ID && mob.castEndsAt > now) {
+      mob.targetX = mob.x;
+      mob.targetY = mob.y;
+      return true;
+    }
+
+    if (mob.castingSkillId === SKELETON_DASH_SKILL_ID && mob.castEndsAt > 0 && now >= mob.castEndsAt) {
+      const destination = this.resolveSkeletonDashDestination(mob, targetPlayer);
+      const distance = Math.hypot(destination.x - mob.x, destination.y - mob.y);
+      const lungeDurationMs =
+        distance <= 0.001
+          ? 1
+          : Math.max(120, Math.round((distance / SKELETON_DASH_SKILL.lungeSpeedPxPerSec) * 1000));
+      mob.skillLungeStartedAt = now;
+      mob.skillLungeEndsAt = now + lungeDurationMs;
+      mob.skillLungeFromX = mob.x;
+      mob.skillLungeFromY = mob.y;
+      mob.skillLungeToX = destination.x;
+      mob.skillLungeToY = destination.y;
+      mob.targetX = destination.x;
+      mob.targetY = destination.y;
+      this.mobSkillHitTargets.set(mob.id, new Set<string>());
+      return true;
+    }
+
+    if (!targetPlayer || targetPlayer.dead) {
+      return false;
+    }
+
+    const triggerDistance = this.profile.tileSize * SKELETON_DASH_SKILL.triggerDistanceTiles;
+    const distanceToTarget = Math.hypot(targetPlayer.x - mob.x, targetPlayer.y - mob.y);
+    if (distanceToTarget > triggerDistance) {
+      return false;
+    }
+
+    if (mob.attackCooldownEndsAt > now) {
+      mob.targetX = mob.x;
+      mob.targetY = mob.y;
+      return true;
+    }
+
+    this.startSkeletonDashCast(mob, now);
+    return true;
+  }
+
   // ── Projectile system ────────────────────────────────────────────
   protected updateProjectilesShared(deltaSeconds: number, now = Date.now()) {
     this.rebuildSpatialGrids();
@@ -779,13 +1099,19 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     const p = this.profile;
 
     for (const [projectileId, projectile] of this.roomProjectiles.entries()) {
+      const sd = this.projectileServerData.get(projectileId);
+      if (!sd) {
+        this.roomProjectiles.delete(projectileId);
+        continue;
+      }
+
       // Homing
-      if (projectile.homingStrength > 0) {
+      if (sd.homingStrength > 0) {
         const closestTarget = this.findNearestProjectileTarget(projectile, 180);
         if (closestTarget) {
           const desiredX = (closestTarget.entity.x - projectile.x) / Math.max(closestTarget.distance, 0.001);
           const desiredY = (closestTarget.entity.y - projectile.y) / Math.max(closestTarget.distance, 0.001);
-          const steer = Math.min(1, projectile.homingStrength * deltaSeconds);
+          const steer = Math.min(1, sd.homingStrength * deltaSeconds);
           const nextDirX = projectile.directionX + (desiredX - projectile.directionX) * steer;
           const nextDirY = projectile.directionY + (desiredY - projectile.directionY) * steer;
           const length = Math.hypot(nextDirX, nextDirY);
@@ -797,21 +1123,21 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       }
 
       // Orbit
-      if (projectile.orbitTimeRemaining > 0) {
+      if (sd.orbitTimeRemaining > 0) {
         const owner = this.getPlayer(projectile.ownerId);
         if (owner && !owner.dead) {
-          const elapsed = projectile.orbitTimeRemaining > deltaSeconds * 1000
+          const elapsed = sd.orbitTimeRemaining > deltaSeconds * 1000
             ? deltaSeconds * 1000
-            : projectile.orbitTimeRemaining;
-          projectile.orbitTimeRemaining -= elapsed;
+            : sd.orbitTimeRemaining;
+          sd.orbitTimeRemaining -= elapsed;
           const angle = (now / 1000) * Math.PI * 4;
-          projectile.x = owner.x + Math.cos(angle) * projectile.orbitRadius;
-          projectile.y = owner.y + Math.sin(angle) * projectile.orbitRadius;
+          projectile.x = owner.x + Math.cos(angle) * sd.orbitRadius;
+          projectile.y = owner.y + Math.sin(angle) * sd.orbitRadius;
           projectile.originX = owner.x;
           projectile.originY = owner.y;
           continue;
         }
-        projectile.orbitTimeRemaining = 0;
+        sd.orbitTimeRemaining = 0;
       }
 
       const previousX = projectile.x;
@@ -824,7 +1150,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         projectile.spiralPhase += speed * deltaSeconds * projectile.spiralFrequency * 0.01;
         const nextOffset = Math.sin(projectile.spiralPhase) * projectile.spiralAmplitude;
         const offsetDelta = nextOffset - prevOffset;
-        projectile.distanceTraveled += speed * deltaSeconds;
+        sd.distanceTraveled += speed * deltaSeconds;
         const perpX = -projectile.directionY;
         const perpY = projectile.directionX;
         projectile.x += projectile.directionX * speed * deltaSeconds + perpX * offsetDelta;
@@ -841,8 +1167,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         if (this.canProjectileReturn(projectile) && this.startProjectileReturn(projectile)) {
           continue;
         }
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -854,8 +1179,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         projectile.x > widthPx + pad ||
         projectile.y > heightPx + pad
       ) {
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -864,8 +1188,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         projectile.returning &&
         Math.hypot(projectile.x - projectile.originX, projectile.y - projectile.originY) <= 12
       ) {
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -876,10 +1199,9 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         if (this.tryBounceProjectile(projectile, previousX, previousY)) {
           continue;
         }
-        this.applyProjectileSplash(projectile, projectile.x, projectile.y, null);
+        this.applyProjectileSplash(projectile, sd, projectile.x, projectile.y, null);
         this.explodeFireballIntoShards(projectile);
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         continue;
       }
 
@@ -897,12 +1219,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       let hitPlayer = false;
 
       for (const player of this.queryNearbyPlayers(projectile.x, projectile.y, p.playerHitRadius)) {
-        if (player.dead || !this.canProjectileHitPlayer(projectile, player) || hitHistory.has(`player:${player.id}`)) {
+        if (player.dead || !this.canProjectileHitPlayer(projectile, sd, player) || hitHistory.has(`player:${player.id}`)) {
           continue;
         }
 
         const attacker = this.getPlayer(projectile.ownerId);
-        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, player.health, player.maxHealth);
+        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, sd, player.health, player.maxHealth);
         const finalDamage = this.applyDamageToPlayer(player, resolvedDamage, "fire");
         this.applyProjectileLifesteal(projectile.ownerId, finalDamage, player.id);
         this.onCombatLog(`${attacker?.name || "Wanderer"} hits ${player.name} for ${finalDamage}.`);
@@ -910,32 +1232,31 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           this.broadcastDamageText(player.x, player.y - 18, `-${finalDamage}`);
         }
         this.applyBurnToPlayer(player, this.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
-        this.pushTargetByKnockback(projectile.x, projectile.y, player, projectile.knockbackDistance, (nx, ny) => {
+        this.pushTargetByKnockback(projectile.x, projectile.y, player, sd.knockbackDistance, (nx, ny) => {
           player.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
           player.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
         });
-        this.applyProjectileSplash(projectile, projectile.x, projectile.y, `player:${player.id}`);
+        this.applyProjectileSplash(projectile, sd, projectile.x, projectile.y, `player:${player.id}`);
         hitHistory.add(`player:${player.id}`);
 
         if (player.health <= 0) {
           this.handlePlayerKilled(player);
         }
 
-        if (projectile.piercesRemaining > 0) {
-          projectile.piercesRemaining -= 1;
+        if (sd.piercesRemaining > 0) {
+          sd.piercesRemaining -= 1;
           hitPlayer = true;
           break;
         }
 
-        if (this.tryChainProjectile(projectile, `player:${player.id}`)) {
+        if (this.tryChainProjectile(projectile, sd, `player:${player.id}`)) {
           hitPlayer = true;
           break;
         }
 
-        this.applyOnHitGemEffects(projectile);
+        this.applyOnHitGemEffects(projectile, sd);
         this.explodeFireballIntoShards(projectile);
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         hitPlayer = true;
         break;
       }
@@ -951,7 +1272,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         }
 
         const attacker = this.getPlayer(projectile.ownerId);
-        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, mob.health, mob.maxHealth);
+        const { damage: resolvedDamage, isCritical } = this.getProjectileDirectDamage(projectile, sd, mob.health, mob.maxHealth);
         mob.health = Math.max(0, mob.health - resolvedDamage);
         this.applyProjectileLifesteal(projectile.ownerId, resolvedDamage);
         if (attacker && !attacker.dead) {
@@ -962,11 +1283,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           this.broadcastDamageText(mob.x, mob.y - 18, `-${resolvedDamage}`);
         }
         this.applyBurnToMob(mob, this.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
-        this.pushTargetByKnockback(projectile.x, projectile.y, mob, projectile.knockbackDistance, (nx, ny) => {
+        this.pushTargetByKnockback(projectile.x, projectile.y, mob, sd.knockbackDistance, (nx, ny) => {
           mob.x = nx;
           mob.y = ny;
         });
-        this.applyProjectileSplash(projectile, projectile.x, projectile.y, `mob:${mob.id}`);
+        this.applyProjectileSplash(projectile, sd, projectile.x, projectile.y, `mob:${mob.id}`);
         hitHistory.add(`mob:${mob.id}`);
         hitMob = true;
 
@@ -975,19 +1296,18 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           this.awardExperience(projectile.ownerId, mob.experienceReward);
         }
 
-        if (projectile.piercesRemaining > 0) {
-          projectile.piercesRemaining -= 1;
+        if (sd.piercesRemaining > 0) {
+          sd.piercesRemaining -= 1;
           break;
         }
 
-        if (this.tryChainProjectile(projectile, `mob:${mob.id}`)) {
+        if (this.tryChainProjectile(projectile, sd, `mob:${mob.id}`)) {
           break;
         }
 
-        this.applyOnHitGemEffects(projectile);
+        this.applyOnHitGemEffects(projectile, sd);
         this.explodeFireballIntoShards(projectile);
-        this.projectileHitHistory.delete(projectileId);
-        this.roomProjectiles.delete(projectileId);
+        this.deleteProjectile(projectileId);
         break;
       }
 
@@ -995,6 +1315,13 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
     }
+  }
+
+  /** Clean up both schema and server data for a projectile. */
+  protected deleteProjectile(projectileId: string) {
+    this.projectileHitHistory.delete(projectileId);
+    this.projectileServerData.delete(projectileId);
+    this.roomProjectiles.delete(projectileId);
   }
 
   // ── Projectile helpers ───────────────────────────────────────────
@@ -1022,7 +1349,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     projectile.directionY = directionY;
     projectile.originX = x;
     projectile.originY = y;
-    applyGemConfigToProjectile(projectile, gemConfig, {
+    const serverData = createDefaultProjectileServerData();
+    applyGemConfigToProjectile(projectile, serverData, gemConfig, {
       bounceCount: this.getProjectileBounceCount(ownerId, skillId),
       rangeMultiplier: this.getProjectileRangeMultiplier(ownerId, skillId),
       fireballSpeed: p.fireballSpeed,
@@ -1033,6 +1361,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       sizeScale,
     });
     this.roomProjectiles.set(projectile.id, projectile);
+    this.projectileServerData.set(projectile.id, serverData);
   }
 
   /** Subclasses must provide the concrete ProjectileState constructor. */
@@ -1080,8 +1409,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     );
   }
 
-  protected tryChainProjectile(projectile: ProjectileState, excludeEntityId: string) {
-    if (projectile.chainRemaining <= 0) {
+  protected tryChainProjectile(projectile: ProjectileState, sd: ProjectileServerData, excludeEntityId: string) {
+    if (sd.chainRemaining <= 0) {
       return false;
     }
     const bestTarget = this.findNearestProjectileTarget(projectile, 180, excludeEntityId);
@@ -1096,24 +1425,24 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
     projectile.directionX = dx / distance;
     projectile.directionY = dy / distance;
-    projectile.chainRemaining -= 1;
+    sd.chainRemaining -= 1;
     return true;
   }
 
-  protected applyProjectileSplash(projectile: ProjectileState, hitX: number, hitY: number, excludedEntityId: string | null) {
-    if (projectile.splashRadius <= 0 || projectile.splashDamageScale <= 0) {
+  protected applyProjectileSplash(projectile: ProjectileState, sd: ProjectileServerData, hitX: number, hitY: number, excludedEntityId: string | null) {
+    if (sd.splashRadius <= 0 || sd.splashDamageScale <= 0) {
       return;
     }
 
     const splashDamage = Math.max(
       0,
-      Math.round(this.getSkillDirectDamage(projectile.skillId) * projectile.splashDamageScale * this.getProjectileDamageScale(projectile)),
+      Math.round(this.getSkillDirectDamage(projectile.skillId) * sd.splashDamageScale * this.getProjectileDamageScale(projectile, sd)),
     );
     if (splashDamage <= 0) {
       return;
     }
 
-    for (const player of this.queryNearbyPlayers(hitX, hitY, projectile.splashRadius)) {
+    for (const player of this.queryNearbyPlayers(hitX, hitY, sd.splashRadius)) {
       if (player.dead || `player:${player.id}` === excludedEntityId) {
         continue;
       }
@@ -1124,7 +1453,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       }
     }
 
-    for (const mob of this.queryNearbyMobs(hitX, hitY, projectile.splashRadius)) {
+    for (const mob of this.queryNearbyMobs(hitX, hitY, sd.splashRadius)) {
       if (mob.dead || `mob:${mob.id}` === excludedEntityId) {
         continue;
       }
@@ -1137,9 +1466,9 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
-  protected applyOnHitGemEffects(projectile: ProjectileState) {
+  protected applyOnHitGemEffects(projectile: ProjectileState, sd: ProjectileServerData) {
     const p = this.profile;
-    const { spawns, aftershock } = buildOnHitProjectileEffects(projectile, {
+    const { spawns, aftershock } = buildOnHitProjectileEffects(projectile, sd, {
       fireballLifetime: p.fireballLifetime,
       fireballShardLifetime: p.fireballShardLifetime,
       shardSkillId: FIREBALL_SHARD_SKILL_ID,
@@ -1164,8 +1493,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
-  protected canProjectileHitPlayer(projectile: ProjectileState, player: BasePlayerState) {
-    return canProjectileHitOwner(projectile, player.id, this.profile.fireballSelfHitArmDistance);
+  protected canProjectileHitPlayer(projectile: ProjectileState, sd: ProjectileServerData, player: BasePlayerState) {
+    return canProjectileHitOwner(projectile, sd.selfHitGraceEndsAt, player.id, this.profile.fireballSelfHitArmDistance);
   }
 
   // ── Skill cast helpers ───────────────────────────────────────────
@@ -1374,6 +1703,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     mob.burnEndsAt = 0;
     mob.respawnAt = Date.now() + this.profile.mobRespawnMs;
     mob.attackCooldownEndsAt = 0;
+    this.clearMobSkillState(mob);
     clearMobPath(this.mobPathCache, mob.id);
     this.mobBurns.delete(mob.id);
     this.onCombatLog(`${mob.name} collapses.`);
@@ -1462,9 +1792,13 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
   // ── Spatial grid ─────────────────────────────────────────────────
 
+  protected rebuildMobSpatialGrid() {
+    rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());
+  }
+
   protected rebuildSpatialGrids() {
     rebuildRoomSpatialGrid(this.playerSpatialGrid, this.playerSpatialOrder, this.roomPlayers.values());
-    rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());
+    this.rebuildMobSpatialGrid();
   }
 
   protected queryNearbyPlayers(x: number, y: number, radius: number) {
@@ -1489,12 +1823,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     );
   }
 
-  protected getProjectileDamageScale(projectile: ProjectileState) {
-    return getRoomProjectileDamageScale(projectile);
+  protected getProjectileDamageScale(projectile: ProjectileState, sd: ProjectileServerData) {
+    return getRoomProjectileDamageScale(projectile, sd);
   }
 
-  protected getProjectileDirectDamage(projectile: ProjectileState, targetHealth: number, targetMaxHealth: number) {
-    return getRoomProjectileDirectDamage(this.skillBalance, projectile, targetHealth, targetMaxHealth);
+  protected getProjectileDirectDamage(projectile: ProjectileState, sd: ProjectileServerData, targetHealth: number, targetMaxHealth: number) {
+    return getRoomProjectileDirectDamage(this.skillBalance, projectile, sd, targetHealth, targetMaxHealth);
   }
 
   protected applyProjectileLifesteal(ownerId: string, resolvedDamage: number, targetPlayerId?: string) {

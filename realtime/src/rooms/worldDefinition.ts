@@ -1,7 +1,8 @@
 import path from "node:path";
-import { getWorldDefinitionPath } from "@mmorpg/shared/content/paths";
+import { getWorldDefinitionPath, getWorldMobsPath } from "@mmorpg/shared/content/paths";
 import {
   normalizeWorldDefinition,
+  type WorldMobDefinition,
   type WorldDefinition,
 } from "@mmorpg/shared/worlds/definition";
 import {
@@ -11,9 +12,22 @@ import {
 
 export function loadWorldDefinition(worldId = "lobby"): WorldDefinition {
   const gameDataDir = resolveGameDataDirectory();
-  const candidatePaths = [
+  const worldDefinitionPaths = [
     path.normalize(getWorldDefinitionPath(gameDataDir, worldId)),
   ];
+  const worldMobPaths = [
+    path.normalize(getWorldMobsPath(gameDataDir, worldId)),
+  ];
 
-  return readGameDataJson(candidatePaths, normalizeWorldDefinition);
+  const worldDefinition = readGameDataJson(worldDefinitionPaths, normalizeWorldDefinition);
+  const staticMobs = readGameDataJson<WorldMobDefinition[]>(
+    worldMobPaths,
+    (value) => normalizeWorldDefinition({ staticMobs: value }).staticMobs,
+    [],
+  );
+
+  return {
+    ...worldDefinition,
+    staticMobs,
+  };
 }

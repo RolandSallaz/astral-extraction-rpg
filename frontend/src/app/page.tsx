@@ -5,12 +5,10 @@ import { GameCanvas, type MinimapSnapshot, type ObjectiveArrowState, type Realti
 import { GameChat } from '@/components/GameChat';
 import { GameHud, type ContainerView } from '@/components/GameHud';
 import { HudWindow } from '@/components/ui/HudWindow';
-import HealthBar from '@/components/ui/8bit/health-bar';
 import {
   ITEM_DEFINITIONS,
   parseInventoryItem,
   serializeInventoryItem,
-  type GemItemId,
   type ItemId,
 } from '@/lib/items/equipmentItems';
 import {
@@ -56,7 +54,11 @@ import {
   type QuestStepDefinition,
 } from '@/lib/quests';
 import { loadStoredLocale, persistLocale, pickLocale, type Locale } from '@/lib/i18n';
-import type { MeadowMapAsset, MeadowOverlayAsset, MeadowStampAsset, MeadowTile, MeadowTraderAsset } from '@/lib/maps/meadowMap';
+import type { MeadowMapAsset, MeadowMobAsset, MeadowOverlayAsset, MeadowStampAsset, MeadowTile, MeadowTraderAsset } from '@/lib/maps/meadowMap';
+import { MOB_KINDS, getMobDefinition, type MobKind } from '@mmorpg/shared/mobs/catalog';
+import { DEFAULT_PLAYER_VISUALS } from '@mmorpg/shared/player/visuals';
+import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
+import { ITEM_DEFINITIONS as SHARED_ITEM_DEFINITIONS } from '@mmorpg/shared/items/catalog';
 import {
   createParty,
   giveItemToPlayer,
@@ -68,6 +70,7 @@ import {
   loadItemBalanceConfig,
   loadSkillBalanceConfig,
   loadMobBalanceConfig,
+  loadMobVisualConfig,
   loadSessionPlayer,
   loginPlayer,
   logoutPlayer,
@@ -76,8 +79,10 @@ import {
   saveItemBalanceConfig,
   saveSkillBalanceConfig,
   saveMobBalanceConfig,
+  saveMobVisualConfig,
   setPartyReady,
   startRaid,
+  getStoredSessionToken,
   type PartyView,
   type RaidTemplateView,
   type StartedRaidView,
@@ -92,6 +97,10 @@ import {
   DEFAULT_MOB_BALANCE_CONFIG,
   type MobBalanceConfig,
 } from '@/lib/mobBalance';
+import {
+  createDefaultMobVisualConfig,
+  type MobVisualConfig,
+} from '@mmorpg/shared/mobs/visuals';
 import {
   DEFAULT_SKILL_BALANCE_CONFIG,
   type SkillBalanceConfig,
@@ -112,7 +121,7 @@ type ActiveRoomTarget = {
   name: 'world' | 'raid';
   options?: Record<string, string | number>;
 };
-type WorldEditorMode = 'tile' | 'sprite' | 'spawn' | 'trader';
+type WorldEditorMode = 'tile' | 'sprite' | 'mob' | 'spawn' | 'trader';
 type WorldOverlayBrush = {
   texture: MeadowOverlayAsset['texture'];
   rotation: number;
@@ -125,10 +134,16 @@ type WorldSpriteBrush = {
   scale: number;
 };
 type WorldTraderBrush = {
-  name: string;
-  bodyTexturePath: MeadowTraderAsset['bodyTexturePath'];
-  headTexturePath: MeadowTraderAsset['headTexturePath'];
+  bodyItemId: string;
+  headItemId: string;
+  hairTexturePath: MeadowTraderAsset['hairTexturePath'];
+  hairOffsetX: number;
+  hairOffsetY: number;
 };
+type WorldMobBrush = {
+  kind: MobKind;
+};
+type AdminMobPanelMode = 'edit' | 'spawn';
 type WorldEditorDebugState = {
   textureKey: string;
   textureLoaded: boolean;
@@ -160,6 +175,54 @@ type QuestObjectiveTarget = {
   worldY: number;
   label: string;
 } | null;
+
+const OLD_MAGE_TRADER_ID = 'old-mage';
+const OLD_MAGE_TRADER_NAME = 'Old mage';
+
+function findOldMageTrader(asset: MeadowMapAsset | null) {
+  if (!asset) {
+    return null;
+  }
+
+  return asset.traders.find((trader) =>
+    trader.id === OLD_MAGE_TRADER_ID || trader.name.trim().toLowerCase() === OLD_MAGE_TRADER_NAME.toLowerCase(),
+  ) ?? asset.traders[0] ?? null;
+}
+
+function getItemDefinitionByValue(value?: string) {
+  if (!value || !(value in ITEM_DEFINITIONS)) {
+    return undefined;
+  }
+
+  return ITEM_DEFINITIONS[value as ItemId];
+}
+
+function createAdminRequestHeaders(init?: HeadersInit) {
+  const headers = new Headers(init);
+  const token = getStoredSessionToken();
+
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  return headers;
+}
+
+async function readResponseErrorMessage(response: Response, fallback: string) {
+  const payload = (await response.json().catch(() => null)) as
+    | { message?: string | string[] }
+    | null;
+
+  if (Array.isArray(payload?.message) && payload.message.length > 0) {
+    return payload.message.join(', ');
+  }
+
+  if (typeof payload?.message === 'string' && payload.message.trim()) {
+    return payload.message;
+  }
+
+  return fallback;
+}
 
 function getPageText(locale: Locale) {
   return {
@@ -276,11 +339,9 @@ const LOBBY_TOOLS_VISIBLE_STORAGE_KEY = 'mmorpg.lobby-tools.visible.v1';
 const LOBBY_TOOLS_POSITION_STORAGE_KEY = 'mmorpg.lobby-tools.position.v1';
 const ADMIN_TOOLS_POSITION_STORAGE_KEY = 'mmorpg.admin-tools.position.v1';
 const ACTIVE_ROOM_TARGET_STORAGE_KEY = 'mmorpg.active-room-target.v1';
-const ADMIN_GEM_COLORS_STORAGE_KEY = 'mmorpg.admin.gem-colors.v1';
 const MINIMAP_ZOOM_STORAGE_KEY = 'mmorpg.minimap.zoom.v1';
 const RAID_DEADLINE_MS = 15 * 60 * 1000;
 const ADMIN_ITEM_DEFINITIONS = Object.values(ITEM_DEFINITIONS);
-type AdminGemColorOverrides = Partial<Record<GemItemId, string>>;
 const TRADER_WINDOW_POSITION_STORAGE_KEY = 'mmorpg.ui.trader.position.v1';
 const PARTY_POLL_INTERVAL_MS = 2000;
 function getTraderQuestDefinitions(locale: Locale): Partial<Record<string, TraderQuestDefinition[]>> {
@@ -326,23 +387,17 @@ function getTraderOffers(trader: WorldTraderInteraction): TraderOffer[] {
   if (normalizedName.includes('old mage')) {
     return [
       { itemId: 'default_staff' },
-      { itemId: 'magic_hat' },
-      { itemId: 'robe_tunic' },
       { itemId: 'healing_potion', quantity: 1 },
       { itemId: 'fire_trail_gem' },
       { itemId: 'fire_return_gem' },
       { itemId: 'fire_range_gem' },
       { itemId: 'cast_speed_gem' },
       { itemId: 'critical_gem' },
-      { itemId: 'guard_gem' },
-      { itemId: 'focus_gem' },
-      { itemId: 'vitality_gem' },
     ];
   }
 
   return [
     { itemId: 'healing_potion', quantity: 1 },
-    { itemId: 'magic_hat' },
   ];
 }
 
@@ -360,6 +415,290 @@ function getTraderGreeting(trader: WorldTraderInteraction, locale: Locale) {
     ru: 'Посмотри, что у меня есть.',
     en: 'Browse the wares.',
   });
+}
+
+function renderStaticPlayerBaseBody() {
+  const idleAnimation = DEFAULT_PLAYER_VISUALS.animations.idle;
+  if (!idleAnimation) {
+    return (
+      <img
+        src={DEFAULT_PLAYER_VISUALS.body.texturePath}
+        alt="Trader body base"
+        className="pixelated absolute inset-0 h-full w-full object-contain"
+      />
+    );
+  }
+
+  return (
+    <div
+      className="pixelated absolute inset-0 bg-no-repeat"
+      style={{
+        backgroundImage: `url(${idleAnimation.texturePath})`,
+        backgroundPosition: '0% 0%',
+        backgroundSize: `${idleAnimation.frameCount * 100}% 100%`,
+        imageRendering: 'pixelated',
+      }}
+    />
+  );
+}
+
+function isAnimatedTraderBodyOverlayPath(texturePath: string | undefined) {
+  return typeof texturePath === 'string' && /^\/character\/equipment\/.+_idle\.(png|jpg|jpeg|webp|gif)$/i.test(texturePath);
+}
+
+function renderStaticTraderBodyOverlay(texturePath: string, alt: string) {
+  const idleAnimation = DEFAULT_PLAYER_VISUALS.animations.idle;
+  if (idleAnimation && isAnimatedTraderBodyOverlayPath(texturePath)) {
+    return (
+      <div
+        aria-label={alt}
+        className="pixelated absolute inset-0 bg-no-repeat"
+        style={{
+          backgroundImage: `url(${texturePath})`,
+          backgroundPosition: '0% 0%',
+          backgroundSize: `${idleAnimation.frameCount * 100}% 100%`,
+          imageRendering: 'pixelated',
+        }}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={texturePath}
+      alt={alt}
+      className="pixelated absolute inset-0 h-full w-full object-contain"
+    />
+  );
+}
+
+function renderStaticHeadEyes(direction: 'up' | 'down' = 'down') {
+  const headWidth = DEFAULT_PLAYER_VISUALS.head.frameWidth ?? 16;
+  const headHeight = DEFAULT_PLAYER_VISUALS.head.frameHeight ?? 16;
+  const eyeSizePercentX = (1 / headWidth) * 100;
+  const eyeSizePercentY = (1 / headHeight) * 100;
+  const leftEye = DEFAULT_PLAYER_VISUALS.eyes.positions[direction].left;
+  const rightEye = DEFAULT_PLAYER_VISUALS.eyes.positions[direction].right;
+
+  return [leftEye, rightEye].map((eye, index) => (
+    <span
+      key={`${direction}-${index}`}
+      className="absolute rounded-none"
+      style={{
+        left: `${((eye.x + 0.5) / headWidth) * 100}%`,
+        top: `${((eye.y + 0.5) / headHeight) * 100}%`,
+        width: `${eyeSizePercentX}%`,
+        height: `${eyeSizePercentY}%`,
+        backgroundColor: DEFAULT_PLAYER_VISUALS.eyes.color,
+        transform: 'translate(-50%, -50%)',
+      }}
+    />
+  ));
+}
+
+function renderTraderPortrait(trader: WorldTraderInteraction) {
+  if (trader.spriteSheetPath && trader.frameWidth && trader.frameHeight) {
+    const startFrame = trader.animationStartFrame ?? 0;
+    const columns = Math.max(1, trader.columns ?? trader.frameCount ?? 1);
+    const frameX = (startFrame % columns) * trader.frameWidth;
+    const frameY = Math.floor(startFrame / columns) * trader.frameHeight;
+    const renderScale = Math.max(2, Math.floor((trader.renderScale ?? 1) * 2));
+
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <div
+          className="pixelated bg-no-repeat"
+          style={{
+            width: trader.frameWidth * renderScale,
+            height: trader.frameHeight * renderScale,
+            backgroundImage: `url(${trader.spriteSheetPath})`,
+            backgroundPosition: `-${frameX * renderScale}px -${frameY * renderScale}px`,
+            backgroundSize: `${columns * trader.frameWidth * renderScale}px auto`,
+            imageRendering: 'pixelated',
+          }}
+        />
+      </div>
+    );
+  }
+
+  const bodyTexturePath =
+    (trader.bodyItemId ? getEquipmentBodyTexturePath(trader.bodyItemId) : undefined) ??
+    trader.bodyTexturePath;
+  const headTexturePath =
+    (trader.headItemId ? getEquipmentBodyTexturePath(trader.headItemId) : undefined) ??
+    trader.headTexturePath;
+
+  return (
+    <>
+      {renderStaticPlayerBaseBody()}
+      {bodyTexturePath ? renderStaticTraderBodyOverlay(bodyTexturePath, `${trader.name} body`) : null}
+      <img
+        src={DEFAULT_PLAYER_VISUALS.head.texturePath}
+        alt="Trader head base"
+        className="pixelated absolute inset-0 h-full w-full object-contain"
+      />
+      {trader.hairTexturePath ? (
+        <img
+          src={trader.hairTexturePath}
+          alt={`${trader.name} hair`}
+          className="pixelated absolute inset-0 h-full w-full object-contain"
+          style={{
+            transform: `translate(${trader.hairOffsetX ?? 0}px, ${trader.hairOffsetY ?? 0}px)`,
+          }}
+        />
+      ) : null}
+      {renderStaticHeadEyes('down')}
+      {headTexturePath ? (
+        <img
+          src={headTexturePath}
+          alt={`${trader.name} head`}
+          className="pixelated absolute inset-0 h-full w-full object-contain"
+        />
+      ) : null}
+    </>
+  );
+}
+
+function ensureDefaultMobClip(config: MobVisualConfig[keyof MobVisualConfig]) {
+  const defaultClip = config.clips.default ?? {
+    key: 'default',
+    spritesheet: '',
+    frameWidth: 16,
+    frameHeight: 16,
+    columns: 1,
+    startFrame: 0,
+    endFrame: 0,
+    frameRate: 4,
+    repeat: -1,
+  };
+
+  return {
+    ...config,
+    clips: {
+      ...config.clips,
+      default: defaultClip,
+      idle: config.clips.idle ?? { ...defaultClip, key: 'idle' },
+      move: config.clips.move ?? { ...defaultClip, key: 'move' },
+      attack: config.clips.attack ?? { ...defaultClip, key: 'attack' },
+    },
+    states: {
+      ...config.states,
+      idle: 'idle',
+      move: 'move',
+      attack: 'attack',
+    },
+  };
+}
+
+function ensureEditableMobVisualConfig(config: MobVisualConfig): MobVisualConfig {
+  return Object.fromEntries(
+    MOB_KINDS.map((kind) => [kind, ensureDefaultMobClip(config[kind])]),
+  ) as unknown as MobVisualConfig;
+}
+
+function getDisplayedMobClipFieldValue(
+  clip: {
+    frameWidth: number;
+    frameHeight: number;
+    columns: number;
+    startFrame: number;
+    endFrame: number;
+    frameRate: number;
+  },
+  field: 'frameWidth' | 'frameHeight' | 'columns' | 'startFrame' | 'endFrame' | 'frameRate',
+) {
+  if (field === 'startFrame' || field === 'endFrame') {
+    return clip[field] + 1;
+  }
+
+  return clip[field];
+}
+
+const EDITABLE_MOB_ANIMATION_STATES = ['idle', 'move', 'attack'] as const;
+
+function getMobClipRow(clip: { startFrame: number; columns: number }) {
+  return Math.floor(clip.startFrame / Math.max(1, clip.columns)) + 1;
+}
+
+function getMobClipStartColumn(clip: { startFrame: number; columns: number }) {
+  return (clip.startFrame % Math.max(1, clip.columns)) + 1;
+}
+
+function getMobClipEndColumn(clip: { endFrame: number; columns: number }) {
+  return (clip.endFrame % Math.max(1, clip.columns)) + 1;
+}
+
+function getFallbackMobPreviewImage(kind: MobKind, timeMs: number) {
+  if (kind === 'bat' || kind === 'rat') {
+    const frame = Math.floor(timeMs / 240) % 2 === 0 ? 1 : 2;
+    return `/npc/${kind}/${kind}_${frame}.png`;
+  }
+
+  return null;
+}
+
+function AdminMobPreview({
+  kind,
+  config,
+}: {
+  kind: MobKind;
+  config: MobVisualConfig[MobKind];
+}) {
+  const [timeMs, setTimeMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTimeMs(Date.now());
+    }, 120);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const normalized = ensureDefaultMobClip(config);
+  const fallbackClipKey = (Object.keys(normalized.clips)[0] ?? 'default') as keyof typeof normalized.clips;
+  const idleKey = (normalized.states.idle as keyof typeof normalized.clips | undefined) ?? fallbackClipKey;
+  const clip = idleKey ? normalized.clips[idleKey] ?? null : null;
+
+  if (clip?.spritesheet) {
+    const frameCount = Math.max(1, clip.endFrame - clip.startFrame + 1);
+    const frameDurationMs = 1000 / Math.max(1, clip.frameRate);
+    const frame = clip.startFrame + (Math.floor(timeMs / frameDurationMs) % frameCount);
+    const columns = Math.max(1, clip.columns);
+    const frameX = (frame % columns) * clip.frameWidth;
+    const frameY = Math.floor(frame / columns) * clip.frameHeight;
+    const renderScale = Math.max(1, Math.round(normalized.spriteScale * 2));
+
+    return (
+      <div className="flex h-20 items-center justify-center overflow-hidden rounded-xl border border-[#d9efbd]/16 bg-[#102108]/60">
+        <div
+          className="pixelated bg-no-repeat"
+          style={{
+            width: clip.frameWidth * renderScale,
+            height: clip.frameHeight * renderScale,
+            backgroundImage: `url(${clip.spritesheet})`,
+            backgroundPosition: `-${frameX * renderScale}px -${frameY * renderScale}px`,
+            backgroundSize: `${columns * clip.frameWidth * renderScale}px auto`,
+            imageRendering: 'pixelated',
+          }}
+        />
+      </div>
+    );
+  }
+
+  const fallbackImage = getFallbackMobPreviewImage(kind, timeMs);
+  return (
+    <div className="flex h-20 items-center justify-center overflow-hidden rounded-xl border border-[#d9efbd]/16 bg-[#102108]/60">
+      {fallbackImage ? (
+        <img
+          src={fallbackImage}
+          alt={`${kind} preview`}
+          className="pixelated h-14 w-14 object-contain"
+        />
+      ) : (
+        <div className="text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">No Preview</div>
+      )}
+    </div>
+  );
 }
 
 function getQuestStatusForCharacter(questId: string, character: CharacterProfile | null): TraderQuestStatus | null {
@@ -477,7 +816,7 @@ function QuestRequiredItemCard({
               <span
                 className="pixelated h-full w-full"
                 style={{
-                  backgroundColor: item.tintColor ?? '#ffffff',
+                  backgroundColor: '#ffffff',
                   WebkitMaskImage: `url(${item.texturePath})`,
                   maskImage: `url(${item.texturePath})`,
                   WebkitMaskRepeat: 'no-repeat',
@@ -612,24 +951,6 @@ function loadLobbyToolsVisible() {
   }
 
   return window.localStorage.getItem(LOBBY_TOOLS_VISIBLE_STORAGE_KEY) !== 'false';
-}
-
-function loadAdminGemColorOverrides(): AdminGemColorOverrides {
-  if (typeof window === 'undefined') {
-    return {};
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_GEM_COLORS_STORAGE_KEY);
-    if (!rawValue) {
-      return {};
-    }
-
-    const parsed = JSON.parse(rawValue) as AdminGemColorOverrides;
-    return parsed ?? {};
-  } catch {
-    return {};
-  }
 }
 
 function loadStoredActiveRoomTarget(): ActiveRoomTarget | null {
@@ -1102,9 +1423,16 @@ export default function Home() {
   const introductionQuestSteps = getIntroductionQuestSteps(locale);
   const sealedRelicQuestSteps = getSealedRelicQuestSteps(locale);
   const [selectedWorldTrader, setSelectedWorldTrader] = useState<WorldTraderBrush>({
-    name: 'Trader',
-    bodyTexturePath: '',
-    headTexturePath: '',
+    bodyItemId: '',
+    headItemId: '',
+    hairTexturePath: '',
+    hairOffsetX: 0,
+    hairOffsetY: 0,
+  });
+  const [traderBodySearch, setTraderBodySearch] = useState('');
+  const [traderHeadSearch, setTraderHeadSearch] = useState('');
+  const [selectedWorldMob, setSelectedWorldMob] = useState<WorldMobBrush>({
+    kind: MOB_KINDS[0] ?? 'rat',
   });
   const [selectedWorldSpriteFolder, setSelectedWorldSpriteFolder] = useState('');
   const [worldMapStatus, setWorldMapStatus] = useState('');
@@ -1128,6 +1456,15 @@ export default function Home() {
   const [mobBalanceDraft, setMobBalanceDraft] = useState<MobBalanceConfig>(
     DEFAULT_MOB_BALANCE_CONFIG,
   );
+  const [mobVisualConfig, setMobVisualConfig] = useState<MobVisualConfig>(
+    ensureEditableMobVisualConfig(createDefaultMobVisualConfig()),
+  );
+  const [mobVisualDraft, setMobVisualDraft] = useState<MobVisualConfig>(
+    ensureEditableMobVisualConfig(createDefaultMobVisualConfig()),
+  );
+  const [adminMobStatus, setAdminMobStatus] = useState('');
+  const [selectedAdminMobId, setSelectedAdminMobId] = useState<MobKind>(MOB_KINDS[0] ?? 'rat');
+  const [adminMobPanelMode, setAdminMobPanelMode] = useState<AdminMobPanelMode>('edit');
   const [itemBalanceConfig, setItemBalanceConfig] = useState<ItemBalanceConfig>(
     DEFAULT_ITEM_BALANCE_CONFIG,
   );
@@ -1137,16 +1474,17 @@ export default function Home() {
   const [adminItemBusyId, setAdminItemBusyId] = useState<string | null>(null);
   const [adminItemStatus, setAdminItemStatus] = useState('');
   const [selectedAdminItemId, setSelectedAdminItemId] = useState<ItemId>(
-    ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'magic_hat',
-  );
-  const [adminGemColorOverrides, setAdminGemColorOverrides] = useState<AdminGemColorOverrides>(
-    loadAdminGemColorOverrides,
+    ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'default_staff',
   );
   const skipFirstSaveRef = useRef(true);
   const skillBalanceLoadedRef = useRef(false);
   const skillBalancePersistedRef = useRef(JSON.stringify(DEFAULT_SKILL_BALANCE_CONFIG));
   const mobBalanceLoadedRef = useRef(false);
   const mobBalancePersistedRef = useRef(JSON.stringify(DEFAULT_MOB_BALANCE_CONFIG));
+  const mobVisualLoadedRef = useRef(false);
+  const mobVisualPersistedRef = useRef(
+    JSON.stringify(ensureEditableMobVisualConfig(createDefaultMobVisualConfig())),
+  );
   const itemBalanceLoadedRef = useRef(false);
   const itemBalancePersistedRef = useRef(JSON.stringify(DEFAULT_ITEM_BALANCE_CONFIG));
   const chatSenderRef = useRef<((text: string) => void) | null>(null);
@@ -1362,17 +1700,6 @@ export default function Home() {
     }
 
     window.localStorage.setItem(
-      ADMIN_GEM_COLORS_STORAGE_KEY,
-      JSON.stringify(adminGemColorOverrides),
-    );
-  }, [adminGemColorOverrides]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
       ADMIN_TOOLS_VISIBLE_STORAGE_KEY,
       String(adminToolsVisible),
     );
@@ -1394,10 +1721,12 @@ export default function Home() {
       return;
     }
 
-    void fetch('/api/admin/public-images')
+    void fetch('/api/admin/public-images', {
+      headers: createAdminRequestHeaders(),
+    })
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error('Failed to load public images.');
+          throw new Error(await readResponseErrorMessage(response, 'Failed to load public images.'));
         }
 
         return response.json() as Promise<{ images: string[] }>;
@@ -1409,10 +1738,12 @@ export default function Home() {
         console.error('Failed to load admin image list', error);
       });
 
-    void fetch('/api/admin/maps/world')
+    void fetch('/api/admin/maps/world', {
+      headers: createAdminRequestHeaders(),
+    })
       .then(async (response) => {
         if (!response.ok) {
-          throw new Error('Failed to load world map asset.');
+          throw new Error(await readResponseErrorMessage(response, 'Failed to load world map asset.'));
         }
 
         return response.json() as Promise<MeadowMapAsset>;
@@ -1469,25 +1800,59 @@ export default function Home() {
       return;
     }
 
-    const traderHeadOptions = adminImageOptions
-      .filter((imagePath) => /head/i.test(imagePath))
+    const traderHairOptions = adminImageOptions
+      .filter((imagePath) => /hair/i.test(imagePath))
       .sort((left, right) => left.localeCompare(right));
-    const traderBodyOptions = adminImageOptions
-      .filter((imagePath) => /(body|tunic|robe|blacksmith)/i.test(imagePath))
-      .sort((left, right) => left.localeCompare(right));
+    const bodyItems = ADMIN_ITEM_DEFINITIONS.filter(
+      (item) => item.type === 'equipment' && item.slot === 'body',
+    );
+    const headItems = ADMIN_ITEM_DEFINITIONS.filter(
+      (item) => item.type === 'equipment' && item.slot === 'head',
+    );
+    const preferredHairTexturePath =
+      traderHairOptions.find((imagePath) => /old_mage_haird/i.test(imagePath)) ??
+      traderHairOptions[0] ??
+      '';
+    const preferredBodyItemId =
+      bodyItems.find((item) => item.id === 'fire_robe')?.id ??
+      bodyItems[0]?.id ??
+      '';
+    const preferredHeadItemId = headItems[0]?.id ?? '';
 
     setSelectedWorldTrader((current) => ({
       ...current,
-      headTexturePath:
-        current.headTexturePath && traderHeadOptions.includes(current.headTexturePath)
-          ? current.headTexturePath
-          : (traderHeadOptions[0] ?? current.headTexturePath),
-      bodyTexturePath:
-        current.bodyTexturePath && traderBodyOptions.includes(current.bodyTexturePath)
-          ? current.bodyTexturePath
-          : (traderBodyOptions[0] ?? current.bodyTexturePath),
+      hairTexturePath:
+        typeof current.hairTexturePath === 'string' && (
+          current.hairTexturePath.length === 0 || traderHairOptions.includes(current.hairTexturePath)
+        )
+          ? current.hairTexturePath
+          : preferredHairTexturePath,
+      bodyItemId:
+        current.bodyItemId && bodyItems.some((item) => item.id === current.bodyItemId)
+          ? current.bodyItemId
+          : preferredBodyItemId,
+      headItemId:
+        current.headItemId && headItems.some((item) => item.id === current.headItemId)
+          ? current.headItemId
+          : preferredHeadItemId,
     }));
   }, [adminImageOptions]);
+
+  useEffect(() => {
+    const oldMage = findOldMageTrader(worldMapDraft);
+    if (!oldMage) {
+      return;
+    }
+
+    setSelectedWorldTrader((current) => ({
+      ...current,
+      bodyItemId: oldMage.bodyItemId || current.bodyItemId,
+      headItemId: oldMage.headItemId || current.headItemId,
+      hairTexturePath: oldMage.hairTexturePath ?? '',
+      hairOffsetX: oldMage.hairOffsetX ?? 0,
+      hairOffsetY: oldMage.hairOffsetY ?? 0,
+    }));
+  }, [worldMapDraft]);
 
   useEffect(() => {
     if (authStatus !== 'ready') {
@@ -1518,6 +1883,18 @@ export default function Home() {
       })
       .catch((error) => {
         console.error('Failed to load mob balance config', error);
+      });
+
+    void loadMobVisualConfig()
+      .then((config) => {
+        const editableConfig = ensureEditableMobVisualConfig(config);
+        mobVisualLoadedRef.current = true;
+        mobVisualPersistedRef.current = JSON.stringify(editableConfig);
+        setMobVisualConfig(editableConfig);
+        setMobVisualDraft(editableConfig);
+      })
+      .catch((error) => {
+        console.error('Failed to load mob visual config', error);
       });
 
     void loadItemBalanceConfig()
@@ -1669,6 +2046,26 @@ export default function Home() {
       console.error('Failed to save mob balance config', error);
     });
   }, [authStatus, playerRole, mobBalanceConfig]);
+
+  useEffect(() => {
+    if (
+      authStatus !== 'ready' ||
+      playerRole !== 'admin' ||
+      !mobVisualLoadedRef.current
+    ) {
+      return;
+    }
+
+    const serialized = JSON.stringify(mobVisualConfig);
+    if (serialized === mobVisualPersistedRef.current) {
+      return;
+    }
+
+    mobVisualPersistedRef.current = serialized;
+    void saveMobVisualConfig(mobVisualConfig).catch((error) => {
+      console.error('Failed to save mob visual config', error);
+    });
+  }, [authStatus, playerRole, mobVisualConfig]);
 
   useEffect(() => {
     if (
@@ -2368,6 +2765,193 @@ export default function Home() {
     }));
   };
 
+  const handleMobVisualChange = (
+    mobId: keyof MobVisualConfig,
+    field: 'spritesheet' | 'frameWidth' | 'frameHeight' | 'columns' | 'startFrame' | 'endFrame' | 'frameRate' | 'spriteScale' | 'anchorY',
+    value: string,
+  ) => {
+    setMobVisualDraft((current) => {
+      const nextConfig = ensureDefaultMobClip(current[mobId]);
+      const nextClip = nextConfig.clips.default;
+      if (!nextClip) {
+        return current;
+      }
+
+      const sharedClipValue =
+        field === 'spritesheet'
+          ? value
+          : field === 'frameWidth' ||
+              field === 'frameHeight' ||
+              field === 'columns' ||
+              field === 'frameRate'
+            ? Math.max(
+                1,
+                Math.floor(
+                  Number.parseFloat(value) ||
+                    (nextClip[field as keyof typeof nextClip] as number) ||
+                    1,
+                ),
+              )
+            : field === 'startFrame' || field === 'endFrame'
+              ? Math.max(
+                  0,
+                  Math.floor(
+                    (Number.parseFloat(value) ||
+                      ((nextClip[field as keyof typeof nextClip] as number) + 1) ||
+                      1) - 1,
+                  ),
+                )
+              : 0;
+
+      const getUpdatedClip = (
+        clip: typeof nextClip,
+        clipField: typeof field,
+        clipValue: string | number,
+      ) => {
+        if (clipField === 'columns') {
+          const nextColumns = Math.max(1, Number(clipValue) || clip.columns || 1);
+          const currentRow = getMobClipRow(clip);
+          const currentStart = getMobClipStartColumn(clip);
+          const currentEnd = getMobClipEndColumn(clip);
+          const clampedStart = Math.min(nextColumns, Math.max(1, currentStart));
+          const clampedEnd = Math.min(nextColumns, Math.max(clampedStart, currentEnd));
+          const rowOffset = (currentRow - 1) * nextColumns;
+
+          return {
+            ...clip,
+            columns: nextColumns,
+            startFrame: rowOffset + clampedStart - 1,
+            endFrame: rowOffset + clampedEnd - 1,
+          };
+        }
+
+        return {
+          ...clip,
+          ...(clipField === 'spritesheet'
+            ? { spritesheet: clipValue as string }
+            : {
+                [clipField]: clipValue,
+              }),
+        };
+      };
+
+      const nextClips = {
+        ...nextConfig.clips,
+        default: getUpdatedClip(nextClip, field, sharedClipValue),
+      };
+
+      if (
+        field === 'spritesheet' ||
+        field === 'frameWidth' ||
+        field === 'frameHeight' ||
+        field === 'columns'
+      ) {
+        for (const state of EDITABLE_MOB_ANIMATION_STATES) {
+          const stateClip = nextConfig.clips[state];
+          if (!stateClip) {
+            continue;
+          }
+
+          nextClips[state] = {
+            ...getUpdatedClip(stateClip, field, sharedClipValue),
+          };
+        }
+      }
+
+      return {
+        ...current,
+        [mobId]: {
+          ...nextConfig,
+          spriteScale:
+            field === 'spriteScale'
+              ? Math.max(0.1, Number.parseFloat(value) || nextConfig.spriteScale)
+              : nextConfig.spriteScale,
+          anchorY:
+            field === 'anchorY'
+              ? Math.max(0, Math.min(1.5, Number.parseFloat(value) || nextConfig.anchorY))
+              : nextConfig.anchorY,
+          clips: nextClips,
+        },
+      };
+    });
+  };
+
+  const handleMobStateVisualChange = (
+    mobId: keyof MobVisualConfig,
+    state: typeof EDITABLE_MOB_ANIMATION_STATES[number],
+    field: 'row' | 'start' | 'end' | 'frameRate',
+    value: string,
+  ) => {
+    setMobVisualDraft((current) => {
+      const nextConfig = ensureDefaultMobClip(current[mobId]);
+      const nextClip = nextConfig.clips[state];
+      if (!nextClip) {
+        return current;
+      }
+
+      const columns = Math.max(1, nextClip.columns);
+      const parsed = Math.max(1, Math.floor(Number.parseFloat(value) || 1));
+      const currentRow = getMobClipRow(nextClip);
+      const currentStart = getMobClipStartColumn(nextClip);
+      const currentEnd = getMobClipEndColumn(nextClip);
+      const nextRow = field === 'row' ? parsed : currentRow;
+      const nextStart = field === 'start' ? parsed : currentStart;
+      const nextEnd = field === 'end' ? parsed : currentEnd;
+      const clampedStart = Math.min(columns, Math.max(1, nextStart));
+      const clampedEnd = Math.min(columns, Math.max(clampedStart, nextEnd));
+      const rowOffset = (nextRow - 1) * columns;
+
+      return {
+        ...current,
+        [mobId]: {
+          ...nextConfig,
+          clips: {
+            ...nextConfig.clips,
+            [state]: {
+              ...nextClip,
+              startFrame: rowOffset + clampedStart - 1,
+              endFrame: rowOffset + clampedEnd - 1,
+              frameRate:
+                field === 'frameRate'
+                  ? Math.max(1, Math.floor(Number.parseFloat(value) || nextClip.frameRate || 1))
+                  : nextClip.frameRate,
+              repeat: -1,
+            },
+          },
+          states: {
+            ...nextConfig.states,
+            [state]: state,
+          },
+        },
+      };
+    });
+  };
+
+  const handleApplyMobVisuals = async () => {
+    setAdminMobStatus('');
+
+    try {
+      const editableDraft = ensureEditableMobVisualConfig(mobVisualDraft);
+      const savedConfig = ensureEditableMobVisualConfig(
+        await saveMobVisualConfig(editableDraft),
+      );
+      mobVisualLoadedRef.current = true;
+      mobVisualPersistedRef.current = JSON.stringify(savedConfig);
+      setMobVisualConfig(savedConfig);
+      setMobVisualDraft(savedConfig);
+      setAdminMobStatus('Mob visuals saved.');
+    } catch (error) {
+      setAdminMobStatus(error instanceof Error ? error.message : 'Failed to save mob visuals.');
+    }
+  };
+
+  const handlePrepareMobSpawn = (kind: MobKind) => {
+    setSelectedWorldMob({ kind });
+    setWorldEditorMode('mob');
+    setActiveAdminTab('world');
+    setAdminMobStatus(`Spawn brush armed for ${getMobDefinition(kind).name}.`);
+  };
+
   const filteredAdminImageOptions = adminImageOptions.filter((path) =>
     path.toLowerCase().includes(adminImageSearch.trim().toLowerCase()),
   );
@@ -2386,14 +2970,54 @@ export default function Home() {
   const worldSpriteOptions = adminImageOptions.filter((imagePath) =>
     activeWorldSpriteFolder ? imagePath.startsWith(`${activeWorldSpriteFolder}/`) : false,
   );
-  const worldTraderHeadOptions = (
-    adminImageOptions.filter((imagePath) => /head/i.test(imagePath)).sort((left, right) => left.localeCompare(right))
+  const worldTraderHairOptions = (
+    adminImageOptions.filter((imagePath) => /hair/i.test(imagePath)).sort((left, right) => left.localeCompare(right))
   );
-  const worldTraderBodyOptions = (
-    adminImageOptions.filter((imagePath) => /(body|tunic|robe|blacksmith)/i.test(imagePath)).sort((left, right) => left.localeCompare(right))
+  const worldTraderBodyItems = ADMIN_ITEM_DEFINITIONS.filter(
+    (item) => item.type === 'equipment' && item.slot === 'body',
   );
+  const worldTraderHeadItems = ADMIN_ITEM_DEFINITIONS.filter(
+    (item) => item.type === 'equipment' && item.slot === 'head',
+  );
+  const traderBodySearchValue = traderBodySearch.trim().toLowerCase();
+  const traderHeadSearchValue = traderHeadSearch.trim().toLowerCase();
+  const filteredTraderBodyItems = worldTraderBodyItems.filter((item) => {
+    if (!traderBodySearchValue) {
+      return true;
+    }
+    return (
+      item.id.toLowerCase().includes(traderBodySearchValue) ||
+      item.name.toLowerCase().includes(traderBodySearchValue)
+    );
+  });
+  const filteredTraderHeadItems = worldTraderHeadItems.filter((item) => {
+    if (!traderHeadSearchValue) {
+      return true;
+    }
+    return (
+      item.id.toLowerCase().includes(traderHeadSearchValue) ||
+      item.name.toLowerCase().includes(traderHeadSearchValue)
+    );
+  });
+  const selectedTraderBodyTexturePath = selectedWorldTrader.bodyItemId
+    ? getEquipmentBodyTexturePath(selectedWorldTrader.bodyItemId)
+    : undefined;
+  const selectedTraderHeadTexturePath = selectedWorldTrader.headItemId
+    ? getEquipmentBodyTexturePath(selectedWorldTrader.headItemId)
+    : undefined;
+  const selectedTraderBodyItem = getItemDefinitionByValue(selectedWorldTrader.bodyItemId);
+  const selectedTraderHeadItem = getItemDefinitionByValue(selectedWorldTrader.headItemId);
+  const selectedTraderBodyLabel = selectedWorldTrader.bodyItemId
+    ? selectedTraderBodyItem?.name ?? selectedWorldTrader.bodyItemId
+    : 'default body';
+  const selectedTraderHeadLabel = selectedWorldTrader.headItemId
+    ? selectedTraderHeadItem?.name ?? selectedWorldTrader.headItemId
+    : 'no head overlay';
   const selectedAdminItem = ITEM_DEFINITIONS[selectedAdminItemId];
   const selectedAdminItemBalance = itemBalanceDraft[selectedAdminItemId] ?? DEFAULT_ITEM_BALANCE_CONFIG[selectedAdminItemId];
+  const selectedAdminMobDefinition = getMobDefinition(selectedAdminMobId);
+  const selectedAdminMobBalance = mobBalanceDraft[selectedAdminMobId];
+  const selectedAdminMobVisual = ensureDefaultMobClip(mobVisualDraft[selectedAdminMobId]);
 
   const handleSkillBalanceChange = (
     skillId: keyof SkillBalanceConfig,
@@ -2589,34 +3213,60 @@ export default function Home() {
   };
 
   const handleWorldTraderPaint = (tileX: number, tileY: number) => {
-    if (!selectedWorldTrader.bodyTexturePath || !selectedWorldTrader.headTexturePath) {
-      return;
-    }
-
     setWorldMapDraft((current) => {
       if (!current) {
         return current;
       }
 
-      const existingTrader = current.traders.find((trader) => trader.x === tileX && trader.y === tileY);
-      const nextTraders = current.traders.filter((trader) => !(trader.x === tileX && trader.y === tileY));
-      nextTraders.push({
-        id: existingTrader?.id ?? `trader-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
-        x: tileX,
-        y: tileY,
-        name: selectedWorldTrader.name.trim() || 'Trader',
-        bodyTexturePath: selectedWorldTrader.bodyTexturePath,
-        headTexturePath: selectedWorldTrader.headTexturePath,
-      });
-
       return {
         ...current,
-        traders: nextTraders,
+        traders: [
+          {
+            id: OLD_MAGE_TRADER_ID,
+            x: tileX,
+            y: tileY,
+            name: OLD_MAGE_TRADER_NAME,
+            ...(selectedWorldTrader.bodyItemId ? { bodyItemId: selectedWorldTrader.bodyItemId } : {}),
+            ...(selectedWorldTrader.hairTexturePath ? { hairTexturePath: selectedWorldTrader.hairTexturePath } : {}),
+            ...(selectedWorldTrader.hairOffsetX || selectedWorldTrader.hairOffsetY
+              ? { hairOffsetX: selectedWorldTrader.hairOffsetX, hairOffsetY: selectedWorldTrader.hairOffsetY }
+              : {}),
+            ...(selectedWorldTrader.headItemId ? { headItemId: selectedWorldTrader.headItemId } : {}),
+          },
+        ],
       };
     });
   };
 
-  const handleWorldTraderErase = (tileX: number, tileY: number) => {
+  const handleWorldMobPaint = (tileX: number, tileY: number) => {
+    setWorldMapDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const kind = selectedWorldMob.kind;
+      const nextMobs = current.mobs.filter((mob) => !(mob.spawn.x === tileX && mob.spawn.y === tileY));
+      nextMobs.push({
+        id: `${kind}-${tileX}-${tileY}`,
+        kind,
+        spawn: { x: tileX, y: tileY },
+        patrol: {
+          minX: tileX,
+          maxX: tileX,
+          y: tileY,
+          radiusY: kind === 'bat' ? 2 : kind === 'skeleton' ? 1 : 0,
+          phase: 0,
+        },
+      } satisfies MeadowMobAsset);
+
+      return {
+        ...current,
+        mobs: nextMobs,
+      };
+    });
+  };
+
+  const handleWorldMobErase = (tileX: number, tileY: number) => {
     setWorldMapDraft((current) => {
       if (!current) {
         return current;
@@ -2624,7 +3274,56 @@ export default function Home() {
 
       return {
         ...current,
-        traders: current.traders.filter((trader) => !(trader.x === tileX && trader.y === tileY)),
+        mobs: current.mobs.filter((mob) => !(mob.spawn.x === tileX && mob.spawn.y === tileY)),
+      };
+    });
+  };
+
+  const handleOldMageAppearanceChange = (
+    key: 'bodyItemId' | 'headItemId' | 'hairTexturePath' | 'hairOffsetX' | 'hairOffsetY',
+    value: string,
+  ) => {
+    setSelectedWorldTrader((current) => ({
+      ...current,
+      [key]: key === 'hairOffsetX' || key === 'hairOffsetY' ? Number.parseFloat(value) || 0 : value,
+    }));
+
+    setWorldMapDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const oldMage = findOldMageTrader(current);
+      if (!oldMage) {
+        return current;
+      }
+
+      const updates: Partial<MeadowTraderAsset> = {
+        id: OLD_MAGE_TRADER_ID,
+        name: OLD_MAGE_TRADER_NAME,
+      };
+
+      if (key === 'bodyItemId') {
+        updates.bodyItemId = value || undefined;
+        updates.bodyTexturePath = undefined;
+      } else if (key === 'headItemId') {
+        updates.headItemId = value || undefined;
+        updates.headTexturePath = undefined;
+      } else if (key === 'hairOffsetX') {
+        updates.hairOffsetX = Number.parseFloat(value) || 0;
+      } else if (key === 'hairOffsetY') {
+        updates.hairOffsetY = Number.parseFloat(value) || 0;
+      } else {
+        updates[key] = value || undefined;
+      }
+
+      return {
+        ...current,
+        traders: current.traders.map((trader) =>
+          trader.id === oldMage.id
+            ? { ...trader, ...updates }
+            : trader,
+        ),
       };
     });
   };
@@ -2648,12 +3347,17 @@ export default function Home() {
     }
 
     if (worldEditorMode === 'trader') {
+      handleWorldTraderPaint(tileX, tileY);
+      return;
+    }
+
+    if (worldEditorMode === 'mob') {
       if (eraseOverlay) {
-        handleWorldTraderErase(tileX, tileY);
+        handleWorldMobErase(tileX, tileY);
         return;
       }
 
-      handleWorldTraderPaint(tileX, tileY);
+      handleWorldMobPaint(tileX, tileY);
       return;
     }
 
@@ -2666,9 +3370,11 @@ export default function Home() {
   };
 
   const handleReloadWorldMap = async () => {
-    const response = await fetch('/api/admin/maps/world');
+    const response = await fetch('/api/admin/maps/world', {
+      headers: createAdminRequestHeaders(),
+    });
     if (!response.ok) {
-      throw new Error('Failed to reload world map.');
+      throw new Error(await readResponseErrorMessage(response, 'Failed to reload world map.'));
     }
 
     const asset = await response.json() as MeadowMapAsset;
@@ -2683,14 +3389,14 @@ export default function Home() {
 
     const response = await fetch('/api/admin/maps/world', {
       method: 'PUT',
-      headers: {
+      headers: createAdminRequestHeaders({
         'Content-Type': 'application/json',
-      },
+      }),
       body: JSON.stringify(worldMapDraft),
     });
 
     if (!response.ok) {
-      throw new Error('Failed to save world map.');
+      throw new Error(await readResponseErrorMessage(response, 'Failed to save world map.'));
     }
 
     const savedAsset = await response.json() as MeadowMapAsset;
@@ -3279,11 +3985,14 @@ export default function Home() {
             STR {character.strength} · AGI {character.agility} · INT {character.intellect}
           </div>
           <div className="mt-3 w-40">
-            <HealthBar
-              variant="retro"
-              value={Math.max(0, Math.min(100, (character.health / Math.max(1, character.maxHealth)) * 100))}
-              className="h-3 w-full"
-            />
+            <div className="h-3 w-full overflow-hidden rounded-full border border-[#d9efbd]/35 bg-[#0b1606]">
+              <div
+                className="h-full bg-[linear-gradient(90deg,#d84f4f_0%,#ef7a5f_100%)] transition-[width] duration-200"
+                style={{
+                  width: `${Math.max(0, Math.min(100, (character.health / Math.max(1, character.maxHealth)) * 100))}%`,
+                }}
+              />
+            </div>
             <div className="mt-1 text-[10px] text-[#dceec9]">
               HP {character.health}/{character.maxHealth}
             </div>
@@ -3585,6 +4294,7 @@ export default function Home() {
           selectedWorldTile={selectedWorldTile}
           selectedWorldOverlay={selectedWorldOverlay}
           selectedWorldSprite={selectedWorldSprite}
+          selectedWorldMob={selectedWorldMob}
           selectedWorldTrader={selectedWorldTrader}
           onWorldEditPaint={handleWorldPaint}
           onWorldEditHoverChange={setWorldHoverTile}
@@ -3719,6 +4429,7 @@ export default function Home() {
           skillEffectOverrides={skillEffectOverrides}
           skillBalanceConfig={skillBalanceConfig}
           mobBalanceConfig={mobBalanceConfig}
+          mobVisualConfig={mobVisualConfig}
           onSkillBalanceConfigChange={(config) => {
             skillBalanceLoadedRef.current = true;
             skillBalancePersistedRef.current = JSON.stringify(config);
@@ -3772,7 +4483,6 @@ export default function Home() {
         equipment={character.equipment}
         inventory={character.inventory ?? createEmptyInventory()}
         container={activeContainer}
-        itemTintOverrides={adminGemColorOverrides}
         itemBalanceConfig={itemBalanceConfig}
         playerGold={character.gold}
         playerStrength={character.strength}
@@ -3988,26 +4698,7 @@ export default function Home() {
           <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-4">
             <div className="flex items-start gap-4">
               <div className="relative h-16 w-16 shrink-0 rounded-xl border border-[#d9efbd]/18 bg-[#102108]/60">
-                <img
-                  src="/sprites/characters/body-torso-8x8.png"
-                  alt="Trader body base"
-                  className="pixelated absolute inset-0 h-full w-full object-contain"
-                />
-                <img
-                  src={activeTrader.bodyTexturePath}
-                  alt={`${activeTrader.name} body`}
-                  className="pixelated absolute inset-0 h-full w-full object-contain"
-                />
-                <img
-                  src="/sprites/characters/body-head-8x8.png"
-                  alt="Trader head base"
-                  className="pixelated absolute inset-0 h-full w-full object-contain"
-                />
-                <img
-                  src={activeTrader.headTexturePath}
-                  alt={`${activeTrader.name} head`}
-                  className="pixelated absolute inset-0 h-full w-full object-contain"
-                />
+                {renderTraderPortrait(activeTrader)}
               </div>
               <div className="min-w-0">
                 <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">{text.dialogue}</div>
@@ -4080,7 +4771,7 @@ export default function Home() {
                               <span
                                 className="pixelated h-full w-full"
                                 style={{
-                                  backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
+                                  backgroundColor: '#ffffff',
                                   WebkitMaskImage: `url(${item.texturePath})`,
                                   maskImage: `url(${item.texturePath})`,
                                   WebkitMaskRepeat: 'no-repeat',
@@ -4150,7 +4841,7 @@ export default function Home() {
                                 <span
                                   className="pixelated h-full w-full"
                                   style={{
-                                    backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
+                                    backgroundColor: '#ffffff',
                                     WebkitMaskImage: `url(${item.texturePath})`,
                                     maskImage: `url(${item.texturePath})`,
                                     WebkitMaskRepeat: 'no-repeat',
@@ -4201,7 +4892,7 @@ export default function Home() {
                           <span
                             className="pixelated h-full w-full"
                             style={{
-                              backgroundColor: adminGemColorOverrides[selectedSellItem.id as GemItemId] ?? selectedSellItem.tintColor ?? '#ffffff',
+                              backgroundColor: '#ffffff',
                               WebkitMaskImage: `url(${selectedSellItem.texturePath})`,
                               maskImage: `url(${selectedSellItem.texturePath})`,
                               WebkitMaskRepeat: 'no-repeat',
@@ -4259,7 +4950,7 @@ export default function Home() {
                           <span
                             className="pixelated h-full w-full"
                             style={{
-                              backgroundColor: adminGemColorOverrides[selectedItem.id as GemItemId] ?? selectedItem.tintColor ?? '#ffffff',
+                              backgroundColor: '#ffffff',
                               WebkitMaskImage: `url(${selectedItem.texturePath})`,
                               maskImage: `url(${selectedItem.texturePath})`,
                               WebkitMaskRepeat: 'no-repeat',
@@ -4534,10 +5225,11 @@ export default function Home() {
                   Reset
                 </button>
               }
-              className="z-30 w-[420px] border-[#d9efbd]/30 bg-[#17320d]/90 text-[#f3ffe7]"
+              className="z-30 w-[min(420px,calc(100vw-24px))] max-h-[calc(100dvh-24px)] overflow-hidden border-[#d9efbd]/30 bg-[#17320d]/90 text-[#f3ffe7]"
+              bodyClassName="mt-4 flex max-h-[calc(100dvh-120px)] min-h-0 flex-col overflow-hidden"
             >
 
-          <div className="mt-4 grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-4 gap-2 shrink-0">
             {[ 
               ['skills', 'Skills'],
               ['balance', 'Balance'],
@@ -4562,7 +5254,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+          <div className="mt-4 shrink-0 rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
             <label className="block">
               <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Search Images</span>
               <input
@@ -4578,7 +5270,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-4 max-h-[70vh] overflow-y-auto pr-1">
+          <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
             {activeAdminTab === 'skills' ? (
               <div className="space-y-4">
                 {(Object.keys(skillEffectOverrides) as SkillEffectId[]).map((skillId) => {
@@ -4707,32 +5399,130 @@ export default function Home() {
 
             {activeAdminTab === 'mobs' ? (
               <div className="space-y-4">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMobBalanceConfig(mobBalanceDraft)}
-                    className="rounded-xl border border-[#d9efbd]/30 bg-[#d7f0b6] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#18310d] transition hover:bg-[#e7f8cf]"
-                  >
-                    Apply
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setMobBalanceDraft(mobBalanceConfig)}
-                    className="rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/55 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#d7ebc1] transition hover:bg-[#294816]/72"
-                  >
-                    Revert
-                  </button>
+                {adminMobStatus ? (
+                  <div className="rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2 text-sm text-[#d8ebc7]">
+                    {adminMobStatus}
+                  </div>
+                ) : null}
+
+                <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Mob Library</div>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    {MOB_KINDS.map((kind) => {
+                      const isSelected = selectedAdminMobId === kind;
+                      const mobVisual = mobVisualDraft[kind];
+
+                      return (
+                        <button
+                          key={kind}
+                          type="button"
+                          onClick={() => setSelectedAdminMobId(kind)}
+                          className={`rounded-2xl border p-3 text-left transition ${
+                            isSelected
+                              ? 'border-[#d9efbd]/45 bg-[#d7f0b6] text-[#18310d]'
+                              : 'border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] text-[#d8ebc7] hover:bg-[linear-gradient(180deg,rgba(52,84,31,0.82),rgba(27,46,16,0.88))]'
+                          }`}
+                        >
+                          <AdminMobPreview kind={kind} config={mobVisual} />
+                          <div className="mt-3 text-[11px] uppercase tracking-[0.18em] opacity-80">{kind}</div>
+                          <div className="mt-1 text-sm font-semibold">{getMobDefinition(kind).name}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {(Object.keys(mobBalanceDraft) as Array<keyof MobBalanceConfig>).map((mobId) => {
-                  const config = mobBalanceDraft[mobId];
+                <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Selected Mob</div>
+                      <div className="mt-1 text-lg font-semibold text-[#f4ffe8]">{selectedAdminMobDefinition.name}</div>
+                      <div className="text-[11px] uppercase tracking-[0.18em] text-[#9fbc7e]">{selectedAdminMobId}</div>
+                    </div>
+                    <div className="w-24">
+                      <AdminMobPreview kind={selectedAdminMobId} config={selectedAdminMobVisual} />
+                    </div>
+                  </div>
 
-                  return (
-                    <div
-                      key={mobId}
-                      className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3"
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAdminMobPanelMode('edit')}
+                      className={`rounded-xl border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${
+                        adminMobPanelMode === 'edit'
+                          ? 'border-[#d9efbd]/45 bg-[#d7f0b6] text-[#18310d]'
+                          : 'border-[#d9efbd]/22 bg-[#203b11]/55 text-[#d7ebc1] hover:bg-[#294816]/72'
+                      }`}
                     >
-                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">{mobId}</div>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAdminMobPanelMode('spawn')}
+                      className={`rounded-xl border px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] transition ${
+                        adminMobPanelMode === 'spawn'
+                          ? 'border-[#d9efbd]/45 bg-[#d7f0b6] text-[#18310d]'
+                          : 'border-[#d9efbd]/22 bg-[#203b11]/55 text-[#d7ebc1] hover:bg-[#294816]/72'
+                      }`}
+                    >
+                      Spawn
+                    </button>
+                  </div>
+                </div>
+
+                {adminMobPanelMode === 'spawn' ? (
+                  <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                    <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Spawn Brush</div>
+                    <div className="mt-2 text-sm text-[#d8ebc7]">
+                      Arm the world editor with {selectedAdminMobDefinition.name}, then click on the map to place one mob.
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handlePrepareMobSpawn(selectedAdminMobId)}
+                        className="rounded-xl border border-[#d9efbd]/30 bg-[#d7f0b6] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#18310d] transition hover:bg-[#e7f8cf]"
+                      >
+                        Open Spawn Brush
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedWorldMob({ kind: selectedAdminMobId });
+                          setAdminMobStatus(`Spawn brush set to ${selectedAdminMobDefinition.name}.`);
+                        }}
+                        className="rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/55 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#d7ebc1] transition hover:bg-[#294816]/72"
+                      >
+                        Sync Brush Only
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobBalanceConfig(mobBalanceDraft);
+                          setAdminMobStatus(`Saved balance for ${selectedAdminMobDefinition.name}.`);
+                        }}
+                        className="rounded-xl border border-[#d9efbd]/30 bg-[#d7f0b6] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#18310d] transition hover:bg-[#e7f8cf]"
+                      >
+                        Apply Balance
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobBalanceDraft(mobBalanceConfig);
+                          setAdminMobStatus('Reverted mob balance draft.');
+                        }}
+                        className="rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/55 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#d7ebc1] transition hover:bg-[#294816]/72"
+                      >
+                        Revert Balance
+                      </button>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">{selectedAdminMobId} Balance</div>
                       <div className="mt-3 grid grid-cols-2 gap-3">
                         {([
                           ['maxHealth', 'Max HP'],
@@ -4749,16 +5539,122 @@ export default function Home() {
                             <input
                               type="number"
                               min={0}
-                              value={config[field]}
-                              onChange={(event) => handleMobBalanceChange(mobId, field, event.target.value)}
+                              value={selectedAdminMobBalance[field]}
+                              onChange={(event) => handleMobBalanceChange(selectedAdminMobId, field, event.target.value)}
                               className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
                             />
                           </label>
                         ))}
                       </div>
                     </div>
-                  );
-                })}
+
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleApplyMobVisuals();
+                        }}
+                        className="rounded-xl border border-[#d9efbd]/30 bg-[#d7f0b6] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#18310d] transition hover:bg-[#e7f8cf]"
+                      >
+                        Apply Visuals
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMobVisualDraft(mobVisualConfig);
+                          setAdminMobStatus('Reverted mob visual draft.');
+                        }}
+                        className="rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/55 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#d7ebc1] transition hover:bg-[#294816]/72"
+                      >
+                        Revert Visuals
+                      </button>
+                    </div>
+
+                    <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">{selectedAdminMobId} Visual</div>
+                      <label className="mt-3 block">
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Spritesheet</span>
+                        <input
+                          type="text"
+                          value={selectedAdminMobVisual.clips.default?.spritesheet ?? ''}
+                          onChange={(event) => handleMobVisualChange(selectedAdminMobId, 'spritesheet', event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                        />
+                      </label>
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        {([
+                          ['frameWidth', 'Frame W'],
+                          ['frameHeight', 'Frame H'],
+                          ['columns', 'Columns'],
+                          ['spriteScale', 'Scale'],
+                          ['anchorY', 'Anchor Y'],
+                        ] as const).map(([field, label]) => (
+                          <label key={`${selectedAdminMobId}-${field}`} className="block">
+                            <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">{label}</span>
+                            <input
+                              type="number"
+                              min={field === 'spriteScale' || field === 'anchorY' ? 0 : 1}
+                              step={field === 'spriteScale' || field === 'anchorY' ? 0.1 : 1}
+                              value={
+                                field === 'spriteScale' || field === 'anchorY'
+                                  ? selectedAdminMobVisual[field]
+                                  : getDisplayedMobClipFieldValue(selectedAdminMobVisual.clips.default, field)
+                              }
+                              onChange={(event) => handleMobVisualChange(selectedAdminMobId, field, event.target.value)}
+                              className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                            />
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-1 gap-3">
+                        {EDITABLE_MOB_ANIMATION_STATES.map((state) => {
+                          const stateClip = selectedAdminMobVisual.clips[state];
+                          if (!stateClip) {
+                            return null;
+                          }
+
+                          return (
+                            <div
+                              key={`${selectedAdminMobId}-${state}`}
+                              className="rounded-xl border border-[#d9efbd]/14 bg-[#17280d]/55 p-3"
+                            >
+                              <div className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">{state}</div>
+                              <div className="mt-3 grid grid-cols-4 gap-3">
+                                {([
+                                  ['row', 'Row'],
+                                  ['start', 'Start'],
+                                  ['end', 'End'],
+                                  ['frameRate', 'FPS'],
+                                ] as const).map(([field, label]) => (
+                                  <label key={`${selectedAdminMobId}-${state}-${field}`} className="block">
+                                    <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">{label}</span>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      step={1}
+                                      value={
+                                        field === 'row'
+                                          ? getMobClipRow(stateClip)
+                                          : field === 'start'
+                                            ? getMobClipStartColumn(stateClip)
+                                            : field === 'end'
+                                              ? getMobClipEndColumn(stateClip)
+                                              : stateClip.frameRate
+                                      }
+                                      onChange={(event) => handleMobStateVisualChange(selectedAdminMobId, state, field, event.target.value)}
+                                      className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                                    />
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             ) : null}
 
@@ -4807,7 +5703,7 @@ export default function Home() {
                         <span
                           className="pixelated h-16 w-16"
                           style={{
-                            backgroundColor: adminGemColorOverrides[selectedAdminItem.id as GemItemId] ?? selectedAdminItem.tintColor ?? '#ffffff',
+                            backgroundColor: '#ffffff',
                             WebkitMaskImage: `url(${selectedAdminItem.texturePath})`,
                             maskImage: `url(${selectedAdminItem.texturePath})`,
                             WebkitMaskRepeat: 'no-repeat',
@@ -4882,48 +5778,6 @@ export default function Home() {
                   </label>
                 </div>
 
-                {ADMIN_ITEM_DEFINITIONS.some((item) => item.type === 'gem') ? (
-                  <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
-                    <div className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Gem Colors</div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {ADMIN_ITEM_DEFINITIONS.filter((item) => item.type === 'gem').map((item) => (
-                        <label key={item.id} className="block">
-                          <span className="text-[10px] uppercase tracking-[0.18em] text-[#bfd8a4]">{item.name}</span>
-                          <div className="mt-2 flex items-center gap-3 rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2">
-                            <span
-                              className="pixelated h-10 w-10 shrink-0"
-                              style={{
-                                backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
-                                WebkitMaskImage: `url(${item.texturePath})`,
-                                maskImage: `url(${item.texturePath})`,
-                                WebkitMaskRepeat: 'no-repeat',
-                                maskRepeat: 'no-repeat',
-                                WebkitMaskPosition: 'center',
-                                maskPosition: 'center',
-                                WebkitMaskSize: 'contain',
-                                maskSize: 'contain',
-                                transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                              }}
-                            />
-                            <input
-                              type="color"
-                              value={adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff'}
-                              onChange={(event) => {
-                                const nextColor = event.target.value;
-                                setAdminGemColorOverrides((current) => ({
-                                  ...current,
-                                  [item.id as GemItemId]: nextColor,
-                                }));
-                              }}
-                              className="block h-10 w-full cursor-pointer rounded-lg border border-[#d9efbd]/22 bg-[#203b11]/70 p-1"
-                            />
-                          </div>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
                 <div className="grid grid-cols-2 gap-3">
                   {ADMIN_ITEM_DEFINITIONS.map((item) => (
                     <button
@@ -4941,7 +5795,7 @@ export default function Home() {
                             <span
                               className="pixelated h-full w-full"
                               style={{
-                                backgroundColor: adminGemColorOverrides[item.id as GemItemId] ?? item.tintColor ?? '#ffffff',
+                                backgroundColor: '#ffffff',
                                 WebkitMaskImage: `url(${item.texturePath})`,
                                 maskImage: `url(${item.texturePath})`,
                                 WebkitMaskRepeat: 'no-repeat',
@@ -4993,7 +5847,8 @@ export default function Home() {
                   {([
                     ['tile', 'Tiles'],
                     ['sprite', 'Sprites'],
-                    ['trader', 'Traders'],
+                    ['mob', 'Mobs'],
+                    ['trader', 'NPC'],
                     ['spawn', 'Spawn'],
                   ] as const).map(([mode, label]) => (
                     <button
@@ -5103,93 +5958,234 @@ export default function Home() {
                       </div>
                     </div>
                   </div>
+                ) : worldEditorMode === 'mob' ? (
+                  <div className="space-y-3">
+                    <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Mob Brush</div>
+                      <div className="mt-2 text-sm text-[#d8ebc7]">
+                        Select a mob, then click on the world to place it. Right click removes a mob from a tile.
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {MOB_KINDS.map((kind) => {
+                        const definition = getMobDefinition(kind);
+                        const isSelected = selectedWorldMob.kind === kind;
+
+                        return (
+                          <button
+                            key={kind}
+                            type="button"
+                            onClick={() => setSelectedWorldMob({ kind })}
+                            className={`rounded-2xl border p-3 text-left transition ${
+                              isSelected
+                                ? 'border-[#d9efbd]/45 bg-[#d7f0b6] text-[#18310d]'
+                                : 'border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] text-[#d8ebc7] hover:bg-[linear-gradient(180deg,rgba(52,84,31,0.82),rgba(27,46,16,0.88))]'
+                            }`}
+                          >
+                            <div className="text-[11px] uppercase tracking-[0.18em] opacity-80">{kind}</div>
+                            <div className="mt-1 text-sm font-semibold">{definition.name}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 ) : worldEditorMode === 'trader' ? (
                   <div className="space-y-3">
-                    <label className="block">
-                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Name</span>
-                      <input
-                        type="text"
-                        value={selectedWorldTrader.name}
-                        onChange={(event) =>
-                          setSelectedWorldTrader((current) => ({
-                            ...current,
-                            name: event.target.value,
-                          }))
-                        }
-                        className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
-                      />
-                    </label>
+                    <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+                      <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">NPC</div>
+                      <div className="mt-2 text-sm text-[#d8ebc7]">
+                        Old mage is fixed. You can only move him and change his sprite parts.
+                      </div>
+                    </div>
                     <label className="block">
                       <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Body</span>
+                      <input
+                        value={traderBodySearch}
+                        onChange={(event) => setTraderBodySearch(event.target.value)}
+                        placeholder="Search body items..."
+                        className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                      />
+                      <div className="mt-2 grid max-h-44 grid-cols-2 gap-2 overflow-auto pr-1">
+                        {filteredTraderBodyItems.length ? (
+                          filteredTraderBodyItems.map((item) => {
+                            const itemTexturePath = getEquipmentBodyTexturePath(item.id);
+                            const isSelected = selectedWorldTrader.bodyItemId === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => handleOldMageAppearanceChange('bodyItemId', item.id)}
+                                className={`rounded-xl border p-2 text-left transition ${
+                                  isSelected
+                                    ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                                    : 'border-[#89ad5d]/20 bg-[#203b11]/65 text-[#d8ebc7] hover:bg-[#294816]/72'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {itemTexturePath ? (
+                                    <img
+                                      src={itemTexturePath}
+                                      alt={item.name}
+                                      className="pixelated h-10 w-10 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 text-[10px] uppercase tracking-[0.12em] text-[#9fbc7e]">
+                                      No art
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold">{item.name}</div>
+                                    <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">
+                                      {item.id}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="col-span-2 rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2 text-xs text-[#9fbc7e]">
+                            No body items found.
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                    <label className="block">
+                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Hair</span>
                       <select
-                        value={selectedWorldTrader.bodyTexturePath}
-                        onChange={(event) =>
-                          setSelectedWorldTrader((current) => ({
-                            ...current,
-                            bodyTexturePath: event.target.value,
-                          }))
-                        }
+                        value={selectedWorldTrader.hairTexturePath}
+                        onChange={(event) => handleOldMageAppearanceChange('hairTexturePath', event.target.value)}
                         className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
                       >
-                        {worldTraderBodyOptions.map((spritePath) => (
+                        <option value="">None</option>
+                        {worldTraderHairOptions.map((spritePath) => (
                           <option key={spritePath} value={spritePath}>
                             {spritePath.split('/').at(-1) ?? spritePath}
                           </option>
                         ))}
                       </select>
                     </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Hair Offset X</span>
+                        <input
+                          type="number"
+                          step={0.5}
+                          value={selectedWorldTrader.hairOffsetX}
+                          onChange={(event) => handleOldMageAppearanceChange('hairOffsetX', event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Hair Offset Y</span>
+                        <input
+                          type="number"
+                          step={0.5}
+                          value={selectedWorldTrader.hairOffsetY}
+                          onChange={(event) => handleOldMageAppearanceChange('hairOffsetY', event.target.value)}
+                          className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
+                        />
+                      </label>
+                    </div>
                     <label className="block">
-                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Head</span>
-                      <select
-                        value={selectedWorldTrader.headTexturePath}
-                        onChange={(event) =>
-                          setSelectedWorldTrader((current) => ({
-                            ...current,
-                            headTexturePath: event.target.value,
-                          }))
-                        }
+                      <span className="text-[11px] uppercase tracking-[0.18em] text-[#bfd8a4]">Head Overlay</span>
+                      <input
+                        value={traderHeadSearch}
+                        onChange={(event) => setTraderHeadSearch(event.target.value)}
+                        placeholder="Search head items..."
                         className="mt-1 w-full rounded-xl border border-[#d9efbd]/22 bg-[#203b11]/70 px-3 py-2 text-sm text-[#f3ffe7] outline-none"
-                      >
-                        {worldTraderHeadOptions.map((spritePath) => (
-                          <option key={spritePath} value={spritePath}>
-                            {spritePath.split('/').at(-1) ?? spritePath}
-                          </option>
-                        ))}
-                      </select>
+                      />
+                      <div className="mt-2 grid max-h-44 grid-cols-2 gap-2 overflow-auto pr-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOldMageAppearanceChange('headItemId', '')}
+                          className={`rounded-xl border p-2 text-left transition ${
+                            !selectedWorldTrader.headItemId
+                              ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                              : 'border-[#89ad5d]/20 bg-[#203b11]/65 text-[#d8ebc7] hover:bg-[#294816]/72'
+                          }`}
+                        >
+                          <div className="text-sm font-semibold">None</div>
+                          <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">
+                            Default Head
+                          </div>
+                        </button>
+                        {filteredTraderHeadItems.length ? (
+                          filteredTraderHeadItems.map((item) => {
+                            const itemTexturePath = getEquipmentBodyTexturePath(item.id);
+                            const isSelected = selectedWorldTrader.headItemId === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => handleOldMageAppearanceChange('headItemId', item.id)}
+                                className={`rounded-xl border p-2 text-left transition ${
+                                  isSelected
+                                    ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                                    : 'border-[#89ad5d]/20 bg-[#203b11]/65 text-[#d8ebc7] hover:bg-[#294816]/72'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  {itemTexturePath ? (
+                                    <img
+                                      src={itemTexturePath}
+                                      alt={item.name}
+                                      className="pixelated h-10 w-10 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 object-contain"
+                                    />
+                                  ) : (
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 text-[10px] uppercase tracking-[0.12em] text-[#9fbc7e]">
+                                      No art
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="truncate text-sm font-semibold">{item.name}</div>
+                                    <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">
+                                      {item.id}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="col-span-2 rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-2 text-xs text-[#9fbc7e]">
+                            No head items found.
+                          </div>
+                        )}
+                      </div>
                     </label>
                     <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
                       <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Preview</div>
                       <div className="mt-3 flex min-h-[120px] items-center justify-center rounded-xl border border-[#d9efbd]/18 bg-[#102108]/60 p-3">
-                        {selectedWorldTrader.bodyTexturePath || selectedWorldTrader.headTexturePath ? (
-                          <div className="relative h-20 w-20">
+                        <div className="relative h-20 w-20">
+                          {renderStaticPlayerBaseBody()}
+                          {selectedTraderBodyTexturePath
+                            ? renderStaticTraderBodyOverlay(selectedTraderBodyTexturePath, 'Trader body preview')
+                            : null}
+                          <img
+                            src={DEFAULT_PLAYER_VISUALS.head.texturePath}
+                            alt="Trader head base"
+                            className="pixelated absolute inset-0 h-full w-full object-contain"
+                          />
+                          {selectedWorldTrader.hairTexturePath ? (
                             <img
-                              src="/sprites/characters/body-torso-8x8.png"
-                              alt="Trader body base"
+                              src={selectedWorldTrader.hairTexturePath}
+                              alt="Trader hair preview"
+                              className="pixelated absolute inset-0 h-full w-full object-contain"
+                              style={{
+                                transform: `translate(${selectedWorldTrader.hairOffsetX}px, ${selectedWorldTrader.hairOffsetY}px)`,
+                              }}
+                            />
+                          ) : null}
+                          {renderStaticHeadEyes('down')}
+                          {selectedTraderHeadTexturePath ? (
+                            <img
+                              src={selectedTraderHeadTexturePath}
+                              alt="Trader head preview"
                               className="pixelated absolute inset-0 h-full w-full object-contain"
                             />
-                            {selectedWorldTrader.bodyTexturePath ? (
-                              <img
-                                src={selectedWorldTrader.bodyTexturePath}
-                                alt="Trader body preview"
-                                className="pixelated absolute inset-0 h-full w-full object-contain"
-                              />
-                            ) : null}
-                            <img
-                              src="/sprites/characters/body-head-8x8.png"
-                              alt="Trader head base"
-                              className="pixelated absolute inset-0 h-full w-full object-contain"
-                            />
-                            {selectedWorldTrader.headTexturePath ? (
-                              <img
-                                src={selectedWorldTrader.headTexturePath}
-                                alt="Trader head preview"
-                                className="pixelated absolute inset-0 h-full w-full object-contain"
-                              />
-                            ) : null}
-                          </div>
-                        ) : (
-                          <div className="text-xs uppercase tracking-[0.18em] text-[#9fbc7e]">No Trader Parts</div>
-                        )}
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -5242,8 +6238,10 @@ export default function Home() {
                           ? 'Hold left mouse button and paint directly on the world.'
                           : worldEditorMode === 'sprite'
                             ? 'Hold left mouse button to place the selected sprite on the world. Right mouse button removes the sprite from a tile.'
+                            : worldEditorMode === 'mob'
+                              ? 'Click to place the selected mob on the world. Right mouse button removes the mob from a tile.'
                             : worldEditorMode === 'trader'
-                              ? 'Hold left mouse button to place a trader. Right mouse button removes the trader from a tile.'
+                              ? 'Click on the world to place or move Old mage.'
                             : 'Click or drag on the world to move the spawn point.'}
                       </div>
                       <div>
@@ -5253,9 +6251,11 @@ export default function Home() {
                           ? selectedWorldTile
                           : worldEditorMode === 'sprite'
                             ? `${selectedWorldSprite.texturePath || 'no sprite selected'} @ ${selectedWorldSprite.rotation}deg x${selectedWorldSprite.scale}${selectedWorldSprite.flipX ? ' mirror' : ''}`
-                            : worldEditorMode === 'trader'
-                              ? `${selectedWorldTrader.name || 'Trader'} · ${selectedWorldTrader.bodyTexturePath || 'no body'} · ${selectedWorldTrader.headTexturePath || 'no head'}`
-                            : `spawn @ ${worldMapDraft.spawn.x}:${worldMapDraft.spawn.y}`}
+                            : worldEditorMode === 'mob'
+                              ? `${selectedWorldMob.kind} · ${getMobDefinition(selectedWorldMob.kind).name}`
+                              : worldEditorMode === 'trader'
+                                ? `${OLD_MAGE_TRADER_NAME} · ${selectedTraderBodyLabel} · ${selectedWorldTrader.hairTexturePath || 'no hair'} · ${selectedTraderHeadLabel}`
+                                : `spawn @ ${worldMapDraft.spawn.x}:${worldMapDraft.spawn.y}`}
                       </div>
                       <div>
                         Cursor:
@@ -5263,7 +6263,8 @@ export default function Home() {
                         {worldHoverTile ? `${worldHoverTile.x}:${worldHoverTile.y}` : '--:--'}
                       </div>
                       <div>Draft sprite-tiles: {worldMapDraft.stamps.length}</div>
-                      <div>Draft traders: {worldMapDraft.traders.length}</div>
+                      <div>Draft mobs: {worldMapDraft.mobs.length}</div>
+                      <div>Draft NPCs: {worldMapDraft.traders.length}</div>
                       <div>Texture key: {worldEditorDebug.textureKey || 'none'}</div>
                       <div>Texture loaded: {worldEditorDebug.textureLoaded ? 'yes' : 'no'}</div>
                       {worldEditorMode === 'sprite' ? (

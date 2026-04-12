@@ -58,6 +58,8 @@ On startup, `backend`, `realtime`, and `frontend` check for the package files th
 
 The container start commands invoke the package entrypoints directly from `node_modules` instead of relying on shell shims in `.bin`. This avoids npm workspace path issues inside bind-mounted Docker development environments.
 
+The frontend container also receives `BACKEND_INTERNAL_URL=http://backend:3000` so its server-side admin routes can validate bearer tokens against the backend instead of trusting client-side role checks.
+
 If you already created Docker volumes before this change, recreate them once so the per-service `node_modules` and frontend `.next` volumes are attached cleanly:
 
 ```bash

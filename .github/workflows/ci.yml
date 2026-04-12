@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared
+        run: npm --workspace @mmorpg/shared run build
+
+      - name: Build backend
+        run: npm --workspace backend run build
+
+      - name: Test backend
+        run: npm --workspace backend test -- --runInBand
+
+      - name: Build realtime
+        run: npm --workspace my-app run build
+
+      - name: Test realtime (non-blocking)
+        continue-on-error: true
+        run: npm --workspace my-app test
+
+      - name: Lint frontend (non-blocking)
+        continue-on-error: true
+        run: npm --workspace frontend run lint
+
+      - name: Build frontend
+        run: npm --workspace frontend run build

@@ -8,16 +8,25 @@ import { ItemsModule } from '../items/items.module';
 import { PlayerInventoryService } from './player-inventory.service';
 import { PlayerSerializerService } from './player-serializer.service';
 import { AuthSessionsModule } from '../auth/auth-sessions.module';
+import { GetCurrentPlayerQuery } from './use-cases/get-current-player.query';
+import { GrantItemUseCase } from './use-cases/grant-item.use-case';
+import { UpdatePlayerProfileUseCase } from './use-cases/update-player-profile.use-case';
 
 @Module({
-    imports: [
-      TypeOrmModule.forFeature([PlayerEntity, PlayerItemEntity]),
-      ItemsModule,
-      AuthSessionsModule,
-    ],
-    controllers: [PlayersController],
-    providers: [PlayersService, PlayerInventoryService, PlayerSerializerService],
-    exports: [PlayersService, PlayerInventoryService, PlayerSerializerService],
-
+  imports: [
+    TypeOrmModule.forFeature([PlayerEntity, PlayerItemEntity]),
+    ItemsModule,
+    AuthSessionsModule,
+  ],
+  controllers: [PlayersController],
+  providers: [
+    PlayersService,
+    PlayerInventoryService,
+    PlayerSerializerService,
+    GetCurrentPlayerQuery,
+    GrantItemUseCase,
+    UpdatePlayerProfileUseCase,
+  ],
+  exports: [PlayersService, PlayerInventoryService, PlayerSerializerService],
 })
-export class PlayersModule { }
+export class PlayersModule {}

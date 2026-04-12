@@ -31,12 +31,12 @@ export function canProjectileHitOwner(
   projectile: {
     ownerId: string;
     returning: boolean;
-    selfHitGraceEndsAt: number;
     x: number;
     y: number;
     originX: number;
     originY: number;
   },
+  selfHitGraceEndsAt: number,
   playerId: string,
   armDistance: number,
   now = Date.now(),
@@ -47,27 +47,23 @@ export function canProjectileHitOwner(
 
   return (
     projectile.returning ||
-    (now >= projectile.selfHitGraceEndsAt &&
+    (now >= selfHitGraceEndsAt &&
       Math.hypot(projectile.x - projectile.originX, projectile.y - projectile.originY) >= armDistance)
   );
 }
 
-export function getProjectileDamageScale(projectile: {
-  damageScale?: number;
-  maxDistance: number;
-  x: number;
-  y: number;
-  originX: number;
-  originY: number;
-}) {
-  let damageScale = projectile.damageScale || 1;
+export function getProjectileDamageScale(
+  position: { x: number; y: number; originX: number; originY: number },
+  combat: { damageScale?: number; maxDistance: number },
+) {
+  let damageScale = combat.damageScale || 1;
 
-  if (projectile.maxDistance > 0) {
+  if (combat.maxDistance > 0) {
     const distanceFromOrigin = Math.hypot(
-      projectile.x - projectile.originX,
-      projectile.y - projectile.originY,
+      position.x - position.originX,
+      position.y - position.originY,
     );
-    const falloffScale = Math.max(0, 1 - distanceFromOrigin / projectile.maxDistance);
+    const falloffScale = Math.max(0, 1 - distanceFromOrigin / combat.maxDistance);
     damageScale *= falloffScale;
   }
 
@@ -75,13 +71,10 @@ export function getProjectileDamageScale(projectile: {
 }
 
 export function getProjectileDirectDamage(
-  projectile: {
+  position: { x: number; y: number; originX: number; originY: number },
+  combat: {
     damageScale?: number;
     maxDistance: number;
-    x: number;
-    y: number;
-    originX: number;
-    originY: number;
     executionThreshold: number;
     executionDamageMultiplier: number;
     criticalChance: number;
@@ -91,18 +84,18 @@ export function getProjectileDirectDamage(
   targetHealth: number,
   targetMaxHealth: number,
 ) {
-  let damage = baseDamage * getProjectileDamageScale(projectile);
+  let damage = baseDamage * getProjectileDamageScale(position, combat);
   if (
-    projectile.executionThreshold > 0 &&
+    combat.executionThreshold > 0 &&
     targetMaxHealth > 0 &&
-    targetHealth / targetMaxHealth <= projectile.executionThreshold
+    targetHealth / targetMaxHealth <= combat.executionThreshold
   ) {
-    damage *= projectile.executionDamageMultiplier;
+    damage *= combat.executionDamageMultiplier;
   }
 
   let isCritical = false;
-  if (projectile.criticalChance > 0 && Math.random() < projectile.criticalChance) {
-    damage *= projectile.criticalDamageMultiplier;
+  if (combat.criticalChance > 0 && Math.random() < combat.criticalChance) {
+    damage *= combat.criticalDamageMultiplier;
     isCritical = true;
   }
 

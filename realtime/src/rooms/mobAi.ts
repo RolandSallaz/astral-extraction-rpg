@@ -32,11 +32,15 @@ const AGGRO_RETARGET_DISTANCE_BUFFER = 32;
 const FORCED_AGGRO_LOCK_MS = 2500;
 
 function resolveMobKind(mob: MobState): MobKind {
-  if (mob.kind === "bat" || mob.kind === "rat") {
+  if (mob.kind === "bat" || mob.kind === "rat" || mob.kind === "skeleton") {
     return mob.kind;
   }
 
-  return mob.texture === "bat" ? "bat" : "rat";
+  if (mob.texture === "bat" || mob.texture === "rat" || mob.texture === "skeleton") {
+    return mob.texture;
+  }
+
+  return "rat";
 }
 
 function getMobHomeX(mob: MobState) {
@@ -78,6 +82,15 @@ export function resetMobToSpawn(mob: MobState) {
   mob.targetY = spawnY;
   mob.respawnAt = 0;
   mob.attackCooldownEndsAt = 0;
+  mob.castingSkillId = "";
+  mob.castStartedAt = 0;
+  mob.castEndsAt = 0;
+  mob.skillLungeStartedAt = 0;
+  mob.skillLungeEndsAt = 0;
+  mob.skillLungeFromX = 0;
+  mob.skillLungeFromY = 0;
+  mob.skillLungeToX = 0;
+  mob.skillLungeToY = 0;
 }
 
 export function setMobAggroTarget(
@@ -195,13 +208,25 @@ export function getMobDesiredTargetPosition(
 
   if (target) {
     if (resolveMobKind(mob) === "bat") {
-      const orbitRadius = Math.max(mob.attackRange * 1.5, 34);
+      const deltaX = target.x - mob.x;
+      const deltaY = target.y - mob.y;
+      const distance = Math.hypot(deltaX, deltaY);
+      const directionX = distance > 0.001 ? deltaX / distance : Math.cos(phase);
+      const directionY = distance > 0.001 ? deltaY / distance : Math.sin(phase);
+      const perpendicularX = -directionY;
+      const perpendicularY = directionX;
+      const spiralRadius = Math.max(18, Math.min(54, distance * 0.34));
+      const spiralWave = Math.sin(phase * 5.2);
+      const forwardPull = Math.max(18, Math.min(distance, mob.attackRange * 1.8));
       return {
-        x: target.x + Math.cos(phase * 2.2) * orbitRadius,
+        x:
+          mob.x +
+          directionX * forwardPull +
+          perpendicularX * spiralWave * spiralRadius,
         y:
-          target.y -
-          10 +
-          Math.sin(phase * 1.6 + mob.patrolPhase) * Math.max(10, patrolRadiusY || 10),
+          mob.y +
+          directionY * forwardPull +
+          perpendicularY * spiralWave * spiralRadius,
       };
     }
 
@@ -212,9 +237,12 @@ export function getMobDesiredTargetPosition(
   }
 
   if (resolveMobKind(mob) === "bat") {
+    const spiralRadius = Math.max(10, patrolRadiusY || 18);
+    const spiralWave = Math.sin(phase * 4.8);
+    const outward = Math.max(10, Math.min(patrolRadiusX, 14 + (phase % (Math.PI * 2)) * 4));
     return {
-      x: homeX + Math.cos(phase * 1.15) * patrolRadiusX,
-      y: homeY + Math.sin(phase * 1.7 + mob.patrolPhase) * Math.max(8, patrolRadiusY || 8),
+      x: homeX + Math.cos(phase * 1.35) * outward + Math.cos(phase * 3.4) * spiralRadius,
+      y: homeY + Math.sin(phase * 1.35) * outward + spiralWave * spiralRadius,
     };
   }
 

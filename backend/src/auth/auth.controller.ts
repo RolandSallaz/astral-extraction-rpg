@@ -1,32 +1,34 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { AuthGuard } from './guards/auth.guard';
 import { CurrentPlayer } from './decorators/current-player.decorator';
 import { PlayerEntity } from '../players/entities/player.entity';
-import { PlayerSerializerService } from '../players/player-serializer.service';
+import { GetAuthenticatedPlayerQuery } from './use-cases/get-authenticated-player.query';
+import { LoginPlayerUseCase } from './use-cases/login-player.use-case';
+import { RegisterPlayerUseCase } from './use-cases/register-player.use-case';
 
 @Controller('auth')
 export class AuthController {
   constructor(
-    private readonly authService: AuthService,
-    private readonly playerSerializer: PlayerSerializerService,
+    private readonly registerPlayerUseCase: RegisterPlayerUseCase,
+    private readonly loginPlayerUseCase: LoginPlayerUseCase,
+    private readonly getAuthenticatedPlayerQuery: GetAuthenticatedPlayerQuery,
   ) {}
 
   @Post('register')
   register(@Body() body: RegisterDto) {
-    return this.authService.register(body);
+    return this.registerPlayerUseCase.execute(body);
   }
 
   @Post('login')
   login(@Body() body: LoginDto) {
-    return this.authService.login(body);
+    return this.loginPlayerUseCase.execute(body);
   }
 
   @UseGuards(AuthGuard)
   @Get('me')
   me(@CurrentPlayer() player: PlayerEntity) {
-    return this.playerSerializer.serializePlayer(player);
+    return this.getAuthenticatedPlayerQuery.execute(player);
   }
 }

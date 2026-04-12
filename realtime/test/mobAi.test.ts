@@ -1,6 +1,6 @@
 import assert from "assert";
 import { MobState } from "../src/rooms/schema/MobState.js";
-import { resolveMobAggroTarget, setMobAggroTarget } from "../src/rooms/mobAi.js";
+import { getMobDesiredTargetPosition, resolveMobAggroTarget, setMobAggroTarget } from "../src/rooms/mobAi.js";
 import { hasGridLineOfSight } from "../src/rooms/mobPathing.js";
 
 describe("mob AI aggro", () => {
@@ -142,5 +142,31 @@ describe("mob AI aggro", () => {
     assert.ok(target);
     assert.strictEqual(target?.id, "player-6");
     assert.strictEqual(mob.aggroTargetId, "player-6");
+  });
+
+  it("moves bats toward targets with a spiral offset instead of a straight line", () => {
+    const mob = new MobState();
+    mob.id = "bat-spiral";
+    mob.kind = "bat";
+    mob.texture = "bat";
+    mob.x = 100;
+    mob.y = 100;
+    mob.attackRange = 24;
+    mob.patrolPhase = 0.4;
+    mob.patrolRadiusY = 24;
+
+    const target = {
+      id: "player-spiral",
+      x: 180,
+      y: 100,
+      dead: false,
+    };
+
+    const desiredEarly = getMobDesiredTargetPosition(mob, target, 1000);
+    const desiredLate = getMobDesiredTargetPosition(mob, target, 1350);
+
+    assert.ok(desiredEarly.x > mob.x);
+    assert.notStrictEqual(Math.round(desiredEarly.y), mob.y);
+    assert.notStrictEqual(Math.round(desiredEarly.y), Math.round(desiredLate.y));
   });
 });

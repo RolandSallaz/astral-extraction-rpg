@@ -1,0 +1,13 @@
+[
+  {
+    "id": "old-mage",
+    "x": 17,
+    "y": 19,
+    "name": "Old mage",
+    "bodyItemId": "fire_robe",
+    "bodyTexturePath": "/character/equipment/fire_robe/fire_robe_idle.png",
+    "hairTexturePath": "/character/hairs/old_mage_haird.png",
+    "hairOffsetX": 0,
+    "hairOffsetY": -3.5
+  }
+]

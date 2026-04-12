@@ -1,6 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
+import {
+  requireAdminRequest,
+  toAdminAuthErrorResponse,
+} from '@/lib/server/adminAuth';
 
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif']);
 
@@ -27,12 +31,18 @@ async function walkPublicImages(directory: string, rootDirectory: string, result
   }
 }
 
-export async function GET() {
-  const publicRoot = path.join(process.cwd(), 'public');
-  const imagePaths: string[] = [];
+export async function GET(request: NextRequest) {
+  try {
+    await requireAdminRequest(request);
 
-  await walkPublicImages(publicRoot, publicRoot, imagePaths);
-  imagePaths.sort((left, right) => left.localeCompare(right));
+    const publicRoot = path.join(process.cwd(), 'public');
+    const imagePaths: string[] = [];
 
-  return NextResponse.json({ images: imagePaths });
+    await walkPublicImages(publicRoot, publicRoot, imagePaths);
+    imagePaths.sort((left, right) => left.localeCompare(right));
+
+    return NextResponse.json({ images: imagePaths });
+  } catch (error) {
+    return toAdminAuthErrorResponse(error);
+  }
 }

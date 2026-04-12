@@ -56,6 +56,7 @@ Thumbs.db
 
 # Package artifacts
 *.tgz
+shared/package-lock.json
 
 # Generated migration artifacts
 backend/src/migrations/*.ts

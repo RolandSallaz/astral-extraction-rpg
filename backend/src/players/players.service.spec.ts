@@ -95,10 +95,10 @@ describe('Player inventory and serialization helpers', () => {
     ];
 
     itemsService.findByCodes.mockResolvedValue([
-      { code: 'default_staff', stackable: false, maxStack: 1 },
-      { code: 'fire_trail_gem', stackable: false, maxStack: 1 },
-      { code: 'critical_gem', stackable: false, maxStack: 1 },
-      { code: 'fire_return_gem', stackable: false, maxStack: 1 },
+      { id: 'default_staff', stackable: false, maxStack: 1 },
+      { id: 'fire_trail_gem', stackable: false, maxStack: 1 },
+      { id: 'critical_gem', stackable: false, maxStack: 1 },
+      { id: 'fire_return_gem', stackable: false, maxStack: 1 },
     ]);
     playerItemsRepository.save
       .mockResolvedValueOnce(savedBaseItems)

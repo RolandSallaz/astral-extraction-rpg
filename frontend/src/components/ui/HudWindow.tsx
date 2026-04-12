@@ -83,17 +83,6 @@ export function HudWindow({
   } | null>(null);
 
   useEffect(() => {
-    setPosition((current) => {
-      const loaded = loadWindowPosition(storageKey, defaultPosition);
-      if (current.left === loaded.left && current.top === loaded.top) {
-        return current;
-      }
-
-      return loaded;
-    });
-  }, [storageKey, defaultPosition.left, defaultPosition.top]);
-
-  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }

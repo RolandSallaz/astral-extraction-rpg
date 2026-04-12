@@ -28,8 +28,8 @@
         ]
       },
       "tutorialMob": {
-        "id": "raid-rat-tutorial",
-        "kind": "rat",
+        "id": "raid-skeleton-tutorial",
+        "kind": "skeleton",
         "roomIndex": 2,
         "fallbackRoom": {
           "x": 18,
@@ -63,9 +63,6 @@
         "fixedSlots": [],
         "lootPools": {
           "outer": [
-            "magic_hat",
-            "magic_hat",
-            "magic_hat",
             "healing_potion",
             "healing_potion",
             "healing_potion",
@@ -73,15 +70,10 @@
             "fire_trail_gem",
             "cast_speed_gem",
             "duration_gem",
-            "guard_gem",
-            "focus_gem",
-            "vitality_gem",
             "fire_spiral_gem",
             "fire_orbit_gem"
           ],
           "mid": [
-            "robe_tunic",
-            "robe_tunic",
             "healing_potion",
             "healing_potion",
             "teleport_scroll",
