@@ -189,6 +189,14 @@ function findOldMageTrader(asset: MeadowMapAsset | null) {
   ) ?? asset.traders[0] ?? null;
 }
 
+function getItemDefinitionByValue(value?: string) {
+  if (!value || !(value in ITEM_DEFINITIONS)) {
+    return undefined;
+  }
+
+  return ITEM_DEFINITIONS[value as ItemId];
+}
+
 function createAdminRequestHeaders(init?: HeadersInit) {
   const headers = new Headers(init);
   const token = getStoredSessionToken();
@@ -2997,11 +3005,13 @@ export default function Home() {
   const selectedTraderHeadTexturePath = selectedWorldTrader.headItemId
     ? getEquipmentBodyTexturePath(selectedWorldTrader.headItemId)
     : undefined;
+  const selectedTraderBodyItem = getItemDefinitionByValue(selectedWorldTrader.bodyItemId);
+  const selectedTraderHeadItem = getItemDefinitionByValue(selectedWorldTrader.headItemId);
   const selectedTraderBodyLabel = selectedWorldTrader.bodyItemId
-    ? ITEM_DEFINITIONS[selectedWorldTrader.bodyItemId]?.name ?? selectedWorldTrader.bodyItemId
+    ? selectedTraderBodyItem?.name ?? selectedWorldTrader.bodyItemId
     : 'default body';
   const selectedTraderHeadLabel = selectedWorldTrader.headItemId
-    ? ITEM_DEFINITIONS[selectedWorldTrader.headItemId]?.name ?? selectedWorldTrader.headItemId
+    ? selectedTraderHeadItem?.name ?? selectedWorldTrader.headItemId
     : 'no head overlay';
   const selectedAdminItem = ITEM_DEFINITIONS[selectedAdminItemId];
   const selectedAdminItemBalance = itemBalanceDraft[selectedAdminItemId] ?? DEFAULT_ITEM_BALANCE_CONFIG[selectedAdminItemId];
