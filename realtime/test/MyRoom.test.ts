@@ -144,6 +144,29 @@ describe("world room", () => {
     assert.ok((movedPlayer?.x ?? 0) > startX);
   });
 
+  it("acknowledges the latest world move sequence after simulation", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const client = await colyseus.connectTo(room, {
+      name: "Sequence Mage",
+    });
+
+    await room.waitForNextPatch();
+
+    client.send("move", { x: 1, y: 0, sequence: 7 });
+    await waitForNextSimulation(room, 120);
+
+    const movedPlayer = room.state.players.get(client.sessionId);
+    assert.ok(movedPlayer);
+    assert.strictEqual(movedPlayer?.lastProcessedInput, 7);
+
+    client.send("move", { x: 0, y: 0, sequence: 8 });
+    await waitForNextSimulation(room, 120);
+
+    const stoppedPlayer = room.state.players.get(client.sessionId);
+    assert.ok(stoppedPlayer);
+    assert.strictEqual(stoppedPlayer?.lastProcessedInput, 8);
+  });
+
   it("loads configured static skeletons in the world lobby without legacy rat or bat ids", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", { worldOwner: "tester" });
     await colyseus.connectTo(room, {
@@ -346,7 +369,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const attacker = await colyseus.connectTo(room, {
       name: "Mage Hunter",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
 
     await room.waitForNextPatch();
@@ -378,11 +401,103 @@ describe("world room", () => {
     assert.strictEqual(updatedRat?.aggroTargetId, attacker.sessionId);
   });
 
+  it("lets wood_staff hit a nearby mob with a wood staff strike", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await colyseus.connectTo(room, {
+      name: "Stick Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    await spawnStaticWorldMobsForTest(room);
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const serverRat = room.state.mobs.get(RAT_ID);
+    assert.ok(serverPlayer);
+    assert.ok(serverRat);
+
+    if (!serverPlayer || !serverRat) {
+      assert.fail("Expected player and rat to exist");
+    }
+
+    serverPlayer.x = serverRat.x - 24;
+    serverPlayer.y = serverRat.y;
+    const initialHealth = serverRat.health;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffStrike",
+      targetX: serverRat.x,
+      targetY: serverRat.y,
+    });
+
+    await waitForNextSimulation(room, 180);
+
+    const updatedPlayer = room.state.players.get(attacker.sessionId);
+    const updatedRat = room.state.mobs.get(RAT_ID);
+    assert.ok(updatedPlayer);
+    assert.ok(updatedRat);
+    assert.strictEqual(room.state.projectiles.size, 0);
+    assert.ok((updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0) > Date.now());
+    const remainingHealth = updatedRat?.health ?? initialHealth;
+    assert.ok(remainingHealth < initialHealth);
+    assert.strictEqual(initialHealth - remainingHealth, 2);
+    assert.strictEqual(updatedRat?.aggroTargetId, attacker.sessionId);
+  });
+
+  it("rewinds recent player positions for lag-compensated wood staff strikes", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await colyseus.connectTo(room, {
+      name: "Lag Fighter",
+      weaponItem: "wood_staff",
+    });
+    const target = await colyseus.connectTo(room, {
+      name: "Lag Target",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+
+    const attackerPlayer = room.state.players.get(attacker.sessionId);
+    const targetPlayer = room.state.players.get(target.sessionId);
+    assert.ok(attackerPlayer);
+    assert.ok(targetPlayer);
+
+    if (!attackerPlayer || !targetPlayer) {
+      assert.fail("Expected attacker and target to exist");
+    }
+
+    attackerPlayer.x = 300;
+    attackerPlayer.y = 300;
+    targetPlayer.x = attackerPlayer.x + 38;
+    targetPlayer.y = attackerPlayer.y;
+    const rewindTargetX = targetPlayer.x;
+    const rewindTargetY = targetPlayer.y;
+    const initialHealth = targetPlayer.health;
+
+    await waitForNextSimulation(room, 80);
+    const estimatedLatencyMs = 80;
+    targetPlayer.x = attackerPlayer.x + 140;
+    targetPlayer.y = attackerPlayer.y;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffStrike",
+      targetX: rewindTargetX,
+      targetY: rewindTargetY,
+      clientEstimatedLatencyMs: estimatedLatencyMs,
+    });
+
+    await waitForNextSimulation(room, 180);
+
+    const updatedTarget = room.state.players.get(target.sessionId);
+    assert.ok(updatedTarget);
+    assert.ok((updatedTarget?.health ?? initialHealth) < initialHealth);
+  });
+
   it("aims the fireball through the cursor point from its actual spawn position", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Mage Aim",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
 
     await room.waitForNextPatch();
@@ -422,24 +537,30 @@ describe("world room", () => {
 
   it("clamps targeted staff casts to the maximum cast range", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const fireballCaster = await colyseus.connectTo(room, {
       name: "Range Mage",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
+    });
+    const fireFieldCaster = await colyseus.connectTo(room, {
+      name: "Field Ranger",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
 
-    const player = room.state.players.get(caster.sessionId);
-    assert.ok(player);
+    const fireballPlayer = room.state.players.get(fireballCaster.sessionId);
+    const fireFieldPlayer = room.state.players.get(fireFieldCaster.sessionId);
+    assert.ok(fireballPlayer);
+    assert.ok(fireFieldPlayer);
 
-    if (!player) {
-      assert.fail("Expected caster to exist");
+    if (!fireballPlayer || !fireFieldPlayer) {
+      assert.fail("Expected casters to exist");
     }
 
-    const requestedTargetX = player.x + 1000;
-    const requestedTargetY = player.y;
+    const requestedTargetX = fireballPlayer.x + 1000;
+    const requestedTargetY = fireballPlayer.y;
 
-    caster.send("castSkill", {
+    fireballCaster.send("castSkill", {
       skillId: "fireball",
       targetX: requestedTargetX,
       targetY: requestedTargetY,
@@ -447,7 +568,7 @@ describe("world room", () => {
 
     await waitForNextSimulation(room, 320);
 
-    caster.send("castSkill", {
+    fireFieldCaster.send("castSkill", {
       skillId: "fireField",
       targetX: requestedTargetX,
       targetY: requestedTargetY,
@@ -460,16 +581,16 @@ describe("world room", () => {
 
     assert.ok(projectile);
     assert.ok(fieldCenters.length > 0);
-    assert.ok((projectile?.x ?? player.x) < requestedTargetX);
+    assert.ok((projectile?.x ?? fireballPlayer.x) < requestedTargetX);
     assert.ok(Math.max(...fieldCenters) < requestedTargetX);
-    assert.ok(Math.max(...fieldCenters) <= player.x + 32 * 8);
+    assert.ok(Math.max(...fieldCenters) <= fireFieldPlayer.x + 32 * 8);
   });
 
   it("applies burn damage over time to a player hit by fireball", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Burn Mage",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
     const target = await colyseus.connectTo(room, {
       name: "Burn Target",
@@ -509,7 +630,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Burn Mage",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
 
     await room.waitForNextPatch();
@@ -546,7 +667,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Nova Mage",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -567,7 +688,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "XP Mage",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
 
     await room.waitForNextPatch();
@@ -682,7 +803,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Reconnect Burner",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
     const target = await colyseus.connectTo(room, {
       name: "Burn Survivor",
@@ -820,7 +941,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Field Mage",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -849,7 +970,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Inferno Mage",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
     });
     const target = await colyseus.connectTo(room, {
       name: "Standing Target",
@@ -903,7 +1024,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await colyseus.connectTo(room, {
       name: "Priority Mage",
-      weaponItem: "default_staff",
+      weaponItem: "fire_staff",
     });
     const target = await colyseus.connectTo(room, {
       name: "Priority Target",

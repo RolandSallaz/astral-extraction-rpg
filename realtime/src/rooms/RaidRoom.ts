@@ -15,7 +15,7 @@ import { MobState } from "./schema/MobState.js";
 import { ProjectileState } from "./schema/ProjectileState.js";
 import { RaidRoomState } from "./schema/RaidRoomState.js";
 import { RaidPlayerState } from "./schema/RaidPlayerState.js";
-import { BaseGameRoom, SERVER_TICK_RATE, type DamageType, type VerifiedPlayer } from "./BaseGameRoom.js";
+import { BaseGameRoom, type DamageType, type VerifiedPlayer } from "./BaseGameRoom.js";
 import {
   RAID_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
@@ -379,9 +379,10 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       const deltaSeconds = deltaTime / 1000;
       this.rebuildMobSpatialGrid();
       this.updatePlayers(deltaSeconds);
+      this.recordPlayerPositionHistory(tickNow);
       this.updateMobs(deltaSeconds, tickNow);
       this.sharedRaidCombatTickSystem.update(deltaSeconds, tickNow);
-    }, 1000 / SERVER_TICK_RATE);
+    }, this.simulationIntervalMs);
   }
 
   onDispose() {
@@ -1045,6 +1046,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.fireballCooldownEndsAt = 0;
     player.fireNovaCooldownEndsAt = 0;
     player.fireFieldCooldownEndsAt = 0;
+    player.woodStaffStrikeCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
     this.removePlayerFromRaidState(player.id);
     return payload;
@@ -1080,6 +1082,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.fireballCooldownEndsAt = 0;
     player.fireNovaCooldownEndsAt = 0;
     player.fireFieldCooldownEndsAt = 0;
+    player.woodStaffStrikeCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
     player.headItem = "";
     player.bodyItem = "";

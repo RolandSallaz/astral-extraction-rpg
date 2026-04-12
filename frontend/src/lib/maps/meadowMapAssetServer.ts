@@ -14,7 +14,6 @@ import {
 } from '@mmorpg/shared/worlds/definition';
 import { isMobKind } from '@mmorpg/shared/mobs/catalog';
 import { getEquipmentBodyTexturePath, getEquipmentVisual } from '@mmorpg/shared/visuals/equipmentVisuals';
-import { EQUIPMENT_ITEM_IDS } from '@mmorpg/shared/items/catalog';
 import {
   createDefaultMeadowMapAsset,
   type MeadowDecoration,
@@ -291,13 +290,6 @@ function normalizeMapAsset(input: MeadowMapAsset): MeadowMapAsset {
     stamps,
     traders: normalizeTraders(input.traders, width, height),
     mobs,
-  };
-}
-
-function stripTradersFromMapAsset(asset: MeadowMapAsset): MeadowMapAsset {
-  return {
-    ...asset,
-    traders: [],
   };
 }
 

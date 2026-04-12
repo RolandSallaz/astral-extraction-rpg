@@ -1,4 +1,5 @@
 import {
+  canonicalizeItemId,
   EMPTY_ITEM_SLOT,
   type GemItemId,
   type ItemId,
@@ -61,8 +62,9 @@ export function parseInventoryItem(value: string | null | undefined): ParsedInve
   }
 
   const [rawBasePart, rawSocketPart] = value.split(SOCKET_SEPARATOR, 2);
-  const [baseId, rawQuantity] = rawBasePart.split(STACK_SEPARATOR);
-  if (!isItemId(baseId)) {
+  const [rawBaseId, rawQuantity] = rawBasePart.split(STACK_SEPARATOR);
+  const baseId = canonicalizeItemId(rawBaseId);
+  if (!baseId || !isItemId(baseId)) {
     return null;
   }
 

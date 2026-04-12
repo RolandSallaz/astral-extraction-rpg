@@ -1,5 +1,6 @@
 import type { MobBalanceConfig } from "../balance/mobBalance";
 import type { SkillBalanceConfig } from "../balance/skillBalance";
+import { canonicalizeItemId } from "../items/catalog";
 import type { MobKind } from "../mobs/catalog";
 import type { EquipmentState, InventoryState } from "../player/contracts";
 
@@ -13,6 +14,8 @@ export type CastSkillMessage = {
   skillId?: string;
   targetX?: number;
   targetY?: number;
+  clientEstimatedLatencyMs?: number;
+  clientSentAt?: number;
 };
 
 export type SyncChestMessage = {
@@ -174,8 +177,9 @@ export function createEquipmentStateSnapshot(fields: Partial<EquipmentSyncFields
   ];
 
   assignments.forEach(([slot, value]) => {
-    if (typeof value === "string" && value.trim().length > 0) {
-      nextEquipment[slot] = value as EquipmentState[typeof slot];
+    const canonical = canonicalizeItemId(value);
+    if (canonical) {
+      nextEquipment[slot] = canonical as EquipmentState[typeof slot];
     }
   });
 

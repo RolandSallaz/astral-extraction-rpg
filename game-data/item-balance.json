@@ -1,5 +1,5 @@
 {
-  "default_staff": { "value": 90, "tooltipStats": [], "fireResistancePercent": 0 },
+  "wood_staff": { "value": 90, "tooltipStats": [], "fireResistancePercent": 0 },
   "fire_trail_gem": { "value": 55, "tooltipStats": [], "fireResistancePercent": 0 },
   "fire_shatter_gem": { "value": 70, "tooltipStats": [], "fireResistancePercent": 0 },
   "fire_return_gem": { "value": 50, "tooltipStats": [], "fireResistancePercent": 0 },

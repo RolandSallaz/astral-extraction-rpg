@@ -17,7 +17,7 @@ import { GroundEffectState } from "./schema/GroundEffectState.js";
 import { MobState } from "./schema/MobState.js";
 import { PlayerState } from "./schema/PlayerState.js";
 import { ProjectileState } from "./schema/ProjectileState.js";
-import { BaseGameRoom, SERVER_TICK_RATE, type VerifiedPlayer } from "./BaseGameRoom.js";
+import { BaseGameRoom, type VerifiedPlayer } from "./BaseGameRoom.js";
 import {
   awardExperience as awardSharedExperience,
   WORLD_GAMEPLAY_PROFILE,
@@ -139,6 +139,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       player.moveX = 0;
       player.moveY = 0;
     }
+    this.pendingMovementSequence.delete(sessionId);
   }
 
   protected canTeleportTo(x: number, y: number, _playerId: string): boolean {
@@ -155,6 +156,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.y = destination.y;
     player.moveX = 0;
     player.moveY = 0;
+    this.pendingMovementSequence.delete(playerId);
   }
 
   protected override createProjectileState(): ProjectileState {
@@ -204,7 +206,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     this.setSimulationInterval((deltaTime) => {
       const tickNow = Date.now();
       this.updatePlayers(deltaTime / 1000, tickNow);
-    }, 1000 / SERVER_TICK_RATE);
+    }, this.simulationIntervalMs);
 
     this.onMessage("move", (client, message: MoveMessage) => {
       const player = this.state.players.get(client.sessionId);
@@ -217,7 +219,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         player.moveY = 0;
         const sequence = Number.isFinite(message?.sequence) ? Math.max(0, Math.floor(message.sequence!)) : 0;
         player.lastProcessedInput = sequence;
-        this.pendingMovementSequence.set(client.sessionId, sequence);
+        this.pendingMovementSequence.delete(client.sessionId);
         return;
       }
 
@@ -225,6 +227,14 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       const moveY = Number.isFinite(message?.y) ? message.y : 0;
       const sequence = Number.isFinite(message?.sequence) ? Math.max(0, Math.floor(message.sequence!)) : 0;
       const length = Math.hypot(moveX, moveY);
+
+      if (length <= 0.001) {
+        player.moveX = 0;
+        player.moveY = 0;
+        player.lastProcessedInput = sequence;
+        this.pendingMovementSequence.delete(client.sessionId);
+        return;
+      }
 
       if (length > 1) {
         player.moveX = moveX / length;
@@ -235,7 +245,6 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
       player.moveX = moveX;
       player.moveY = moveY;
-      player.lastProcessedInput = sequence;
       this.pendingMovementSequence.set(client.sessionId, sequence);
     });
 
@@ -523,6 +532,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
       const length = Math.hypot(player.moveX, player.moveY);
       if (length <= 0) {
+        this.pendingMovementSequence.delete(sessionId);
         continue;
       }
 
@@ -540,6 +550,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       }
     }
 
+    this.recordPlayerPositionHistory(tickNow);
     this.updateMobs(deltaSeconds, tickNow);
     this.sharedCombatTickSystem.update(deltaSeconds, tickNow);
   }
@@ -798,6 +809,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.moveX = 0;
     player.moveY = 0;
     player.fireFieldCooldownEndsAt = 0;
+    player.woodStaffStrikeCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
     this.playerBurns.delete(player.id);
     this.playerHealing.delete(player.id);

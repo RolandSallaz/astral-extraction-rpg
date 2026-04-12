@@ -8,7 +8,7 @@
         "columns": 4,
         "rows": 3,
         "fixedSlots": [
-          "default_staff",
+          "wood_staff",
           "fire_trail_gem"
         ],
         "lootPools": {
@@ -88,7 +88,7 @@
             "fire_fork_gem"
           ],
           "core": [
-            "default_staff",
+            "wood_staff",
             "fire_longshot_gem",
             "fire_split_gem",
             "fire_range_gem",

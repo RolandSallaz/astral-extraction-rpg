@@ -166,7 +166,7 @@ export function hasTutorialChestBeenLooted(chestSlots?: Array<string | null> | n
     return false;
   }
 
-  const hasStaff = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'default_staff');
+  const hasStaff = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'wood_staff');
   const hasGem = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'fire_trail_gem');
   return !hasStaff && !hasGem;
 }

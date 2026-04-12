@@ -26,14 +26,23 @@ describe('Player inventory and serialization helpers', () => {
   }
 
   it('serializes and parses stacked inventory entries with socketed gems', () => {
-    const serialized = serializeInventoryItem('default_staff', 2, ['fire_trail_gem', 'critical_gem']);
+    const serialized = serializeInventoryItem('wood_staff', 2, ['fire_trail_gem', 'critical_gem']);
     const parsed = parseInventoryItem(serialized);
 
-    expect(serialized).toBe('default_staff@@fire_trail_gem,critical_gem');
+    expect(serialized).toBe('wood_staff@@fire_trail_gem,critical_gem');
     expect(parsed).toEqual(expect.objectContaining({
-      itemId: 'default_staff',
+      itemId: 'wood_staff',
       quantity: 1,
       socketedGemCodes: ['fire_trail_gem', 'critical_gem'],
+    }));
+  });
+
+  it('migrates legacy default_staff inventory codes to wood_staff', () => {
+    const parsed = parseInventoryItem('default_staff@@fire_return_gem');
+
+    expect(parsed).toEqual(expect.objectContaining({
+      itemId: 'wood_staff',
+      socketedGemCodes: ['fire_return_gem'],
     }));
   });
 
@@ -80,11 +89,11 @@ describe('Player inventory and serialization helpers', () => {
     };
 
     expect(service.buildEquipmentState(player as any)).toEqual({
-      weapon: 'default_staff',
+      weapon: 'wood_staff',
       'weapon-gem-1': 'fire_trail_gem',
       'weapon-gem-2': 'critical_gem',
     });
-    expect(service.buildInventoryState(player as any)[3]).toBe('default_staff@@fire_return_gem');
+    expect(service.buildInventoryState(player as any)[3]).toBe('wood_staff@@fire_return_gem');
   });
 
   it('syncs weapon and inventory socket children into separate player items', async () => {
@@ -95,7 +104,7 @@ describe('Player inventory and serialization helpers', () => {
     ];
 
     itemsService.findByCodes.mockResolvedValue([
-      { id: 'default_staff', stackable: false, maxStack: 1 },
+      { id: 'wood_staff', stackable: false, maxStack: 1 },
       { id: 'fire_trail_gem', stackable: false, maxStack: 1 },
       { id: 'critical_gem', stackable: false, maxStack: 1 },
       { id: 'fire_return_gem', stackable: false, maxStack: 1 },
@@ -107,11 +116,11 @@ describe('Player inventory and serialization helpers', () => {
     await service.syncPlayerItems(
       'player-1',
       {
-        weapon: 'default_staff',
+        weapon: 'wood_staff',
         'weapon-gem-1': 'fire_trail_gem',
         'weapon-gem-2': 'critical_gem',
       },
-      ['default_staff@@fire_return_gem', null],
+      ['wood_staff@@fire_return_gem', null],
     );
 
     expect(playerItemsRepository.delete).toHaveBeenCalledWith({ playerId: 'player-1' });

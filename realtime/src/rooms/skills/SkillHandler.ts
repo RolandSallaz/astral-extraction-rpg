@@ -14,6 +14,8 @@ export interface SkillCastContext {
   readonly player: BasePlayerState;
   readonly profile: RoomGameplayProfile;
   readonly now: number;
+  readonly lagCompensatedAt: number;
+  readonly lagCompensationEnabled: boolean;
 
   getPlayerCastTimeMs(player: BasePlayerState): number;
   clampTargetToCastRange(
@@ -24,6 +26,7 @@ export interface SkillCastContext {
     targetY: number,
   ): { x: number; y: number };
   clearPlayerMovement(sessionId: string): void;
+  performWoodStaffStrike(player: BasePlayerState, targetX: number, targetY: number): void;
 
   // Fireball-specific helpers
   getOwnerProjectileGemConfig(ownerId: string, skillId: string): ProjectileGemConfig;
@@ -59,6 +62,8 @@ export interface SkillHandler {
   setCooldownEndsAt(player: BasePlayerState, value: number): void;
   /** Compute the cooldown duration for this skill. */
   getCooldownMs(ctx: SkillCastContext): number;
+  /** Optional per-skill cast time override (defaults to room/player cast time). */
+  getCastTimeMs?(ctx: SkillCastContext): number;
 
   /** Optional pre-cast validation (e.g. fireball needs non-zero distance). */
   canPerform?(ctx: SkillCastContext, targetX: number, targetY: number): boolean;

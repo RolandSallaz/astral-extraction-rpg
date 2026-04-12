@@ -31,7 +31,7 @@ describe("raid room", () => {
     const client = await colyseus.connectTo(room, {
       name: "Expiry Raider",
       raidRunId: "raid-expiry-test",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
       inventory: ["healing_potion::2"],
     });
 
@@ -61,6 +61,38 @@ describe("raid room", () => {
     assert.strictEqual(player?.health, 0);
   });
 
+  it("acknowledges the latest raid move sequence after simulation", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-move-sequence",
+      seed: "raid-move-sequence-seed",
+      templateCode: "crypt_standard",
+      width: 24,
+      height: 24,
+    });
+
+    const client = await colyseus.connectTo(room, {
+      name: "Sequence Raider",
+      raidRunId: "raid-move-sequence",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+
+    client.send("move", { x: 1, y: 0, sequence: 11 });
+    await waitForNextSimulation(room, 120);
+
+    const movedPlayer = room.state.players.get(client.sessionId);
+    assert.ok(movedPlayer);
+    assert.strictEqual(movedPlayer?.lastProcessedInput, 11);
+
+    client.send("move", { x: 0, y: 0, sequence: 12 });
+    await waitForNextSimulation(room, 120);
+
+    const stoppedPlayer = room.state.players.get(client.sessionId);
+    assert.ok(stoppedPlayer);
+    assert.strictEqual(stoppedPlayer?.lastProcessedInput, 12);
+  });
+
   it("extracts the player with current loot when using an exit", async () => {
     const room = await colyseus.createRoom<RaidRoomState>("raid", {
       raidRunId: "raid-extract-test",
@@ -73,7 +105,7 @@ describe("raid room", () => {
     const client = await colyseus.connectTo(room, {
       name: "Extract Raider",
       raidRunId: "raid-extract-test",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
       weaponGemItem1: "fire_trail_gem",
       inventory: ["healing_potion::2", "critical_gem"],
     });
@@ -102,7 +134,7 @@ describe("raid room", () => {
     assert.strictEqual(payload.reason, "extracted");
     assert.strictEqual(payload.exitId, exitId);
     assert.deepStrictEqual(payload.equipment, {
-      weapon: "default_staff",
+      weapon: "wood_staff",
       "weapon-gem-1": "fire_trail_gem",
     });
     assert.deepStrictEqual(payload.inventory, [
@@ -141,7 +173,7 @@ describe("raid room", () => {
     assert.strictEqual(tutorialChest?.title, "Astral Reliquary");
     assert.strictEqual(tutorialChest?.subtitle, "Training Cache");
     assert.deepStrictEqual(Array.from(tutorialChest?.slots ?? []), [
-      "default_staff",
+      "wood_staff",
       "fire_trail_gem",
       "",
       "",
@@ -241,7 +273,7 @@ describe("raid room", () => {
     const client = await colyseus.connectTo(room, {
       name: "Nova Raider",
       raidRunId: "raid-fire-nova",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -269,7 +301,7 @@ describe("raid room", () => {
     const client = await colyseus.connectTo(room, {
       name: "Field Raider",
       raidRunId: "raid-fire-field",
-      weaponItem: "default_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();

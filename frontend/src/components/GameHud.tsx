@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
 import {
   DEFAULT_ITEM_BALANCE_CONFIG,
@@ -17,6 +18,7 @@ import {
   getInventoryItemId,
   getEquipmentGemSlotIds,
   getBaseEquipmentSlot,
+  getItemIconTint,
   parseInventoryItem,
   serializeInventoryItem,
   type EquipmentSlot,
@@ -83,13 +85,17 @@ type InspectItemState = {
   source: DragSource;
 };
 
-type SkillId = 'fireball' | 'fireNova' | 'fireField';
+export type SkillId = 'woodStaffStrike' | 'fireball' | 'fireNova' | 'fireField';
 
-type ActionSlotKey = '1' | '2' | '3' | '4' | 'Q' | 'E' | 'R';
+type KeyboardActionSlotKey = '1' | '2' | '3' | '4' | 'Q' | 'E' | 'R';
+export type MouseActionSlotKey = 'LMB' | 'RMB';
+type ActionSlotKey = KeyboardActionSlotKey | MouseActionSlotKey;
 
-type ActionBarBinding =
+export type ActionBarBinding =
   | { kind: 'skill'; skillId: SkillId }
   | { kind: 'item'; itemId: ConsumableItemId };
+
+export type MouseSkillBindings = Record<MouseActionSlotKey, SkillId | null>;
 
 function isSameDragSource(left: DragSource, right: DragSource): boolean {
   if (left.type !== right.type) {
@@ -154,7 +160,11 @@ const INVENTORY_POSITION_STORAGE_KEY = 'mmorpg.ui.inventory.position.v1';
 const EQUIPMENT_POSITION_STORAGE_KEY = 'mmorpg.ui.equipment.position.v1';
 const CONTAINER_POSITION_STORAGE_KEY = 'mmorpg.ui.container.position.v1';
 const ACTION_BAR_STORAGE_KEY = 'mmorpg.ui.action-bar.bindings.v1';
-const ACTION_BAR_SLOTS: Array<{ key: ActionSlotKey; code?: string }> = [
+const MOUSE_ACTION_SLOTS: Array<{ key: MouseActionSlotKey; label: string }> = [
+  { key: 'LMB', label: 'LMB' },
+  { key: 'RMB', label: 'RMB' },
+];
+const KEYBOARD_ACTION_SLOTS: Array<{ key: KeyboardActionSlotKey; code?: string }> = [
   { key: '1', code: 'Digit1' },
   { key: '2', code: 'Digit2' },
   { key: '3', code: 'Digit3' },
@@ -162,6 +172,10 @@ const ACTION_BAR_SLOTS: Array<{ key: ActionSlotKey; code?: string }> = [
   { key: 'Q', code: 'KeyQ' },
   { key: 'E', code: 'KeyE' },
   { key: 'R', code: 'KeyR' },
+];
+const ACTION_BAR_SLOTS: Array<{ key: ActionSlotKey; code?: string }> = [
+  ...MOUSE_ACTION_SLOTS,
+  ...KEYBOARD_ACTION_SLOTS,
 ];
 
 type SkillCooldownState = Partial<Record<SkillId, number>>;
@@ -171,6 +185,10 @@ const CONSUMABLE_COOLDOWN_MS: Partial<Record<ConsumableItemId, number>> = {
 };
 
 const SKILL_ICONS: Partial<Record<SkillId, { src: string; alt: string }>> = {
+  woodStaffStrike: {
+    src: '/items/equipment/wood_staff.png',
+    alt: 'Wood Staff Strike',
+  },
   fireball: {
     src: '/ui/skills/fireball-skill-16x16.png',
     alt: 'Fireball',
@@ -186,18 +204,20 @@ const SKILL_ICONS: Partial<Record<SkillId, { src: string; alt: string }>> = {
 };
 
 const SKILL_COOLDOWN_MS: Record<SkillId, number> = {
+  woodStaffStrike: 450,
   fireball: 1000,
   fireNova: 10000,
   fireField: 12000,
 };
 
 const SKILL_TOOLTIP_STATS: Record<SkillId, string[]> = {
+  woodStaffStrike: ['Close-range strike', 'Cooldown: 0.45s'],
   fireball: ['20 damage', 'Applies burning', 'Cooldown: 1s'],
   fireNova: ['12 projectiles around you', 'Applies burning', 'Cooldown: 10s'],
   fireField: ['3x3 burning ground', '10s duration', 'Cooldown: 12s'],
 };
 
-type ItemTintOverrides = Record<string, never>;
+type ItemTintOverrides = Partial<Record<string, string | null>>;
 const MAX_ITEM_SOCKET_COUNT = 3;
 const ITEM_TIER_STYLES = {
   1: {
@@ -239,8 +259,20 @@ function getEquipmentSocketGemIds(slot: BaseEquipmentSlot, equipment: EquipmentS
   return getEquipmentSocketSlotIds(slot, equipment).map((slotId) => equipment[slotId] ?? null);
 }
 
-function getSocketColors(gemIds: Array<string | null>, _itemTintOverrides: ItemTintOverrides) {
-  return gemIds.map(() => null);
+function getResolvedItemTint(itemId: string | null | undefined, itemTintOverrides: ItemTintOverrides) {
+  if (!itemId) {
+    return null;
+  }
+
+  if (itemId in itemTintOverrides) {
+    return itemTintOverrides[itemId] ?? null;
+  }
+
+  return getItemIconTint(itemId);
+}
+
+function getSocketColors(gemIds: Array<string | null>, itemTintOverrides: ItemTintOverrides) {
+  return gemIds.map((gemId) => getResolvedItemTint(gemId, itemTintOverrides));
 }
 
 function getItemSocketGemIds(itemValue: string, equipment: EquipmentState, source?: DragSource) {
@@ -442,9 +474,8 @@ function ItemTile({
   }
 
   const item = EQUIPMENT_ITEMS[parsed.itemId];
+  const tintOverride = getResolvedItemTint(parsed.itemId, itemTintOverrides);
   const tierStyle = getItemTierStyle(parsed.itemId);
-  const rotationDeg = item.iconRotationDeg ?? 0;
-  const scale = compact ? (item.compactIconScale ?? item.iconScale ?? 1) : (item.iconScale ?? 1);
   const frameSizeClass = compact ? 'h-10 w-10' : 'h-12 w-12';
   const isConsumable = item.type === 'consumable' && parsed.itemId in CONSUMABLE_COOLDOWN_MS;
   const remainingMs =
@@ -477,15 +508,12 @@ function ItemTile({
           />
         </>
       ) : null}
-      <img
-        src={item.texturePath}
-        alt={item.name}
+      <ItemIcon
+        item={item}
+        compact={compact}
+        tintOverride={tintOverride}
         draggable={false}
-        className={`pixelated relative z-[1] h-full w-full object-contain ${faded ? 'opacity-25' : ''}`}
-        style={{
-          transform: `rotate(${rotationDeg}deg) scale(${scale})`,
-          transformOrigin: 'center center',
-        }}
+        className={`relative z-[1] ${frameSizeClass} ${faded ? 'opacity-25' : ''}`}
       />
       {parsed.quantity > 1 ? (
         <span className="pointer-events-none absolute bottom-0.5 right-0.5 rounded-sm bg-[#102008]/88 px-1 text-[10px] font-bold leading-none text-[#f4ffe8]">
@@ -608,8 +636,8 @@ function canSwapIntoEquipment(itemValue: string | null, slot: EquipmentSlot) {
 function getAvailableSkills(equipment: EquipmentState): SkillId[] {
   const availableSkills: SkillId[] = [];
 
-  if (equipment.weapon === 'default_staff') {
-    availableSkills.push('fireball');
+  if (equipment.weapon === 'wood_staff') {
+    availableSkills.push('woodStaffStrike');
   }
 
   return availableSkills;
@@ -618,8 +646,8 @@ function getAvailableSkills(equipment: EquipmentState): SkillId[] {
 function getDefaultActionBarBindings(equipment: EquipmentState): Partial<Record<ActionSlotKey, ActionBarBinding | null>> {
   const nextBindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {};
 
-  if (equipment.weapon === 'default_staff') {
-    nextBindings['1'] = { kind: 'skill', skillId: 'fireball' };
+  if (equipment.weapon === 'wood_staff') {
+    nextBindings.LMB = { kind: 'skill', skillId: 'woodStaffStrike' };
   }
 
   return nextBindings;
@@ -637,20 +665,29 @@ function parseStoredActionBarBindings(
     const nextBindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {};
 
     ACTION_BAR_SLOTS.forEach(({ key }) => {
+      if (!(key in parsed)) {
+        return;
+      }
+
       const binding = parsed[key];
+      if (binding === null) {
+        nextBindings[key] = null;
+        return;
+      }
+
       if (!binding) {
         return;
       }
 
       if (
         binding.kind === 'skill' &&
-        ['fireball', 'fireNova', 'fireField'].includes(binding.skillId)
+        ['woodStaffStrike', 'fireNova', 'fireField'].includes(binding.skillId)
       ) {
         nextBindings[key] = { kind: 'skill', skillId: binding.skillId as SkillId };
         return;
       }
 
-      if (binding.kind === 'item') {
+      if (binding.kind === 'item' && !isMouseActionSlot(key)) {
         const item = EQUIPMENT_ITEMS[binding.itemId as ConsumableItemId];
         if (item?.type === 'consumable') {
           nextBindings[key] = { kind: 'item', itemId: binding.itemId as ConsumableItemId };
@@ -664,8 +701,52 @@ function parseStoredActionBarBindings(
   }
 }
 
-function hasActionBarBindings(bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>) {
-  return Object.keys(bindings).length > 0;
+function isMouseActionSlot(slotKey: ActionSlotKey): slotKey is MouseActionSlotKey {
+  return slotKey === 'LMB' || slotKey === 'RMB';
+}
+
+function canBindActionToSlot(slotKey: ActionSlotKey, binding: ActionBarBinding | null) {
+  if (!binding) {
+    return true;
+  }
+
+  if (isMouseActionSlot(slotKey)) {
+    return binding.kind === 'skill';
+  }
+
+  return true;
+}
+
+function getMouseSkillBindingsFromActionBar(
+  bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
+): MouseSkillBindings {
+  return {
+    LMB: bindings.LMB?.kind === 'skill' ? bindings.LMB.skillId : null,
+    RMB: bindings.RMB?.kind === 'skill' ? bindings.RMB.skillId : null,
+  };
+}
+
+function getResolvedActionBarBindings(
+  bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
+  equipment: EquipmentState,
+) {
+  const availableSkills = getAvailableSkills(equipment);
+  const merged: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {
+    ...getDefaultActionBarBindings(equipment),
+    ...bindings,
+  };
+
+  ACTION_BAR_SLOTS.forEach(({ key }) => {
+    const binding = merged[key];
+    if (!binding || binding.kind !== 'skill') {
+      return;
+    }
+    if (!availableSkills.includes(binding.skillId)) {
+      merged[key] = null;
+    }
+  });
+
+  return merged;
 }
 
 export function GameHud({
@@ -680,6 +761,7 @@ export function GameHud({
   skillCooldowns,
   consumableCooldowns,
   onSkillTrigger,
+  onMouseSkillBindingsChange,
   onEquipmentChange,
   onInventoryChange,
   onInventoryUse,
@@ -701,6 +783,7 @@ export function GameHud({
   skillCooldowns: SkillCooldownState;
   consumableCooldowns: ConsumableCooldownState;
   onSkillTrigger: (skillId: SkillId) => void;
+  onMouseSkillBindingsChange?: (bindings: MouseSkillBindings) => void;
   onEquipmentChange: (equipment: EquipmentState) => void;
   onInventoryChange: (inventory: InventoryState) => void;
   onInventoryUse: (request: ConsumableUseRequest) => void;
@@ -804,26 +887,25 @@ export function GameHud({
   }, []);
 
   useEffect(() => {
-    const persistedBindings = hasActionBarBindings(actionBarBindings)
-      ? actionBarBindings
-      : getDefaultActionBarBindings(equipment);
+    const persistedBindings = getResolvedActionBarBindings(actionBarBindings, equipment);
     window.localStorage.setItem(ACTION_BAR_STORAGE_KEY, JSON.stringify(persistedBindings));
   }, [actionBarBindings, equipment]);
 
-  const getResolvedActionBarBindings = (
-    bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
-  ) => (hasActionBarBindings(bindings) ? bindings : getDefaultActionBarBindings(equipment));
+  useEffect(() => {
+    const resolvedBindings = getResolvedActionBarBindings(actionBarBindings, equipment);
+    onMouseSkillBindingsChange?.(getMouseSkillBindingsFromActionBar(resolvedBindings));
+  }, [actionBarBindings, equipment, onMouseSkillBindingsChange]);
 
   const updateActionBarBindings = (
     updater: (
       current: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
     ) => Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
   ) => {
-    setActionBarBindings((current) => updater(getResolvedActionBarBindings(current)));
+    setActionBarBindings((current) => updater(getResolvedActionBarBindings(current, equipment)));
   };
 
   const getActionBarBinding = (slotKey: ActionSlotKey) =>
-    getResolvedActionBarBindings(actionBarBindings)[slotKey] ?? null;
+    getResolvedActionBarBindings(actionBarBindings, equipment)[slotKey] ?? null;
 
   const findActionBarInventorySlot = (itemId: ConsumableItemId) =>
     inventory.findIndex((itemValue) => getInventoryItemId(itemValue) === itemId);
@@ -847,8 +929,8 @@ export function GameHud({
 
   const assignSkillToFirstAvailableActionSlot = (skillId: SkillId) => {
     updateActionBarBindings((current) => {
-      const emptySlot = ACTION_BAR_SLOTS.find(({ key }) => !current[key]);
-      const targetSlotKey = emptySlot?.key ?? ACTION_BAR_SLOTS[0].key;
+      const emptySlot = KEYBOARD_ACTION_SLOTS.find(({ key }) => !current[key]);
+      const targetSlotKey = emptySlot?.key ?? KEYBOARD_ACTION_SLOTS[0].key;
       return {
         ...current,
         [targetSlotKey]: { kind: 'skill', skillId },
@@ -1039,10 +1121,6 @@ export function GameHud({
     const nextInventory = [...sourceInventory];
     nextInventory[index] = serializeSocketedEquipmentItem(itemId, nextGemIds);
     return nextInventory;
-  };
-
-  const updateInventoryItemSockets = (index: number, nextGemIds: Array<string | null>) => {
-    onInventoryChange(buildInventoryWithItemSockets(inventory, index, nextGemIds));
   };
 
   const buildContainerWithItemSockets = (
@@ -1710,7 +1788,7 @@ export function GameHud({
 
         const draggedBinding = getDraggedActionBarBinding(dragState);
         actionBarDragHandledRef.current = true;
-        if (!draggedBinding) {
+        if (!draggedBinding || !canBindActionToSlot(slotKey, draggedBinding)) {
           setDragState(null);
           return;
         }
@@ -1727,6 +1805,10 @@ export function GameHud({
 
       if (dragState.source.type === 'skill-library' && dragState.skillId) {
         const nextBinding = { kind: 'skill', skillId: dragState.skillId } as const;
+        if (!canBindActionToSlot(slotKey, nextBinding)) {
+          setDragState(null);
+          return;
+        }
         setActionBarBinding(slotKey, nextBinding);
         syncActionBarTooltip(nextBinding, event.clientX, event.clientY);
         setDragState(null);
@@ -1737,8 +1819,12 @@ export function GameHud({
         const draggedItemId = getInventoryItemId(dragState.itemId);
         if (draggedItemId && EQUIPMENT_ITEMS[draggedItemId].type === 'consumable') {
           const nextBinding = { kind: 'item', itemId: draggedItemId as ConsumableItemId } as const;
-          setActionBarBinding(slotKey, nextBinding);
-          syncActionBarTooltip(nextBinding, event.clientX, event.clientY);
+          if (canBindActionToSlot(slotKey, nextBinding)) {
+            setActionBarBinding(slotKey, nextBinding);
+            syncActionBarTooltip(nextBinding, event.clientX, event.clientY);
+          } else {
+            syncActionBarTooltip(null, event.clientX, event.clientY);
+          }
         } else {
           syncActionBarTooltip(null, event.clientX, event.clientY);
         }
@@ -2190,6 +2276,122 @@ export function GameHud({
     }
 
     setDragState(null);
+  };
+
+  const renderActionBarSlot = (slotKey: ActionSlotKey, label: string) => {
+    const binding = getActionBarBinding(slotKey);
+    const isSkillBinding = binding?.kind === 'skill';
+    const isItemBinding = binding?.kind === 'item';
+    const skillId = isSkillBinding ? binding.skillId : null;
+    const itemId = isItemBinding ? binding.itemId : null;
+    const skillIcon = skillId ? SKILL_ICONS[skillId] : null;
+    const itemQuantity = itemId ? getActionBarItemQuantity(itemId) : 0;
+    const readyAt =
+      skillId
+        ? (skillCooldowns[skillId] ?? 0)
+        : itemId
+          ? (consumableCooldowns[itemId] ?? 0)
+          : 0;
+    const cooldownDuration =
+      skillId
+        ? SKILL_COOLDOWN_MS[skillId]
+        : itemId
+          ? (CONSUMABLE_COOLDOWN_MS[itemId] ?? 0)
+          : 0;
+    const remainingMs = Math.max(0, readyAt - cooldownNow);
+    const isCoolingDown = cooldownDuration > 0 && remainingMs > 0;
+    const cooldownProgress =
+      cooldownDuration > 0
+        ? Math.max(0, Math.min(1, remainingMs / cooldownDuration))
+        : 0;
+    const isBindingAvailable =
+      skillId
+        ? availableSkills.includes(skillId)
+        : itemId
+          ? itemQuantity > 0
+          : false;
+
+    return (
+      <button
+        key={slotKey}
+        type="button"
+        onMouseDown={binding ? startActionBarDrag(slotKey) : preventPrimaryDefault}
+        onMouseUp={dropOnActionBar(slotKey)}
+        onMouseEnter={
+          skillId
+            ? showSkillTooltip(skillId, 'action-bar')
+            : itemId
+              ? showItemTooltip(serializeInventoryItem(itemId, Math.max(1, itemQuantity)), 'action-bar')
+              : undefined
+        }
+        onMouseMove={binding ? moveActionBarTooltip(binding) : undefined}
+        onMouseLeave={binding ? (skillId ? hideSkillTooltip : hideItemTooltip) : undefined}
+        onClick={() => triggerActionBarBinding(binding)}
+        onContextMenu={binding ? clearActionBarSlot(slotKey) : undefined}
+        className={`${SKILL_BAR_SLOT_CLASS} ${
+          skillId
+            ? 'border-[#f4b36b]/40 bg-[linear-gradient(180deg,rgba(89,49,20,0.92),rgba(39,21,10,0.96))]'
+            : ''
+        } ${
+          activeSkillTargeting === skillId && skillId
+            ? 'ring-2 ring-[#ffd18a]/70 ring-offset-2 ring-offset-transparent'
+            : ''
+        } ${binding && !isBindingAvailable ? 'opacity-55' : ''} ${isCoolingDown ? 'opacity-90' : ''}`}
+      >
+        <div className="absolute left-1.5 top-1.5 z-10 rounded-md border border-[#d9efbd]/24 bg-[#102008]/72 px-1.5 py-[2px] text-[10px] font-bold leading-none text-[#f4ffe8]">
+          {label}
+        </div>
+        {binding ? (
+          <div className="relative h-full w-full overflow-hidden rounded-[1rem] border border-[#f1b26a]/28 bg-[linear-gradient(180deg,rgba(95,41,18,0.82),rgba(46,20,10,0.88))] text-[#ffe7b8] shadow-[inset_0_1px_0_rgba(255,236,195,0.08)]">
+            {skillId && skillIcon ? (
+              <img
+                src={skillIcon.src}
+                alt={skillIcon.alt}
+                draggable={false}
+                className="pixelated h-full w-full object-contain"
+              />
+            ) : itemId ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <ItemTile
+                  itemValue={serializeInventoryItem(itemId, Math.max(1, itemQuantity))}
+                  compact
+                  itemTintOverrides={itemTintOverrides}
+                  cooldownEndsAt={consumableCooldowns[itemId] ?? 0}
+                  cooldownNow={cooldownNow}
+                />
+              </div>
+            ) : null}
+            {itemId && itemQuantity > 1 ? (
+              <div className="absolute bottom-1 right-1 rounded-md bg-[rgba(12,18,8,0.7)] px-1 text-[10px] font-bold leading-none text-[#fff4cf]">
+                {itemQuantity}
+              </div>
+            ) : null}
+            {isCoolingDown ? (
+              <>
+                <div
+                  className="absolute inset-0 rounded-xl"
+                  style={{
+                    background: `conic-gradient(from -90deg, rgba(12,18,8,0.12) 0deg, rgba(12,18,8,0.12) ${
+                      360 - cooldownProgress * 360
+                    }deg, rgba(8,12,6,0.72) ${360 - cooldownProgress * 360}deg, rgba(8,12,6,0.72) 360deg)`,
+                  }}
+                />
+                <div className="absolute inset-[5px] rounded-lg bg-[rgba(10,14,8,0.26)]" />
+                <div className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded-md bg-[rgba(12,18,8,0.55)] px-1 text-[10px] font-bold leading-none text-[#fff4cf]">
+                  {(remainingMs / 1000).toFixed(1)}
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : (
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-dashed border-[#d9efbd]/16 bg-[#102008]/50 text-[#bfd8a4]/70">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">
+              --
+            </span>
+          </div>
+        )}
+      </button>
+    );
   };
 
   return (
@@ -2783,122 +2985,14 @@ export function GameHud({
             </div>
           ) : null}
 
-          <div className="flex items-center gap-2 rounded-[1.75rem] border border-[#d9efbd]/24 bg-[#17320d]/76 px-3 py-3 shadow-[0_18px_44px_rgba(0,0,0,0.3)] backdrop-blur-md">
-            {ACTION_BAR_SLOTS.map(({ key }) => {
-              const binding = getActionBarBinding(key);
-              const isSkillBinding = binding?.kind === 'skill';
-              const isItemBinding = binding?.kind === 'item';
-              const skillId = isSkillBinding ? binding.skillId : null;
-              const itemId = isItemBinding ? binding.itemId : null;
-              const skillIcon = skillId ? SKILL_ICONS[skillId] : null;
-              const itemQuantity = itemId ? getActionBarItemQuantity(itemId) : 0;
-              const readyAt =
-                skillId
-                  ? (skillCooldowns[skillId] ?? 0)
-                  : itemId
-                    ? (consumableCooldowns[itemId] ?? 0)
-                    : 0;
-              const cooldownDuration =
-                skillId
-                  ? SKILL_COOLDOWN_MS[skillId]
-                  : itemId
-                    ? (CONSUMABLE_COOLDOWN_MS[itemId] ?? 0)
-                    : 0;
-              const remainingMs = Math.max(0, readyAt - cooldownNow);
-              const isCoolingDown = cooldownDuration > 0 && remainingMs > 0;
-              const cooldownProgress =
-                cooldownDuration > 0
-                  ? Math.max(0, Math.min(1, remainingMs / cooldownDuration))
-                  : 0;
-              const isBindingAvailable =
-                skillId
-                  ? availableSkills.includes(skillId)
-                  : itemId
-                    ? itemQuantity > 0
-                    : false;
-
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onMouseDown={binding ? startActionBarDrag(key) : preventPrimaryDefault}
-                  onMouseUp={dropOnActionBar(key)}
-                  onMouseEnter={
-                    skillId
-                      ? showSkillTooltip(skillId, 'action-bar')
-                      : itemId
-                        ? showItemTooltip(serializeInventoryItem(itemId, Math.max(1, itemQuantity)), 'action-bar')
-                        : undefined
-                  }
-                  onMouseMove={binding ? moveActionBarTooltip(binding) : undefined}
-                  onMouseLeave={binding ? (skillId ? hideSkillTooltip : hideItemTooltip) : undefined}
-                  onClick={() => triggerActionBarBinding(binding)}
-                  onContextMenu={binding ? clearActionBarSlot(key) : undefined}
-                  className={`${SKILL_BAR_SLOT_CLASS} ${
-                    skillId
-                      ? 'border-[#f4b36b]/40 bg-[linear-gradient(180deg,rgba(89,49,20,0.92),rgba(39,21,10,0.96))]'
-                      : ''
-                  } ${
-                    activeSkillTargeting === skillId && skillId
-                      ? 'ring-2 ring-[#ffd18a]/70 ring-offset-2 ring-offset-transparent'
-                      : ''
-                  } ${binding && !isBindingAvailable ? 'opacity-55' : ''} ${isCoolingDown ? 'opacity-90' : ''}`}
-                >
-                  <div className="absolute left-1.5 top-1.5 z-10 rounded-md border border-[#d9efbd]/24 bg-[#102008]/72 px-1.5 py-[2px] text-[10px] font-bold leading-none text-[#f4ffe8]">
-                    {key}
-                  </div>
-                  {binding ? (
-                    <div className="relative h-full w-full overflow-hidden rounded-[1rem] border border-[#f1b26a]/28 bg-[linear-gradient(180deg,rgba(95,41,18,0.82),rgba(46,20,10,0.88))] text-[#ffe7b8] shadow-[inset_0_1px_0_rgba(255,236,195,0.08)]">
-                      {skillId && skillIcon ? (
-                        <img
-                          src={skillIcon.src}
-                          alt={skillIcon.alt}
-                          draggable={false}
-                          className="pixelated h-full w-full object-contain"
-                        />
-                      ) : itemId ? (
-                        <div className="flex h-full w-full items-center justify-center">
-                          <ItemTile
-                            itemValue={serializeInventoryItem(itemId, Math.max(1, itemQuantity))}
-                            compact
-                            itemTintOverrides={itemTintOverrides}
-                            cooldownEndsAt={consumableCooldowns[itemId] ?? 0}
-                            cooldownNow={cooldownNow}
-                          />
-                        </div>
-                      ) : null}
-                      {itemId && itemQuantity > 1 ? (
-                        <div className="absolute bottom-1 right-1 rounded-md bg-[rgba(12,18,8,0.7)] px-1 text-[10px] font-bold leading-none text-[#fff4cf]">
-                          {itemQuantity}
-                        </div>
-                      ) : null}
-                      {isCoolingDown ? (
-                        <>
-                          <div
-                            className="absolute inset-0 rounded-xl"
-                            style={{
-                              background: `conic-gradient(from -90deg, rgba(12,18,8,0.12) 0deg, rgba(12,18,8,0.12) ${
-                                360 - cooldownProgress * 360
-                              }deg, rgba(8,12,6,0.72) ${360 - cooldownProgress * 360}deg, rgba(8,12,6,0.72) 360deg)`,
-                            }}
-                          />
-                          <div className="absolute inset-[5px] rounded-lg bg-[rgba(10,14,8,0.26)]" />
-                          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded-md bg-[rgba(12,18,8,0.55)] px-1 text-[10px] font-bold leading-none text-[#fff4cf]">
-                            {(remainingMs / 1000).toFixed(1)}
-                          </div>
-                        </>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-dashed border-[#d9efbd]/16 bg-[#102008]/50 text-[#bfd8a4]/70">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.12em]">
-                        --
-                      </span>
-                    </div>
-                  )}
-                </button>
-              );
-            })}
+          <div className="flex items-center gap-3 rounded-[1.75rem] border border-[#d9efbd]/24 bg-[#17320d]/76 px-3 py-3 shadow-[0_18px_44px_rgba(0,0,0,0.3)] backdrop-blur-md">
+            <div className="flex items-center gap-2 rounded-[1.2rem] border border-[#d9efbd]/16 bg-[#102008]/38 px-2 py-2">
+              {MOUSE_ACTION_SLOTS.map(({ key, label }) => renderActionBarSlot(key, label))}
+            </div>
+            <div className="h-10 w-px bg-[#d9efbd]/10" />
+            <div className="flex items-center gap-2">
+              {KEYBOARD_ACTION_SLOTS.map(({ key }) => renderActionBarSlot(key, key))}
+            </div>
           </div>
         </div>
       </section>

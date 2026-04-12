@@ -6,6 +6,8 @@
  * must originate from the backend - never from client options.
  */
 
+import { canonicalizeItemId } from "@mmorpg/shared";
+
 const BACKEND_BASE_URL =
   process.env.BACKEND_URL ?? process.env.BACKEND_API_URL ?? "http://localhost:3000";
 
@@ -124,6 +126,9 @@ export function applyVerifiedProfile(
   },
   verified: VerifiedPlayer,
 ) {
+  const canonicalBodyItem = canonicalizeItemId(verified.equipment.body) ?? "";
+  const canonicalHeadItem = canonicalizeItemId(verified.equipment.head) ?? "";
+  const canonicalWeaponItem = canonicalizeItemId(verified.equipment.weapon) ?? "";
   player.name = verified.nickname.slice(0, 24) || "Wanderer";
   player.role = verified.role;
   player.health = Math.max(1, verified.health);
@@ -133,9 +138,9 @@ export function applyVerifiedProfile(
   player.strength = Math.max(1, verified.strength);
   player.agility = Math.max(1, verified.agility);
   player.intellect = Math.max(1, verified.intellect);
-  player.bodyItem = verified.equipment.body ?? "";
-  player.headItem = verified.equipment.head ?? "";
-  player.weaponItem = verified.equipment.weapon ?? "";
+  player.bodyItem = canonicalBodyItem;
+  player.headItem = canonicalHeadItem;
+  player.weaponItem = canonicalWeaponItem;
   player.headGemItem1 = verified.equipment["head-gem-1"] ?? "";
   player.headGemItem2 = verified.equipment["head-gem-2"] ?? "";
   player.headGemItem3 = verified.equipment["head-gem-3"] ?? "";
