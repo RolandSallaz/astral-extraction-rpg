@@ -239,7 +239,8 @@ function getEquipmentSocketGemIds(slot: BaseEquipmentSlot, equipment: EquipmentS
   return getEquipmentSocketSlotIds(slot, equipment).map((slotId) => equipment[slotId] ?? null);
 }
 
-function getSocketColors(gemIds: Array<string | null>, _itemTintOverrides: ItemTintOverrides) {
+function getSocketColors(gemIds: Array<string | null>, itemTintOverrides: ItemTintOverrides) {
+  void itemTintOverrides;
   return gemIds.map(() => null);
 }
 
@@ -440,6 +441,8 @@ function ItemTile({
   if (!parsed) {
     return null;
   }
+
+  void itemTintOverrides;
 
   const item = EQUIPMENT_ITEMS[parsed.itemId];
   const tierStyle = getItemTierStyle(parsed.itemId);
@@ -1039,10 +1042,6 @@ export function GameHud({
     const nextInventory = [...sourceInventory];
     nextInventory[index] = serializeSocketedEquipmentItem(itemId, nextGemIds);
     return nextInventory;
-  };
-
-  const updateInventoryItemSockets = (index: number, nextGemIds: Array<string | null>) => {
-    onInventoryChange(buildInventoryWithItemSockets(inventory, index, nextGemIds));
   };
 
   const buildContainerWithItemSockets = (

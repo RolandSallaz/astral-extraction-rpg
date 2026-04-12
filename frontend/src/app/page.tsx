@@ -58,7 +58,6 @@ import type { MeadowMapAsset, MeadowMobAsset, MeadowOverlayAsset, MeadowStampAss
 import { MOB_KINDS, getMobDefinition, type MobKind } from '@mmorpg/shared/mobs/catalog';
 import { DEFAULT_PLAYER_VISUALS } from '@mmorpg/shared/player/visuals';
 import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
-import { ITEM_DEFINITIONS as SHARED_ITEM_DEFINITIONS } from '@mmorpg/shared/items/catalog';
 import {
   createParty,
   giveItemToPlayer,
@@ -330,7 +329,6 @@ const INITIAL_FORM: AuthFormState = {
   password: '',
 };
 
-const MEADOW_CHEST_ID = 'meadow-chest-10-22';
 const INITIAL_CHAT_MESSAGES: RealtimeChatMessage[] = [];
 type ActiveSkillTargeting = 'fireball' | 'fireField' | null;
 const ADMIN_EFFECTS_STORAGE_KEY = 'mmorpg.admin.skill-effects.v1';
@@ -1408,7 +1406,7 @@ export default function Home() {
   const [worldMapDraft, setWorldMapDraft] = useState<MeadowMapAsset | null>(null);
   const [selectedWorldTile, setSelectedWorldTile] = useState<MeadowTile>('grassGround');
   const [worldEditorMode, setWorldEditorMode] = useState<WorldEditorMode>('tile');
-  const [selectedWorldOverlay, setSelectedWorldOverlay] = useState<WorldOverlayBrush>({
+  const [selectedWorldOverlay] = useState<WorldOverlayBrush>({
     texture: 'ground-grass-edge-8x8',
     rotation: 0,
     flipX: false,
@@ -1420,8 +1418,6 @@ export default function Home() {
     scale: 1,
   });
   const text = getPageText(locale);
-  const introductionQuestSteps = getIntroductionQuestSteps(locale);
-  const sealedRelicQuestSteps = getSealedRelicQuestSteps(locale);
   const [selectedWorldTrader, setSelectedWorldTrader] = useState<WorldTraderBrush>({
     bodyItemId: '',
     headItemId: '',
@@ -3127,51 +3123,6 @@ export default function Home() {
     });
   };
 
-  const handleWorldOverlayPaint = (tileX: number, tileY: number) => {
-    setWorldMapDraft((current) => {
-      if (!current) {
-        return current;
-      }
-
-      const nextOverlays = current.overlays.filter(
-        (overlay) =>
-          !(
-            overlay.x === tileX &&
-            overlay.y === tileY &&
-            overlay.texture === selectedWorldOverlay.texture &&
-            overlay.rotation === selectedWorldOverlay.rotation &&
-            overlay.flipX === selectedWorldOverlay.flipX
-          ),
-      );
-
-      nextOverlays.push({
-        x: tileX,
-        y: tileY,
-        texture: selectedWorldOverlay.texture,
-        rotation: selectedWorldOverlay.rotation,
-        flipX: selectedWorldOverlay.flipX,
-      });
-
-      return {
-        ...current,
-        overlays: nextOverlays,
-      };
-    });
-  };
-
-  const handleWorldOverlayErase = (tileX: number, tileY: number) => {
-    setWorldMapDraft((current) => {
-      if (!current) {
-        return current;
-      }
-
-      return {
-        ...current,
-        overlays: current.overlays.filter((overlay) => !(overlay.x === tileX && overlay.y === tileY)),
-      };
-    });
-  };
-
   const handleWorldSpritePaint = (tileX: number, tileY: number) => {
     if (!selectedWorldSprite.texturePath) {
       return;
@@ -3527,7 +3478,6 @@ export default function Home() {
       const safeTop = safePaddingY + 24;
       const safeBottom = window.innerHeight - safePaddingY - 24;
       const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
       const canPlaceAbove = rect.top - 34 >= safeTop;
 
       handleTutorialUiArrowChange({
@@ -3582,7 +3532,6 @@ export default function Home() {
       const safeTop = safePaddingY + 24;
       const safeBottom = window.innerHeight - safePaddingY - 24;
       const centerX = rect.left + rect.width / 2;
-      const centerY = rect.top + rect.height / 2;
       const canPlaceAbove = rect.top - 34 >= safeTop;
 
       handleTutorialUiArrowChange({

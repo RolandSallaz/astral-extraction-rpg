@@ -721,10 +721,6 @@ function saveStoredRaidExploredTiles(raidRunId: string, exploredTiles: Set<numbe
   }
 }
 
-function isCryptWallTile(tile: string | undefined) {
-  return tile === 'wall' || tile === 'wallEdge';
-}
-
 function resolveCryptTexture(tile: string) {
   switch (tile) {
     case 'roomCracked':
@@ -1282,28 +1278,6 @@ function applyEquipmentToVisual(
   }
   visual.currentWeaponOffsetX = weaponItem?.equippedOffsetX ?? 0;
   visual.currentWeaponOffsetY = weaponItem?.equippedOffsetY ?? 0;
-}
-
-function applyHealthToVisual(
-  visual: Pick<
-    CharacterVisual | MobVisual,
-    'healthBarFill' | 'healthText' | 'currentHealth' | 'currentMaxHealth'
-  >,
-  health: number,
-  maxHealth: number,
-) {
-  const safeMaxHealth = Math.max(1, Math.floor(maxHealth));
-  const safeHealth = Phaser.Math.Clamp(Math.floor(health), 0, safeMaxHealth);
-  const hpRatio = Phaser.Math.Clamp(safeHealth / safeMaxHealth, 0, 1);
-
-  visual.currentHealth = safeHealth;
-  visual.currentMaxHealth = safeMaxHealth;
-  visual.healthBarFill.width = 26 * hpRatio;
-  visual.healthText.setText(`${safeHealth}/${safeMaxHealth}`);
-  visual.healthBarFill.setFillStyle(
-    hpRatio <= 0.25 ? 0x8b1e1e : hpRatio <= 0.6 ? 0xb32626 : 0xd13b3b,
-    1,
-  );
 }
 
 function applyMobHealthToVisual(
@@ -2928,42 +2902,6 @@ export function GameCanvas({
             worldTraders.forEach((trader) => {
               worldTradersById.set(trader.id, trader);
             });
-
-            const placeWorldStampSprite = (stamp: {
-              x: number;
-              y: number;
-              texturePath: string;
-              rotation: number;
-              flipX: boolean;
-              scale: number;
-            }) => {
-              const textureKey = ensureWorldTextureLoaded(stamp.texturePath);
-              if (!this.textures.exists(textureKey)) {
-                return;
-              }
-
-              const tileKey = `${stamp.x}:${stamp.y}`;
-              const existingSprite = worldStampSpritesByTile.get(tileKey);
-              if (existingSprite) {
-                const existingIndex = worldStampSprites.indexOf(existingSprite);
-                if (existingIndex >= 0) {
-                  worldStampSprites.splice(existingIndex, 1);
-                }
-                existingSprite.destroy();
-              }
-
-              const worldX = stamp.x * tileSize + tileSize / 2;
-              const worldY = stamp.y * tileSize + tileSize / 2;
-              const stampSprite = this.add
-                .image(worldX, worldY, textureKey)
-                .setDisplaySize(tileSize * stamp.scale, tileSize * stamp.scale)
-                .setAngle(stamp.rotation)
-                .setFlipX(stamp.flipX)
-                .setOrigin(0.5)
-                .setDepth(1.5);
-              worldStampSprites.push(stampSprite);
-              worldStampSpritesByTile.set(tileKey, stampSprite);
-            };
 
             const placeWorldTrader = (trader: MeadowTraderAsset) => {
               const worldX = trader.x * tileSize + tileSize / 2;
@@ -5569,7 +5507,6 @@ export function GameCanvas({
             }
 
             const inputSignature = `${normalizedX.toFixed(2)}:${normalizedY.toFixed(2)}`;
-            const now = this.time.now;
             movementSimulationAccumulatorMs = Math.min(
               CLIENT_SIMULATION_STEP_MS * 6,
               movementSimulationAccumulatorMs + delta,
@@ -5941,7 +5878,7 @@ export function GameCanvas({
               }
             }
 
-            groundEffects.forEach((effectVisual, effectId) => {
+            groundEffects.forEach((effectVisual) => {
               const phase = this.time.now * 0.006 + effectVisual.x * 0.01 + effectVisual.y * 0.01;
               effectVisual.tile.setFillStyle(0xa82d12, 0.12 + Math.sin(phase) * 0.02);
               effectVisual.aura.setPosition(effectVisual.x, effectVisual.y + 7 + Math.sin(phase) * 0.8);
