@@ -133,7 +133,20 @@ export type { VerifiedPlayer } from "./auth.js";
 export type { MobPathCacheEntry } from "./mobPathing.js";
 export type { SkillId } from "@mmorpg/shared/skills/registry";
 
-export const SERVER_TICK_RATE = 30;
+type WoodStaffStrikeTarget =
+  | { kind: "player"; entity: BasePlayerState; distance: number }
+  | { kind: "mob"; entity: MobState; distance: number };
+
+type PlayerPositionHistorySample = {
+  at: number;
+  x: number;
+  y: number;
+};
+
+type LagCompensatedCastTiming = {
+  at: number;
+  enabled: boolean;
+};
 
 /**
  * Abstract base class that contains the shared game engine used by
@@ -149,6 +162,9 @@ export const SERVER_TICK_RATE = 30;
 export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerState> extends Room {
   // ── Gameplay profile (subclass picks world vs raid) ──────────────
   protected abstract get profile(): RoomGameplayProfile;
+  protected get simulationIntervalMs() {
+    return 1000 / this.profile.networkTickRate;
+  }
 
   // ── State access ─────────────────────────────────────────────────
   protected abstract get roomPlayers(): MapSchema<TPlayer>;
@@ -187,6 +203,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     targetX?: number;
     targetY?: number;
   }>();
+  protected readonly playerPositionHistory = new Map<string, PlayerPositionHistorySample[]>();
   protected readonly projectileHitHistory = new Map<string, Set<string>>();
   protected readonly projectileServerData = new Map<string, ProjectileServerData>();
   protected readonly pendingBurstSpawns: {
@@ -266,6 +283,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.playerHealing.clear();
     this.playerSpatialGrid.clear();
     this.mobSpatialGrid.clear();
+    this.playerPositionHistory.clear();
     this.projectileServerData.clear();
     this.mobSkillHitTargets.clear();
   }
@@ -284,7 +302,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   // ── Skill casting ────────────────────────────────────────────────
   protected handleCastSkillMessage(
     sessionId: string,
-    message: { skillId?: string; targetX?: number; targetY?: number },
+    message: CastSkillMessage,
   ) {
     const skillId = typeof message?.skillId === "string" ? message.skillId : "";
     const player = this.getPlayer(sessionId);
@@ -306,7 +324,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
 
-    const ctx = this.createSkillCastContext(sessionId, player, now);
+    const lagCompensation = this.resolveLagCompensatedCastTiming(message, now);
+    const ctx = this.createSkillCastContext(sessionId, player, now, lagCompensation);
 
     let targetX = player.x;
     let targetY = player.y;
@@ -323,7 +342,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
 
     handler.setCooldownEndsAt(player, now + handler.getCooldownMs(ctx));
-    const castTimeMs = this.getPlayerCastTimeMs(player);
+    const castTimeMs = handler.getCastTimeMs ? handler.getCastTimeMs(ctx) : this.getPlayerCastTimeMs(player);
 
     if (castTimeMs > 0) {
       player.castingSkillId = skillId;
@@ -345,15 +364,24 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     }
   }
 
-  protected createSkillCastContext(sessionId: string, player: BasePlayerState, now: number): SkillCastContext {
+  protected createSkillCastContext(
+    sessionId: string,
+    player: BasePlayerState,
+    now: number,
+    lagCompensation: LagCompensatedCastTiming = { at: now, enabled: false },
+  ): SkillCastContext {
     return {
       sessionId,
       player,
       profile: this.profile,
       now,
+      lagCompensatedAt: lagCompensation.at,
+      lagCompensationEnabled: lagCompensation.enabled,
       getPlayerCastTimeMs: (p) => this.getPlayerCastTimeMs(p),
       clampTargetToCastRange: (p, ox, oy, tx, ty) => this.clampTargetToCastRange(p, ox, oy, tx, ty),
       clearPlayerMovement: (sid) => this.clearPlayerMovement(sid),
+      performWoodStaffStrike: (p, tx, ty) =>
+        this.performWoodStaffStrike(sessionId, p, tx, ty, lagCompensation.at, lagCompensation.enabled),
       getOwnerProjectileGemConfig: (oid, sid) => this.getOwnerProjectileGemConfig(oid, sid),
       hasSplitProjectileGem: (oid) => this.hasSplitProjectileGem(oid),
       spawnProjectile: (oid, sid, x, y, dx, dy, lt, ds, ss) =>
@@ -782,6 +810,140 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     if (player.health <= 0) {
       this.handlePlayerKilled(player);
     }
+  }
+
+  protected performWoodStaffStrike(
+    ownerId: string,
+    player: BasePlayerState,
+    targetX: number,
+    targetY: number,
+    lagCompensatedAt = Date.now(),
+    lagCompensationEnabled = false,
+  ) {
+    const target = this.findWoodStaffStrikeTarget(player, targetX, targetY, lagCompensatedAt, lagCompensationEnabled);
+    if (!target) {
+      return;
+    }
+
+    const baseDamage = Math.max(1, this.profile.meleeStrikeDamage);
+    const strengthBonus = Math.max(0, player.strength - 1) * 2;
+    const damage = baseDamage + strengthBonus;
+    const knockbackDistance = this.profile.tileSize; // 1 tile
+    const tileSize = this.profile.tileSize;
+    const widthPx = this.getMapWidthPx();
+    const heightPx = this.getMapHeightPx();
+
+    if (target.kind === "player") {
+      const resolvedDamage = this.applyDamageToPlayer(target.entity, damage, "physical");
+      this.onCombatLog(`${player.name} hits ${target.entity.name} for ${resolvedDamage}.`);
+      if (resolvedDamage > 0) {
+        this.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${resolvedDamage}`, "#ffd089");
+      }
+      if (resolvedDamage > 0) {
+        this.pushTargetByKnockback(player.x, player.y, target.entity, knockbackDistance, (nx, ny) => {
+          target.entity.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
+          target.entity.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
+        });
+      }
+
+      if (target.entity.health <= 0) {
+        this.handlePlayerKilled(target.entity);
+      }
+      return;
+    }
+
+    target.entity.health = Math.max(0, target.entity.health - damage);
+    setMobAggroTarget(target.entity, player);
+    this.onCombatLog(`${player.name} hits ${target.entity.name} for ${damage}.`);
+    if (damage > 0) {
+      this.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${damage}`, "#ffd089");
+      this.pushTargetByKnockback(player.x, player.y, target.entity, knockbackDistance, (nx, ny) => {
+        target.entity.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
+        target.entity.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
+      });
+    }
+    if (target.entity.health <= 0) {
+      this.handleMobDeath(target.entity);
+      this.awardExperience(ownerId, target.entity.experienceReward);
+    }
+  }
+
+  protected findWoodStaffStrikeTarget(
+    player: BasePlayerState,
+    targetX: number,
+    targetY: number,
+    lagCompensatedAt = Date.now(),
+    lagCompensationEnabled = false,
+  ): WoodStaffStrikeTarget | null {
+    const maxRange = this.profile.meleeStrikeRange;
+    const hitSlack = 4;
+    const playerPosition = lagCompensationEnabled
+      ? this.getPlayerPositionAt(player.id, lagCompensatedAt) ?? player
+      : player;
+    const directionX = targetX - playerPosition.x;
+    const directionY = targetY - playerPosition.y;
+    const directionLength = Math.hypot(directionX, directionY);
+    const hasAimDirection = directionLength > 0.001;
+    const normalizedX = hasAimDirection ? directionX / directionLength : 0;
+    const normalizedY = hasAimDirection ? directionY / directionLength : 0;
+    const minimumDot = Math.cos(this.profile.meleeStrikeArcHalfAngleRad);
+    const isTargetWithinArc = (deltaX: number, deltaY: number, distance: number, hitRadius: number) => {
+      if (!hasAimDirection || distance <= hitRadius + hitSlack) {
+        return true;
+      }
+
+      const forwardDistance = deltaX * normalizedX + deltaY * normalizedY;
+      if (forwardDistance < -hitSlack) {
+        return false;
+      }
+      const dot = forwardDistance / Math.max(distance, 0.001);
+      return dot >= minimumDot;
+    };
+
+    let nearestMob: WoodStaffStrikeTarget | null = null;
+    for (const mob of this.queryNearbyMobs(playerPosition.x, playerPosition.y, maxRange + this.profile.mobHitRadius)) {
+      if (mob.dead) {
+        continue;
+      }
+
+      const deltaX = mob.x - playerPosition.x;
+      const deltaY = mob.y - playerPosition.y;
+      const distance = Math.hypot(deltaX, deltaY);
+      if (distance > maxRange + this.profile.mobHitRadius || !isTargetWithinArc(deltaX, deltaY, distance, this.profile.mobHitRadius)) {
+        continue;
+      }
+
+      if (!nearestMob || distance < nearestMob.distance) {
+        nearestMob = { kind: "mob", entity: mob, distance };
+      }
+    }
+
+    if (nearestMob) {
+      return nearestMob;
+    }
+
+    let nearestPlayer: WoodStaffStrikeTarget | null = null;
+    for (const candidate of this.roomPlayers.values()) {
+      if (candidate.id === player.id || candidate.dead) {
+        continue;
+      }
+
+      const candidatePosition = lagCompensationEnabled
+        ? this.getPlayerPositionAt(candidate.id, lagCompensatedAt) ?? candidate
+        : candidate;
+      const deltaX = candidatePosition.x - playerPosition.x;
+      const deltaY = candidatePosition.y - playerPosition.y;
+      const distance = Math.hypot(deltaX, deltaY);
+      if (distance > maxRange + this.profile.playerHitRadius || !isTargetWithinArc(deltaX, deltaY, distance, this.profile.playerHitRadius)) {
+        continue;
+      }
+
+      if (!nearestPlayer || distance < nearestPlayer.distance) {
+        nearestPlayer = { kind: "player", entity: candidate, distance };
+      }
+    }
+
+    return nearestPlayer;
   }
 
   protected clearMobSkillState(mob: MobState) {
@@ -1791,6 +1953,98 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   }
 
   // ── Spatial grid ─────────────────────────────────────────────────
+
+  protected resolveLagCompensatedCastTiming(message: CastSkillMessage, now: number): LagCompensatedCastTiming {
+    const maxRewindMs = Math.max(0, this.profile.lagCompensationMaxRewindMs);
+    const estimatedLatencyMs = Number.isFinite(message.clientEstimatedLatencyMs)
+      ? Math.floor(message.clientEstimatedLatencyMs!)
+      : NaN;
+    if (Number.isFinite(estimatedLatencyMs)) {
+      const rewindMs = Math.max(0, Math.min(maxRewindMs, estimatedLatencyMs));
+      return rewindMs > 0
+        ? { at: now - rewindMs, enabled: true }
+        : { at: now, enabled: false };
+    }
+
+    const clientSentAt = Number.isFinite(message.clientSentAt)
+      ? Math.floor(message.clientSentAt!)
+      : NaN;
+    if (!Number.isFinite(clientSentAt)) {
+      return { at: now, enabled: false };
+    }
+
+    const ageMs = now - clientSentAt;
+    if (ageMs < 0 || ageMs > maxRewindMs) {
+      return { at: now, enabled: false };
+    }
+
+    return { at: clientSentAt, enabled: true };
+  }
+
+  protected recordPlayerPositionHistory(now: number) {
+    const keepAfter = now - this.profile.positionHistoryDurationMs;
+
+    for (const player of this.roomPlayers.values()) {
+      const history = this.playerPositionHistory.get(player.id) ?? [];
+      const last = history[history.length - 1];
+      if (!last || last.x !== player.x || last.y !== player.y || now - last.at >= this.simulationIntervalMs) {
+        history.push({
+          at: now,
+          x: player.x,
+          y: player.y,
+        });
+      }
+
+      while (history.length > 1 && history[1]!.at < keepAfter) {
+        history.shift();
+      }
+      this.playerPositionHistory.set(player.id, history);
+    }
+
+    for (const playerId of Array.from(this.playerPositionHistory.keys())) {
+      if (!this.roomPlayers.has(playerId)) {
+        this.playerPositionHistory.delete(playerId);
+      }
+    }
+  }
+
+  protected getPlayerPositionAt(playerId: string, at: number): { x: number; y: number } | null {
+    const history = this.playerPositionHistory.get(playerId);
+    if (!history || history.length === 0) {
+      return null;
+    }
+
+    if (at <= history[0]!.at) {
+      return {
+        x: history[0]!.x,
+        y: history[0]!.y,
+      };
+    }
+
+    for (let index = history.length - 1; index >= 0; index -= 1) {
+      const current = history[index]!;
+      if (current.at > at) {
+        continue;
+      }
+
+      const next = history[index + 1];
+      if (!next) {
+        return {
+          x: current.x,
+          y: current.y,
+        };
+      }
+
+      const span = Math.max(1, next.at - current.at);
+      const t = Math.max(0, Math.min(1, (at - current.at) / span));
+      return {
+        x: current.x + (next.x - current.x) * t,
+        y: current.y + (next.y - current.y) * t,
+      };
+    }
+
+    return null;
+  }
 
   protected rebuildMobSpatialGrid() {
     rebuildRoomSpatialGrid(this.mobSpatialGrid, this.mobSpatialOrder, this.roomMobs.values());

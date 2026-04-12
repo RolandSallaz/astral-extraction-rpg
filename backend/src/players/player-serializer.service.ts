@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  canonicalizeItemId,
   INVENTORY_SIZE,
   serializeInventoryItem,
 } from '@mmorpg/shared';
@@ -44,7 +45,12 @@ export class PlayerSerializerService {
       }
 
       const equippedSlot = item.equippedSlot as keyof CharacterProfile['equipment'];
-      equipment[equippedSlot] = item.itemCode as CharacterProfile['equipment'][typeof equippedSlot];
+      const canonicalItemCode = canonicalizeItemId(item.itemCode);
+      if (!canonicalItemCode) {
+        continue;
+      }
+
+      equipment[equippedSlot] = canonicalItemCode as CharacterProfile['equipment'][typeof equippedSlot];
 
       if (item.socketedItems?.length) {
         const socketedItems = [...(item.socketedItems ?? [])]
@@ -54,7 +60,8 @@ export class PlayerSerializerService {
         socketedItems.forEach((socketedItem, index) => {
           const socketIndex = socketedItem.socketIndex ?? index;
           const socketSlot = `${item.equippedSlot}-gem-${socketIndex + 1}` as keyof CharacterProfile['equipment'];
-          equipment[socketSlot] = socketedItem.itemCode as CharacterProfile['equipment'][typeof socketSlot];
+          const canonicalSocketedCode = canonicalizeItemId(socketedItem.itemCode) ?? socketedItem.itemCode;
+          equipment[socketSlot] = canonicalSocketedCode as CharacterProfile['equipment'][typeof socketSlot];
         });
       }
     }
@@ -71,11 +78,16 @@ export class PlayerSerializerService {
       }
 
       if (item.inventorySlot >= 0 && item.inventorySlot < inventory.length) {
+        const canonicalItemCode = canonicalizeItemId(item.itemCode);
+        if (!canonicalItemCode) {
+          continue;
+        }
+
         const socketedCodes = [...(item.socketedItems ?? [])]
           .filter((socketedItem) => socketedItem.socketIndex !== null && socketedItem.socketIndex !== undefined)
           .sort((left, right) => (left.socketIndex ?? 0) - (right.socketIndex ?? 0))
           .map((socketedItem) => socketedItem.itemCode);
-        inventory[item.inventorySlot] = serializeInventoryItem(item.itemCode as any, item.quantity, socketedCodes);
+        inventory[item.inventorySlot] = serializeInventoryItem(canonicalItemCode, item.quantity, socketedCodes);
       }
     }
 

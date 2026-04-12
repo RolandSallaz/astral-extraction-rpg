@@ -8,6 +8,10 @@
 
 export type RoomGameplayProfile = {
   tileSize: number;
+  networkTickRate: number;
+  remoteInterpolationDelayMs: number;
+  lagCompensationMaxRewindMs: number;
+  positionHistoryDurationMs: number;
   playerMoveSpeed: number;
   projectileBoundsPadding: number;
   fireballSpeed: number;
@@ -22,6 +26,10 @@ export type RoomGameplayProfile = {
   playerHitRadius: number;
   mobHitRadius: number;
   playerMobCollisionRadius: number;
+  meleeStrikeDamage: number;
+  meleeStrikeRange: number;
+  meleeStrikeCooldownMs: number;
+  meleeStrikeArcHalfAngleRad: number;
   fireballCooldownMs: number;
   fireNovaProjectileCount: number;
   fireNovaCooldownMs: number;
@@ -56,6 +64,10 @@ const COMMON_GAMEPLAY: Omit<
   | "teleportScrollRandomAttempts"
 > = {
   tileSize: 32,
+  networkTickRate: 40,
+  remoteInterpolationDelayMs: 100,
+  lagCompensationMaxRewindMs: 180,
+  positionHistoryDurationMs: 1000,
   projectileBoundsPadding: 32,
   fireballBaseDamage: 8,
   fireballSelfHitArmDistance: 52,
@@ -66,6 +78,10 @@ const COMMON_GAMEPLAY: Omit<
   playerHitRadius: 18,
   mobHitRadius: 18,
   playerMobCollisionRadius: 22,
+  meleeStrikeDamage: 2,
+  meleeStrikeRange: 46,
+  meleeStrikeCooldownMs: 450,
+  meleeStrikeArcHalfAngleRad: Math.PI * 0.5,
   fireballCooldownMs: 1000,
   fireNovaProjectileCount: 12,
   fireNovaCooldownMs: 10000,

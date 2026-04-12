@@ -6,9 +6,9 @@
  * message handlers, cast logic, or cooldown tracking.
  */
 
-export type SkillId = "fireball" | "fireNova" | "fireField";
+export type SkillId = "woodStaffStrike" | "fireball" | "fireNova" | "fireField";
 
-export type SkillCategory = "projectile" | "nova" | "ground";
+export type SkillCategory = "melee" | "projectile" | "nova" | "ground";
 
 export type SkillDefinition = {
   id: SkillId;
@@ -24,11 +24,19 @@ export type SkillDefinition = {
 };
 
 export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
+  woodStaffStrike: {
+    id: "woodStaffStrike",
+    category: "melee",
+    name: "Wood Staff Strike",
+    requiredWeapon: "wood_staff",
+    baseCooldownMs: 450,
+    spawnsProjectile: false,
+  },
   fireball: {
     id: "fireball",
     category: "projectile",
     name: "Fireball",
-    requiredWeapon: "default_staff",
+    requiredWeapon: "fire_staff",
     baseCooldownMs: 1000,
     spawnsProjectile: true,
   },
@@ -36,7 +44,7 @@ export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
     id: "fireNova",
     category: "nova",
     name: "Fire Nova",
-    requiredWeapon: "default_staff",
+    requiredWeapon: "wood_staff",
     baseCooldownMs: 10000,
     spawnsProjectile: true,
   },
@@ -44,7 +52,7 @@ export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
     id: "fireField",
     category: "ground",
     name: "Fire Field",
-    requiredWeapon: "default_staff",
+    requiredWeapon: "wood_staff",
     baseCooldownMs: 12000,
     spawnsProjectile: false,
   },

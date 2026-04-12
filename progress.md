@@ -8,3 +8,26 @@ Notes:
 - Player head now uses dynamic 1-pixel eyes from shared visual config; player eyes follow cursor vertically, and trader eyes track the player's vertical position.
 - Armor gem runtime helpers are neutral no-ops so stale network fields do not affect combat.
 - Verification: shared build, realtime tests, frontend build, and backend game-configs test pass.
+- Added dedicated `LMB/RMB` mouse-cast slots to the HUD and wired them into `GameCanvas`.
+- Fixed a regression for old saved action bars: new mouse slots were not receiving defaults because stored keyboard bindings suppressed all new defaults. Resolved by merging defaults per-slot and preserving explicit `null` clears from storage.
+- Current default mouse bind for `wood_staff`: `LMB = fireball`.
+- Verification after the mouse-slot fix: `npm --workspace frontend run lint` and `npm --workspace frontend run build` pass; only pre-existing warnings remain.
+- Network timing is being centralized into shared gameplay profiles so client prediction, remote interpolation, and Colyseus simulation tick all derive from the same source of truth.
+- Current tuning pass targets a moderate PvP profile instead of `60 Hz`: shared simulation tick moved toward `40 Hz`, and remote interpolation back-time is being reduced from the old `160 ms` buffer.
+- Added regression coverage for move-sequence acknowledgements in both `MyRoom` and `RaidRoom` so `lastProcessedInput` stays tied to the latest authoritative movement tick.
+- Verification for the timing pass: `npm --workspace frontend run build`, `npx mocha -r tsx test/MyRoom.test.ts --exit --timeout 20000`, and `npx mocha -r tsx test/RaidRoom.test.ts --exit --timeout 20000` pass.
+- `npm --workspace frontend run lint` still reports only the existing warning set (`<img>` usage, hook dependency warnings, inline Phaser scene class warning); removed the extra unused `hasActionBarBindings` warning from `GameHud`.
+- Tried to verify frontend interaction through Playwright, but `npx playwright --version` attempted a registry fetch and failed locally with `EPERM` in the npm cache, so mouse-cast behavior is code-verified/build-verified but not yet browser-verified through the skill runner.
+- Updated map click handling so `LMB` and `RMB` share the same direct mouse-slot cast path before falling back to targeted/cancel/melee behavior. This avoids bound `LMB` skills being swallowed by the old active-targeting branch.
+- Verification after the LMB parity fix: `npm --workspace frontend run lint` and `npm --workspace frontend run build` pass; lint still has only the existing warning set.
+- Movement sync fixes: `MyRoom` no longer acknowledges active movement input before the server simulation tick applies it, and stale pending movement sequences are cleared on stop/cast/teleport. This keeps client prediction replay from dropping inputs too early.
+- Client movement prediction and reconciliation now share the same mob-blocker snapshot and mirror the server's "can move out of an existing overlap" rule, reducing rubber-banding around mobs.
+- Verification after movement sync fixes: `npm --workspace frontend run build`, `npm --workspace frontend run lint`, and full `npm --workspace realtime test` pass (`56 passing`). Lint still reports only existing warnings.
+- Browser interaction verification remains blocked locally: `npx playwright --version` still fails with `EPERM` writing npm cache temp files under `C:\Users\Roland\AppData\Local\npm-cache`.
+- Wood staff strike is now a dedicated skill id (`woodStaffStrike`) with its own cooldown field (`woodStaffStrikeCooldownEndsAt`).
+- Fireball no longer requires `wood_staff`; it now requires a placeholder `fire_staff` so the wood staff cannot cast it.
+- Removed fireball from HUD defaults and mouse-slot binding parsing; LMB now falls back to wood staff strike unless another skill is bound.
+- Updated realtime fireball tests to use `weaponItem: "fire_staff"` and adjusted the cast-range clamp test to use two casters.
+- Verification: `npx mocha -r tsx test/MyRoom.test.ts --exit --timeout 20000` and `npx mocha -r tsx test/SpreadSplitCombo.test.ts --exit --timeout 20000` pass (ran sequentially to avoid port conflicts).
+- Wood staff now exposes a single skill in the HUD (`woodStaffStrike`), with default LMB binding and cooldown wiring from the server.
+- Added a short post-cast lock (180ms) for `woodStaffStrike` to drive a visible swing window and wired a client-side hand/weapon swing animation during that cast window.

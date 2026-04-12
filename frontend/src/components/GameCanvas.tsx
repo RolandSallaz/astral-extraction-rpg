@@ -2,7 +2,12 @@
 
 import { useEffect, useRef } from 'react';
 import type { Room } from '@colyseus/sdk';
+import type { MouseActionSlotKey, MouseSkillBindings, SkillId } from '@/components/GameHud';
 import { COMMON_DEATH_ANIMATION } from '@mmorpg/shared';
+import {
+  RAID_GAMEPLAY_PROFILE,
+  WORLD_GAMEPLAY_PROFILE,
+} from '@mmorpg/shared/gameplay/profiles';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
 import {
   DEFAULT_PLAYER_VISUALS,
@@ -56,6 +61,7 @@ import {
   type ConsumableItemId,
   type EquippableItemId,
   type EquipmentItemId,
+  type ItemDefinition,
 } from '@/lib/items/equipmentItems';
 import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
 import {
@@ -96,6 +102,7 @@ import {
 
 type PhaserGame = import('phaser').Game;
 type PhaserImage = Phaser.GameObjects.Image;
+type PhaserGraphics = Phaser.GameObjects.Graphics;
 const PLAYER_BODY_TEXTURE_KEY = DEFAULT_PLAYER_VISUALS.body.key;
 const PLAYER_HEAD_TEXTURE_KEY = DEFAULT_PLAYER_VISUALS.head.key;
 const PLAYER_BODY_DEFAULT_FRAME = DEFAULT_PLAYER_VISUALS.body.defaultFrame;
@@ -105,6 +112,7 @@ const PLAYER_HANDS_TEXTURE_PATH = '/character/character_hand.png';
 const PLAYER_HANDS_FRAME_WIDTH = 4;
 const PLAYER_HANDS_FRAME_HEIGHT = 4;
 const PLAYER_HANDS_DEFAULT_FRAME = 0;
+const WOOD_STAFF_ITEM_ID = 'wood_staff' as const;
 const PLAYER_HAND_BASE_OFFSETS = {
   right: { x: 1, y: 11 },
   left: { x: 11, y: 11 },
@@ -241,6 +249,7 @@ type NetworkPlayerState = {
   burnEndsAt: number;
   healingTicksRemaining: number;
   healingEndsAt: number;
+  woodStaffStrikeCooldownEndsAt: number;
   fireballCooldownEndsAt: number;
   fireNovaCooldownEndsAt: number;
   fireFieldCooldownEndsAt: number;
@@ -518,6 +527,8 @@ type CharacterVisual = {
   weaponItem: PhaserImage;
   castItem: PhaserImage;
   burnEffect: PhaserImage;
+  swingTrail: PhaserGraphics;
+  swingTrailPoints: Array<{ x: number; y: number; time: number }>;
   weaponEffects: Array<{
     image: PhaserImage;
     aura: Phaser.GameObjects.Ellipse;
@@ -582,6 +593,8 @@ type CharacterVisual = {
   simPrevY: number;
   simX: number;
   simY: number;
+  simErrorX: number;
+  simErrorY: number;
   idleGraceUntil: number;
   isDead: boolean;
   isVisible?: boolean;
@@ -612,6 +625,7 @@ type RaidNetworkPlayerState = {
   burnEndsAt?: number;
   healingTicksRemaining?: number;
   healingEndsAt?: number;
+  woodStaffStrikeCooldownEndsAt?: number;
   fireballCooldownEndsAt?: number;
   fireNovaCooldownEndsAt?: number;
   fireFieldCooldownEndsAt?: number;
@@ -660,24 +674,111 @@ type RaidRoom = Room<{
 
 type RealtimeRoom = WorldRoom | RaidRoom;
 
-const CLIENT_PLAYER_SPEED = 120;
-const CLIENT_RAID_PLAYER_SPEED = 110;
-const FIRE_TRAIL_CAST_PENALTY_MS = 200;
+const CLIENT_PLAYER_SPEED = WORLD_GAMEPLAY_PROFILE.playerMoveSpeed;
+const CLIENT_RAID_PLAYER_SPEED = RAID_GAMEPLAY_PROFILE.playerMoveSpeed;
+const FIRE_TRAIL_CAST_PENALTY_MS = WORLD_GAMEPLAY_PROFILE.fireTrailCastPenaltyMs;
 const FIRE_BURST_EXTRA_LOCK_MS = 200;
+const WOOD_STAFF_STRIKE_LOCK_MS = 180;
 const FIRE_RANGE_GEM_ID = 'fire_range_gem';
 const SKELETON_RENDER_SCALE = 2;
 const DEFAULT_MOB_BURN_SCALE = 1;
-const STAFF_CAST_RANGE = 32 * 6;
+const STAFF_CAST_RANGE = WORLD_GAMEPLAY_PROFILE.staffCastRange;
 const RAID_VISIBILITY_UPDATE_INTERVAL_MS = 90;
 const RAID_MINIMAP_UPDATE_INTERVAL_MS = 260;
 const RAID_OBJECT_VISIBILITY_UPDATE_INTERVAL_MS = 140;
-const CLIENT_SIMULATION_STEP_MS = 1000 / 30;
+const WORLD_CLIENT_SIMULATION_STEP_MS = 1000 / WORLD_GAMEPLAY_PROFILE.networkTickRate;
+const RAID_CLIENT_SIMULATION_STEP_MS = 1000 / RAID_GAMEPLAY_PROFILE.networkTickRate;
+const WORLD_REMOTE_INTERPOLATION_DELAY_MS = WORLD_GAMEPLAY_PROFILE.remoteInterpolationDelayMs;
+const RAID_REMOTE_INTERPOLATION_DELAY_MS = RAID_GAMEPLAY_PROFILE.remoteInterpolationDelayMs;
 const RAID_VISION_RADIUS_TILES = 6;
 const RAID_FOOT_TILE_OFFSET_Y = 32 * 0.375;
 const RAID_MINIMAP_EXPLORED_STORAGE_PREFIX = 'mmorpg.raid-minimap-explored.v1';
+const ACTION_BAR_STORAGE_KEY = 'mmorpg.ui.action-bar.bindings.v1';
 
 function getRaidExploredStorageKey(raidRunId: string) {
   return `${RAID_MINIMAP_EXPLORED_STORAGE_PREFIX}:${raidRunId}`;
+}
+
+function readStoredMouseSkillBindings(): MouseSkillBindings {
+  if (typeof window === 'undefined') {
+    return { LMB: null, RMB: null };
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(ACTION_BAR_STORAGE_KEY);
+    if (!rawValue) {
+      return { LMB: null, RMB: null };
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<
+      Record<'LMB' | 'RMB', { kind?: string; skillId?: string } | null>
+    >;
+
+    return {
+      LMB:
+        parsed.LMB?.kind === 'skill' &&
+        (parsed.LMB.skillId === 'woodStaffStrike' ||
+          parsed.LMB.skillId === 'fireNova' ||
+          parsed.LMB.skillId === 'fireField')
+          ? parsed.LMB.skillId
+          : null,
+      RMB:
+        parsed.RMB?.kind === 'skill' &&
+        (parsed.RMB.skillId === 'woodStaffStrike' ||
+          parsed.RMB.skillId === 'fireNova' ||
+          parsed.RMB.skillId === 'fireField')
+          ? parsed.RMB.skillId
+          : null,
+    };
+  } catch {
+    return { LMB: null, RMB: null };
+  }
+}
+
+function resolvePointerButtons(pointer: Phaser.Input.Pointer) {
+  const pointerEvent = pointer.event as MouseEvent | PointerEvent | null | undefined;
+  const eventButton = typeof pointerEvent?.button === 'number' ? pointerEvent.button : null;
+  const eventButtons = typeof pointerEvent?.buttons === 'number' ? pointerEvent.buttons : null;
+  const isLeftButton =
+    eventButton === 0 ||
+    pointer.button === 0 ||
+    (eventButtons !== null && (eventButtons & 1) !== 0) ||
+    pointer.leftButtonDown();
+  const isRightButton =
+    eventButton === 2 ||
+    pointer.button === 2 ||
+    (eventButtons !== null && (eventButtons & 2) !== 0) ||
+    pointer.rightButtonDown();
+
+  return {
+    isLeftButton,
+    isRightButton,
+  };
+}
+
+function resolveMouseActionSlotKey(isLeftButton: boolean, isRightButton: boolean): MouseActionSlotKey | null {
+  if (isLeftButton) {
+    return 'LMB';
+  }
+
+  if (isRightButton) {
+    return 'RMB';
+  }
+
+  return null;
+}
+
+function createTimedCastSkillMessage(
+  message: Omit<CastSkillMessage, 'clientEstimatedLatencyMs' | 'clientSentAt'>,
+  estimatedOneWayLatencyMs: number,
+): CastSkillMessage {
+  const safeEstimatedLatencyMs = Math.max(0, Math.round(estimatedOneWayLatencyMs));
+
+  return {
+    ...message,
+    ...(safeEstimatedLatencyMs > 0 ? { clientEstimatedLatencyMs: safeEstimatedLatencyMs } : {}),
+    clientSentAt: Date.now(),
+  };
 }
 
 function loadStoredRaidExploredTiles(raidRunId: string, maxTiles: number) {
@@ -833,6 +934,40 @@ function getHandDisplaySize(tileSize: number) {
   };
 }
 
+function getEquippedItemHandPosition(
+  item: Pick<ItemDefinition, 'equippedAnchorHand'> | undefined,
+  leftHandPosition: { x: number; y: number },
+  rightHandPosition: { x: number; y: number },
+) {
+  return item?.equippedAnchorHand === 'right' ? rightHandPosition : leftHandPosition;
+}
+
+function syncCharacterWeaponLayering(
+  visual: Pick<
+    CharacterVisual,
+    'container' | 'head' | 'leftEye' | 'rightEye' | 'leftHand' | 'rightHand' | 'weaponItem' | 'weaponEffects' | 'burnEffect'
+  >,
+  item: Pick<ItemDefinition, 'equippedAnchorHand'> | undefined,
+  showWeapon: boolean,
+) {
+  const holdingHand = item?.equippedAnchorHand === 'left' ? visual.leftHand : visual.rightHand;
+
+  visual.container.bringToTop(visual.head);
+  visual.container.bringToTop(visual.leftEye);
+  visual.container.bringToTop(visual.rightEye);
+
+  if (showWeapon) {
+    visual.container.bringToTop(visual.weaponItem);
+    visual.weaponEffects.forEach(({ aura, image }) => {
+      visual.container.bringToTop(aura);
+      visual.container.bringToTop(image);
+    });
+    visual.container.bringToTop(holdingHand);
+  }
+
+  visual.container.bringToTop(visual.burnEffect);
+}
+
 function getSharedDeathAnimationScale(tileSize: number) {
   return getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, tileSize);
 }
@@ -866,6 +1001,8 @@ function canMoveToWorldPosition(
   meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
   mobBlockers: MovementBlocker[] = [],
+  currentX?: number,
+  currentY?: number,
 ) {
   const clampedX = Math.max(tileSize / 2, Math.min(mapWidth - tileSize / 2, x));
   const clampedY = Math.max(tileSize / 2, Math.min(mapHeight - tileSize / 2, y));
@@ -877,7 +1014,18 @@ function canMoveToWorldPosition(
   }
 
   for (const blocker of mobBlockers) {
-    if (Phaser.Math.Distance.Between(clampedX, clampedY, blocker.x, blocker.y) < blocker.radius) {
+    const nextDistance = Phaser.Math.Distance.Between(clampedX, clampedY, blocker.x, blocker.y);
+    if (nextDistance >= blocker.radius) {
+      continue;
+    }
+
+    const currentDistance =
+      typeof currentX === 'number' && typeof currentY === 'number'
+        ? Phaser.Math.Distance.Between(currentX, currentY, blocker.x, blocker.y)
+        : Number.POSITIVE_INFINITY;
+    const isAlreadyOverlapping = currentDistance < blocker.radius;
+    const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
+    if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
       return false;
     }
   }
@@ -896,6 +1044,8 @@ function canMoveToRaidWorldPosition(
   height: number,
   chestBlockedTiles?: Uint8Array,
   mobBlockers: MovementBlocker[] = [],
+  currentX?: number,
+  currentY?: number,
 ) {
   const clampedX = Math.max(tileSize / 2, Math.min(mapWidth - tileSize / 2, x));
   const clampedY = Math.max(tileSize / 2, Math.min(mapHeight - tileSize / 2, y + tileSize * 0.375));
@@ -913,7 +1063,18 @@ function canMoveToRaidWorldPosition(
   }
 
   for (const blocker of mobBlockers) {
-    if (Phaser.Math.Distance.Between(clampedX, y, blocker.x, blocker.y) < blocker.radius) {
+    const nextDistance = Phaser.Math.Distance.Between(clampedX, y, blocker.x, blocker.y);
+    if (nextDistance >= blocker.radius) {
+      continue;
+    }
+
+    const currentDistance =
+      typeof currentX === 'number' && typeof currentY === 'number'
+        ? Phaser.Math.Distance.Between(currentX, currentY, blocker.x, blocker.y)
+        : Number.POSITIVE_INFINITY;
+    const isAlreadyOverlapping = currentDistance < blocker.radius;
+    const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
+    if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
       return false;
     }
   }
@@ -957,6 +1118,8 @@ function applyWorldPredictedMovement(
       meadowMap,
       meadowDecorations,
       mobBlockers,
+      currentX,
+      currentY,
     )
   ) {
     return { x: nextX, y: nextY };
@@ -1007,6 +1170,8 @@ function applyRaidPredictedMovement(
       height,
       chestBlockedTiles,
       mobBlockers,
+      currentX,
+      currentY,
     )
   ) {
     resolvedX = nextX;
@@ -1024,6 +1189,8 @@ function applyRaidPredictedMovement(
       height,
       chestBlockedTiles,
       mobBlockers,
+      resolvedX,
+      currentY,
     )
   ) {
     resolvedY = nextY;
@@ -1186,6 +1353,11 @@ function applyEquipmentToVisual(
   visual: (PlayerVisualRefs & {
     container: Phaser.GameObjects.Container;
     burnEffect: PhaserImage;
+    head: PhaserImage;
+    leftEye: Phaser.GameObjects.Rectangle;
+    rightEye: Phaser.GameObjects.Rectangle;
+    leftHand: PhaserImage;
+    rightHand: PhaserImage;
     weaponEffects: Array<{
       image: PhaserImage;
       aura: Phaser.GameObjects.Ellipse;
@@ -1216,6 +1388,7 @@ function applyEquipmentToVisual(
 
     if (weaponItemId) {
       visual.weaponItem.setTexture(weaponItem!.textureKey);
+      visual.weaponItem.setOrigin(weaponItem!.equippedOriginX ?? 0.5, weaponItem!.equippedOriginY ?? 0.5);
       visual.weaponItem.setAngle(weaponItem!.worldRotationDeg ?? 0);
       visual.weaponItem.setScale(weaponItem!.worldScale ?? 1);
       visual.weaponItem.setVisible(true);
@@ -1260,6 +1433,7 @@ function applyEquipmentToVisual(
         });
       });
     } else {
+      visual.weaponItem.setOrigin(0.5, 0.5);
       visual.weaponItem.setAngle(0);
       visual.weaponItem.setScale(1);
       visual.weaponItem.setVisible(false);
@@ -1267,6 +1441,7 @@ function applyEquipmentToVisual(
     visual.currentWeaponItem = weaponItemId;
   } else if (weaponItemId) {
     visual.weaponItem.setTexture(weaponItem!.textureKey);
+    visual.weaponItem.setOrigin(weaponItem!.equippedOriginX ?? 0.5, weaponItem!.equippedOriginY ?? 0.5);
     visual.weaponItem.setAngle(weaponItem!.worldRotationDeg ?? 0);
     visual.weaponItem.setScale(weaponItem!.worldScale ?? 1);
     visual.weaponItem.setVisible(true);
@@ -1278,6 +1453,7 @@ function applyEquipmentToVisual(
   }
   visual.currentWeaponOffsetX = weaponItem?.equippedOffsetX ?? 0;
   visual.currentWeaponOffsetY = weaponItem?.equippedOffsetY ?? 0;
+  syncCharacterWeaponLayering(visual, weaponItem, Boolean(weaponItemId) && visual.weaponItem.visible);
 }
 
 function applyMobHealthToVisual(
@@ -1517,6 +1693,10 @@ function getCharacterCastRange(equipment: PlayerEquipment) {
   }
 
   return STAFF_CAST_RANGE;
+}
+
+function hasWoodStaffEquipped(equipment: PlayerEquipment) {
+  return equipment.weapon === WOOD_STAFF_ITEM_ID;
 }
 
 function applyCastingToCharacterVisual(
@@ -1775,6 +1955,7 @@ export function GameCanvas({
   playerIntellect,
   playerRole,
   activeSkillTargeting,
+  mouseSkillBindings = { LMB: null, RMB: null },
   onChestInteract,
   onNearbyChestChange,
   onTraderInteract,
@@ -1797,6 +1978,7 @@ export function GameCanvas({
   onRoomConnected,
   respawnRequestNonce,
   fireNovaCastNonce,
+  woodStaffStrikeCastNonce,
   useConsumableRequest = null,
   containerStates,
   onContainersStateChange,
@@ -1838,6 +2020,7 @@ export function GameCanvas({
   playerIntellect: number;
   playerRole: string;
   activeSkillTargeting: 'fireball' | 'fireField' | null;
+  mouseSkillBindings?: MouseSkillBindings;
   onChestInteract?: (chestId: string) => void;
   onNearbyChestChange?: (chestId: string | null) => void;
   onTraderInteract?: (trader: WorldTraderInteraction) => void;
@@ -1848,7 +2031,12 @@ export function GameCanvas({
   onMinimapChange?: (snapshot: MinimapSnapshot | null) => void;
   onSkillTargetCancel?: () => void;
   onFireballCast?: (payload: { x: number; y: number }) => void;
-  onSkillCooldownsChange?: (payload: { fireball: number; fireNova: number; fireField: number }) => void;
+  onSkillCooldownsChange?: (payload: {
+    woodStaffStrike: number;
+    fireball: number;
+    fireNova: number;
+    fireField: number;
+  }) => void;
   onPlayerVitalsChange?: (payload: { health: number; maxHealth: number }) => void;
   onPlayerProgressChange?: (payload: { level: number; experience: number }) => void;
   onPlayerPositionChange?: (payload: { x: number; y: number }) => void;
@@ -1863,6 +2051,7 @@ export function GameCanvas({
   }) => void;
   respawnRequestNonce: number;
   fireNovaCastNonce: number;
+  woodStaffStrikeCastNonce: number;
   useConsumableRequest?: {
     source: 'inventory' | 'container';
     slotIndex: number;
@@ -1916,6 +2105,14 @@ export function GameCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const playerVisualRef = useRef<PlayerVisualRefs | null>(null);
   const roomRef = useRef<RealtimeRoom | null>(null);
+  const estimatedOneWayLatencyMsRef = useRef(0);
+  const lastPointerWorldRef = useRef({ x: playerPosition.x, y: playerPosition.y });
+  const skillCooldownsRef = useRef({
+    woodStaffStrike: 0,
+    fireball: 0,
+    fireNova: 0,
+    fireField: 0,
+  });
   const chestInteractRef = useRef(onChestInteract);
   const nearbyChestChangeRef = useRef(onNearbyChestChange);
   const traderInteractRef = useRef(onTraderInteract);
@@ -1925,6 +2122,7 @@ export function GameCanvas({
   const objectiveArrowChangeRef = useRef(onObjectiveArrowChange);
   const minimapChangeRef = useRef(onMinimapChange);
   const activeSkillTargetingRef = useRef(activeSkillTargeting);
+  const mouseSkillBindingsRef = useRef(mouseSkillBindings);
   const skillTargetCancelRef = useRef(onSkillTargetCancel);
   const fireballCastRef = useRef(onFireballCast);
   const skillCooldownsChangeRef = useRef(onSkillCooldownsChange);
@@ -2027,6 +2225,10 @@ export function GameCanvas({
   }, [activeSkillTargeting]);
 
   useEffect(() => {
+    mouseSkillBindingsRef.current = mouseSkillBindings;
+  }, [mouseSkillBindings]);
+
+  useEffect(() => {
     skillTargetCancelRef.current = onSkillTargetCancel;
   }, [onSkillTargetCancel]);
 
@@ -2041,6 +2243,13 @@ export function GameCanvas({
   useEffect(() => {
     playerVitalsChangeRef.current = onPlayerVitalsChange;
   }, [onPlayerVitalsChange]);
+
+  useEffect(() => {
+    lastPointerWorldRef.current = {
+      x: playerPosition.x,
+      y: playerPosition.y,
+    };
+  }, [playerPosition.x, playerPosition.y]);
 
   useEffect(() => {
     playerProgressChangeRef.current = onPlayerProgressChange;
@@ -2283,11 +2492,38 @@ export function GameCanvas({
       return;
     }
 
-    const castSkillMessage: CastSkillMessage = {
-      skillId: 'fireNova',
-    };
+    const castSkillMessage = createTimedCastSkillMessage(
+      { skillId: 'fireNova' },
+      estimatedOneWayLatencyMsRef.current,
+    );
     roomRef.current?.send('castSkill', castSkillMessage);
   }, [activeRoomName, fireNovaCastNonce]);
+
+  useEffect(() => {
+    if (woodStaffStrikeCastNonce <= 0) {
+      return;
+    }
+
+    if (!roomRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if ((skillCooldownsRef.current.woodStaffStrike ?? 0) > now) {
+      return;
+    }
+
+    const target = lastPointerWorldRef.current;
+    const castSkillMessage = createTimedCastSkillMessage(
+      {
+        skillId: 'woodStaffStrike',
+        targetX: target.x,
+        targetY: target.y,
+      },
+      estimatedOneWayLatencyMsRef.current,
+    );
+    roomRef.current.send('castSkill', castSkillMessage);
+  }, [activeRoomName, woodStaffStrikeCastNonce]);
 
   useEffect(() => {
     let game: PhaserGame | null = null;
@@ -2316,6 +2552,16 @@ export function GameCanvas({
       }
 
       const isRaidScene = activeRoomName === 'raid';
+      const clientSimulationStepMs = isRaidScene
+        ? RAID_CLIENT_SIMULATION_STEP_MS
+        : WORLD_CLIENT_SIMULATION_STEP_MS;
+      const remoteInterpolationDelayMs = isRaidScene
+        ? RAID_REMOTE_INTERPOLATION_DELAY_MS
+        : WORLD_REMOTE_INTERPOLATION_DELAY_MS;
+      const maxPendingInputHistory = Math.max(
+        90,
+        Math.ceil((isRaidScene ? RAID_GAMEPLAY_PROFILE.networkTickRate : WORLD_GAMEPLAY_PROFILE.networkTickRate) * 3),
+      );
       const meadowAsset =
         worldMapAssetOverride && !isRaidScene
           ? worldMapAssetOverride
@@ -2443,6 +2689,16 @@ export function GameCanvas({
           const networkClient = new Client(getRealtimeEndpoint());
           const characters = new Map<string, CharacterVisual>();
           const mobs = new Map<string, MobVisual>();
+          const getMovementMobBlockers = () =>
+            Array.from(mobs.values()).flatMap((mob) =>
+              mob.isDead
+                ? []
+                : [{
+                  x: mob.sprite.x,
+                  y: mob.sprite.y,
+                  radius: 22,
+                }],
+            );
           const completedDeadPlayerIds = new Set<string>();
           const completedDeadMobIds = new Set<string>();
           const groundEffects = new Map<string, GroundEffectVisual>();
@@ -2491,6 +2747,7 @@ export function GameCanvas({
           let lastRaidVisibilityUpdateAt = 0;
           let lastRaidObjectVisibilityUpdateAt = 0;
           let lastRaidMinimapUpdateAt = 0;
+          let latencyPingIntervalId: ReturnType<typeof window.setInterval> | null = null;
           let nextRaidInputSequence = 1;
           let lastProcessedRaidInput = 0;
           let pendingRaidInputs: PendingRaidInputSample[] = [];
@@ -2499,6 +2756,37 @@ export function GameCanvas({
           let pendingWorldInputs: PendingWorldInputSample[] = [];
           let movementSimulationAccumulatorMs = 0;
           let lastPositionSyncAt = 0;
+          const maxCastRewindMs = Math.max(
+            WORLD_GAMEPLAY_PROFILE.lagCompensationMaxRewindMs,
+            RAID_GAMEPLAY_PROFILE.lagCompensationMaxRewindMs,
+          );
+          const stopLatencyPing = () => {
+            if (latencyPingIntervalId !== null) {
+              window.clearInterval(latencyPingIntervalId);
+              latencyPingIntervalId = null;
+            }
+            estimatedOneWayLatencyMsRef.current = 0;
+          };
+          const sampleCastLatency = () => {
+            if (!room || !sceneActive) {
+              return;
+            }
+
+            room.ping((roundTripMs) => {
+              if (!sceneActive) {
+                return;
+              }
+              estimatedOneWayLatencyMsRef.current = Math.max(
+                0,
+                Math.min(maxCastRewindMs, Math.round(roundTripMs / 2)),
+              );
+            });
+          };
+          const startLatencyPing = () => {
+            stopLatencyPing();
+            sampleCastLatency();
+            latencyPingIntervalId = window.setInterval(sampleCastLatency, 2000);
+          };
           let lastSyncedPositionX = latestProfileRef.current.playerPosition.x;
           let lastSyncedPositionY = latestProfileRef.current.playerPosition.y;
           let canOpenChest = false;
@@ -3272,8 +3560,9 @@ export function GameCanvas({
               .image(0, 0, PLAYER_HANDS_TEXTURE_KEY, PLAYER_HANDS_DEFAULT_FRAME)
               .setDisplaySize(handDisplay.width, handDisplay.height)
               .setOrigin(0.5);
+            const swingTrail = this.add.graphics().setVisible(false);
             const weaponItem = this.add
-              .image(10, 2, EQUIPMENT_ITEMS.default_staff.textureKey)
+              .image(10, 2, EQUIPMENT_ITEMS.wood_staff.textureKey)
               .setDisplaySize(meadowMap.tileSize, meadowMap.tileSize)
               .setOrigin(0.5)
               .setVisible(false);
@@ -3313,16 +3602,30 @@ export function GameCanvas({
               { x: 0, y: 0 },
               meadowMap.tileSize,
             );
+            const initialWeaponItem = equipment.weapon ? EQUIPMENT_ITEMS[equipment.weapon] : undefined;
+            const initialWeaponHandPosition = getEquippedItemHandPosition(
+              initialWeaponItem,
+              leftHandPosition,
+              rightHandPosition,
+            );
             rightHand.setPosition(rightHandPosition.x, rightHandPosition.y);
             leftHand.setPosition(leftHandPosition.x, leftHandPosition.y);
+            weaponItem
+              .setOrigin(initialWeaponItem?.equippedOriginX ?? 0.5, initialWeaponItem?.equippedOriginY ?? 0.5)
+              .setPosition(
+                initialWeaponHandPosition.x + (initialWeaponItem?.equippedOffsetX ?? 0),
+                initialWeaponHandPosition.y + (initialWeaponItem?.equippedOffsetY ?? 0),
+              );
+            castItem.setPosition(leftHandPosition.x, leftHandPosition.y);
 
             container.add(leftHand);
             container.add(body);
+            container.add(swingTrail);
+            container.add(weaponItem);
             container.add(rightHand);
             container.add(head);
             container.add(leftEye);
             container.add(rightEye);
-            container.add(weaponItem);
             container.add(castItem);
             container.add(burnEffect);
 
@@ -3456,6 +3759,8 @@ export function GameCanvas({
               weaponItem,
               castItem,
               burnEffect,
+              swingTrail,
+              swingTrailPoints: [],
               weaponEffects: [],
               head,
               leftEye,
@@ -3523,6 +3828,8 @@ export function GameCanvas({
               simPrevY: y,
               simX: x,
               simY: y,
+              simErrorX: 0,
+              simErrorY: 0,
               idleGraceUntil: 0,
               isDead: false,
             };
@@ -3783,9 +4090,11 @@ export function GameCanvas({
             deltaSeconds: number,
             now: number,
             lookTargetY?: number,
+            swingTarget?: { x: number; y: number },
           ) => {
             character.motionPhase += deltaSeconds * (isMoving ? 12 : 4);
             character.effectPhase += deltaSeconds * 4;
+            const castNow = Date.now();
 
             const nextAnimationState: PlayerAnimationState = isMoving ? 'move' : 'idle';
             syncAnimationState(character, nextAnimationState, now);
@@ -3831,10 +4140,77 @@ export function GameCanvas({
               },
               meadowMap.tileSize,
             );
-            character.leftHand.x = leftHandPosition.x;
-            character.leftHand.y = leftHandPosition.y;
-            character.rightHand.x = rightHandPosition.x;
-            character.rightHand.y = rightHandPosition.y;
+            const weaponItemDefinition = character.currentWeaponItem
+              ? EQUIPMENT_ITEMS[character.currentWeaponItem]
+              : undefined;
+            const holdingHand = weaponItemDefinition?.equippedAnchorHand === 'right' ? 'right' : 'left';
+            let swingOffsetX = 0;
+            let swingOffsetY = 0;
+            let swingAngleDeg = 0;
+            let isSwinging = false;
+            let swingProgress = 0;
+            if (
+              character.currentCastingSkillId === 'woodStaffStrike' &&
+              character.currentWeaponItem === WOOD_STAFF_ITEM_ID &&
+              character.currentCastEndsAt > character.currentCastStartedAt
+            ) {
+              isSwinging = true;
+              const swingDuration = Math.max(1, character.currentCastEndsAt - character.currentCastStartedAt);
+              swingProgress = Phaser.Math.Clamp(
+                (castNow - character.currentCastStartedAt) / swingDuration,
+                0,
+                1,
+              );
+              const windupCutoff = 0.3;
+              const strikeCutoff = 0.7;
+              const windupDist = 18;
+              const strikeDist = 34;
+              const windupLift = 32;
+              const strikeDrop = 2;
+              const windupAngleOffset = -90;
+              const strikeAngleOffset = 50;
+              let dirX = 1;
+              let dirY = 0;
+              if (swingTarget) {
+                const dx = swingTarget.x - character.container.x;
+                const dy = swingTarget.y - character.container.y;
+                const length = Math.hypot(dx, dy);
+                if (length > 0.001) {
+                  dirX = (dx / length) * character.facingX;
+                  dirY = dy / length;
+                }
+              }
+              const aimAngle = Math.atan2(dirY, dirX) * (180 / Math.PI);
+
+              if (swingProgress < windupCutoff) {
+                const t = Math.sin((swingProgress / windupCutoff) * Math.PI * 0.5);
+                swingOffsetX = -dirX * windupDist * t;
+                swingOffsetY = -dirY * windupDist * t - windupLift * t;
+                swingAngleDeg = aimAngle + windupAngleOffset * t;
+              } else if (swingProgress < strikeCutoff) {
+                const t = Math.sin(((swingProgress - windupCutoff) / (strikeCutoff - windupCutoff)) * Math.PI * 0.5);
+                swingOffsetX = Phaser.Math.Linear(-dirX * windupDist, dirX * strikeDist, t);
+                swingOffsetY = Phaser.Math.Linear(-dirY * windupDist - windupLift, dirY * strikeDist + strikeDrop, t);
+                swingAngleDeg = Phaser.Math.Linear(aimAngle + windupAngleOffset, aimAngle + strikeAngleOffset, t);
+              } else {
+                const t = Math.sin(((swingProgress - strikeCutoff) / (1 - strikeCutoff)) * Math.PI * 0.5);
+                swingOffsetX = Phaser.Math.Linear(dirX * strikeDist, 0, t);
+                swingOffsetY = Phaser.Math.Linear(dirY * strikeDist + strikeDrop, 0, t);
+                swingAngleDeg = Phaser.Math.Linear(aimAngle + strikeAngleOffset, 0, t);
+              }
+            }
+
+            if (holdingHand === 'left') {
+              character.leftHand.x = leftHandPosition.x + swingOffsetX;
+              character.leftHand.y = leftHandPosition.y + swingOffsetY;
+              character.rightHand.x = rightHandPosition.x;
+              character.rightHand.y = rightHandPosition.y;
+            } else {
+              character.rightHand.x = rightHandPosition.x + swingOffsetX;
+              character.rightHand.y = rightHandPosition.y + swingOffsetY;
+              character.leftHand.x = leftHandPosition.x;
+              character.leftHand.y = leftHandPosition.y;
+            }
 
             const bodyPixelSize =
               getVisualPixelSize(DEFAULT_PLAYER_VISUALS.body, meadowMap.tileSize);
@@ -3848,6 +4224,11 @@ export function GameCanvas({
             const leftEyePosition = getEyeLocalPosition(eyeDirection, 'left', meadowMap.tileSize);
             const rightEyePosition = getEyeLocalPosition(eyeDirection, 'right', meadowMap.tileSize);
             const weaponBob = isMoving ? Math.cos(character.motionPhase * 2) * 0.4 : 0;
+            const weaponHandPosition = getEquippedItemHandPosition(
+              weaponItemDefinition,
+              { x: character.leftHand.x, y: character.leftHand.y },
+              { x: character.rightHand.x, y: character.rightHand.y },
+            );
             const heldCastItemId = getHeldCastConsumableItemId(character);
             const heldCastItem = heldCastItemId ? EQUIPMENT_ITEMS[heldCastItemId] : undefined;
             const showHeldCastItem = Boolean(heldCastItem);
@@ -3874,9 +4255,69 @@ export function GameCanvas({
 
             character.body.x = DEFAULT_PLAYER_VISUALS.body.offsetX;
             character.body.y = DEFAULT_PLAYER_VISUALS.body.offsetY;
-            character.weaponItem.x = 10 + character.currentWeaponOffsetX;
-            character.weaponItem.y = 2 + weaponBob + character.currentWeaponOffsetY;
+            character.weaponItem.x = weaponHandPosition.x + character.currentWeaponOffsetX;
+            character.weaponItem.y = weaponHandPosition.y + character.currentWeaponOffsetY;
+            character.weaponItem.setAngle((weaponItemDefinition?.worldRotationDeg ?? 0) + swingAngleDeg);
             character.weaponItem.setVisible(showWeapon);
+            syncCharacterWeaponLayering(character, weaponItemDefinition, showWeapon);
+
+            const trailPoints = character.swingTrailPoints;
+            const swingTrail = character.swingTrail;
+            const trailDurationMs = 220;
+            const maxTrailPoints = 14;
+            if (!showWeapon) {
+              trailPoints.length = 0;
+              swingTrail.clear();
+              swingTrail.setVisible(false);
+            } else {
+              if (isSwinging) {
+                const weaponTipLength = Math.max(6, character.weaponItem.displayHeight * 0.46);
+                const weaponRotation = character.weaponItem.rotation;
+                const tipX = character.weaponItem.x + Math.sin(weaponRotation) * weaponTipLength;
+                const tipY = character.weaponItem.y - Math.cos(weaponRotation) * weaponTipLength;
+                const lastPoint = trailPoints[trailPoints.length - 1];
+                const distance = lastPoint ? Math.hypot(tipX - lastPoint.x, tipY - lastPoint.y) : 999;
+                if (!lastPoint || distance > 1.4 || castNow - lastPoint.time > 40) {
+                  trailPoints.push({ x: tipX, y: tipY, time: castNow });
+                  if (trailPoints.length > maxTrailPoints) {
+                    trailPoints.shift();
+                  }
+                }
+              }
+
+              while (trailPoints.length > 0 && castNow - trailPoints[0].time > trailDurationMs) {
+                trailPoints.shift();
+              }
+
+              if (trailPoints.length < 2) {
+                swingTrail.clear();
+                swingTrail.setVisible(false);
+              } else {
+                swingTrail.clear();
+                swingTrail.setVisible(true);
+                const trailBoost = Phaser.Math.Clamp((swingProgress - 0.1) / 0.9, 0.35, 1);
+                for (let index = 1; index < trailPoints.length; index += 1) {
+                  const from = trailPoints[index - 1];
+                  const to = trailPoints[index];
+                  const age = Phaser.Math.Clamp((castNow - from.time) / trailDurationMs, 0, 1);
+                  const fade = (1 - age) * trailBoost;
+                  const outerWidth = Phaser.Math.Linear(9, 2, age);
+                  const innerWidth = Math.max(1.6, outerWidth * 0.55);
+                  const outerAlpha = 0.2 * fade;
+                  const innerAlpha = 0.55 * fade;
+                  swingTrail.lineStyle(outerWidth, 0xf0c27b, outerAlpha);
+                  swingTrail.beginPath();
+                  swingTrail.moveTo(from.x, from.y);
+                  swingTrail.lineTo(to.x, to.y);
+                  swingTrail.strokePath();
+                  swingTrail.lineStyle(innerWidth, 0xffe6b5, innerAlpha);
+                  swingTrail.beginPath();
+                  swingTrail.moveTo(from.x, from.y);
+                  swingTrail.lineTo(to.x, to.y);
+                  swingTrail.strokePath();
+                }
+              }
+            }
             character.castItem.x = 10 + character.currentWeaponOffsetX;
             character.castItem.y = 2 + weaponBob + character.currentWeaponOffsetY;
             character.castItem.setVisible(showHeldCastItem);
@@ -3938,18 +4379,26 @@ export function GameCanvas({
             if (!roomRef.current) {
               return;
             }
+            const now = Date.now();
+            const cooldownEndsAt = skillCooldownsRef.current.fireball ?? 0;
+            if (cooldownEndsAt > now) {
+              return;
+            }
             const localCharacter = localSessionId ? characters.get(localSessionId) : undefined;
-            if (localCharacter && localCharacter.currentCastEndsAt > Date.now()) {
+            if (localCharacter && localCharacter.currentCastEndsAt > now) {
               return;
             }
             const resolvedTarget = localCharacter
               ? clampTargetToCastRange(latestProfileRef.current.playerEquipment, localCharacter.container.x, localCharacter.container.y, targetX, targetY)
               : { x: targetX, y: targetY, clamped: false };
-            const castSkillMessage: CastSkillMessage = {
-              skillId: 'fireball',
-              targetX: resolvedTarget.x,
-              targetY: resolvedTarget.y,
-            };
+            const castSkillMessage = createTimedCastSkillMessage(
+              {
+                skillId: 'fireball',
+                targetX: resolvedTarget.x,
+                targetY: resolvedTarget.y,
+              },
+              estimatedOneWayLatencyMsRef.current,
+            );
             roomRef.current.send('castSkill', castSkillMessage);
 
             if (localCharacter) {
@@ -3968,24 +4417,121 @@ export function GameCanvas({
             fireballCastRef.current?.({ x: resolvedTarget.x, y: resolvedTarget.y });
           };
 
+          const castFireNova = () => {
+            if (!roomRef.current) {
+              return;
+            }
+            const now = Date.now();
+            const cooldownEndsAt = skillCooldownsRef.current.fireNova ?? 0;
+            if (cooldownEndsAt > now) {
+              return;
+            }
+            const localCharacter = localSessionId ? characters.get(localSessionId) : undefined;
+            if (localCharacter && localCharacter.currentCastEndsAt > now) {
+              return;
+            }
+
+            const castSkillMessage = createTimedCastSkillMessage(
+              { skillId: 'fireNova' },
+              estimatedOneWayLatencyMsRef.current,
+            );
+            roomRef.current.send('castSkill', castSkillMessage);
+          };
+
           const castFireField = (targetX: number, targetY: number) => {
             if (!roomRef.current) {
               return;
             }
+            const now = Date.now();
+            const cooldownEndsAt = skillCooldownsRef.current.fireField ?? 0;
+            if (cooldownEndsAt > now) {
+              return;
+            }
             const localCharacter = localSessionId ? characters.get(localSessionId) : undefined;
+            if (localCharacter && localCharacter.currentCastEndsAt > now) {
+              return;
+            }
             const resolvedTarget = localCharacter
               ? clampTargetToCastRange(latestProfileRef.current.playerEquipment, localCharacter.container.x, localCharacter.container.y, targetX, targetY)
               : { x: targetX, y: targetY, clamped: false };
 
-            const castSkillMessage: CastSkillMessage = {
-              skillId: 'fireField',
-              targetX: resolvedTarget.x,
-              targetY: resolvedTarget.y,
-            };
+            const castSkillMessage = createTimedCastSkillMessage(
+              {
+                skillId: 'fireField',
+                targetX: resolvedTarget.x,
+                targetY: resolvedTarget.y,
+              },
+              estimatedOneWayLatencyMsRef.current,
+            );
             roomRef.current.send('castSkill', castSkillMessage);
           };
 
+          const castMouseBoundSkill = (skillId: SkillId, targetX: number, targetY: number) => {
+            if (skillId === 'woodStaffStrike') {
+              castWoodStaffStrike(targetX, targetY);
+              return;
+            }
+
+            if (skillId === 'fireball') {
+              castFireball(targetX, targetY);
+              return;
+            }
+
+            if (skillId === 'fireField') {
+              castFireField(targetX, targetY);
+              return;
+            }
+
+            castFireNova();
+          };
+
+          const castWoodStaffStrike = (targetX: number, targetY: number) => {
+            if (!roomRef.current || !hasWoodStaffEquipped(latestProfileRef.current.playerEquipment)) {
+              return;
+            }
+
+            const localCharacter = localSessionId ? characters.get(localSessionId) : undefined;
+            const now = Date.now();
+            const cooldownEndsAt = skillCooldownsRef.current.woodStaffStrike ?? 0;
+            if (cooldownEndsAt > now) {
+              return;
+            }
+            if (localCharacter && localCharacter.currentCastEndsAt > now) {
+              return;
+            }
+
+            const castSkillMessage = createTimedCastSkillMessage(
+              {
+                skillId: 'woodStaffStrike',
+                targetX,
+                targetY,
+              },
+              estimatedOneWayLatencyMsRef.current,
+            );
+            roomRef.current.send('castSkill', castSkillMessage);
+
+            if (localCharacter) {
+              const castStartedAt = Date.now();
+              applyCastingToCharacterVisual(
+                localCharacter,
+                'woodStaffStrike',
+                castStartedAt,
+                castStartedAt + WOOD_STAFF_STRIKE_LOCK_MS,
+              );
+            }
+          };
+
+          const getMouseBoundSkill = (slotKey: MouseActionSlotKey) => {
+            const storedMouseSkillBindings = readStoredMouseSkillBindings();
+            return slotKey === 'LMB'
+              ? mouseSkillBindingsRef.current.LMB ?? storedMouseSkillBindings.LMB
+              : mouseSkillBindingsRef.current.RMB ?? storedMouseSkillBindings.RMB;
+          };
+
           this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+            const { isLeftButton, isRightButton } = resolvePointerButtons(pointer);
+            const mouseSlotKey = resolveMouseActionSlotKey(isLeftButton, isRightButton);
+
             if (!isRaidScene && worldEditorEnabledRef.current) {
               const activeElement = document.activeElement;
               if (activeElement instanceof HTMLElement) {
@@ -3998,16 +4544,16 @@ export function GameCanvas({
               const canEraseWorldEdit =
                 currentEditorMode === 'sprite' || currentEditorMode === 'trader' || currentEditorMode === 'mob';
 
-              if (pointer.button === 2 || pointer.button === 0) {
+              if (mouseSlotKey) {
                 pointer.event?.preventDefault();
                 worldEditPointerActive = true;
-                worldEditEraseMode = pointer.button === 2 && canEraseWorldEdit;
+                worldEditEraseMode = mouseSlotKey === 'RMB' && canEraseWorldEdit;
                 lastWorldEditedTileKey = `${tileX}:${tileY}:${worldEditEraseMode ? 'erase' : 'paint'}`;
-                worldEditPaintRef.current?.(tileX, tileY, pointer.button === 2 && canEraseWorldEdit);
+                worldEditPaintRef.current?.(tileX, tileY, mouseSlotKey === 'RMB' && canEraseWorldEdit);
 
                 if (currentEditorMode === 'sprite') {
                   const tileKey = `${tileX}:${tileY}`;
-                  if (pointer.button === 2) {
+                  if (mouseSlotKey === 'RMB') {
                     const existingSprite = worldStampSpritesByTile.get(tileKey);
                     if (existingSprite) {
                       const existingIndex = worldStampSprites.indexOf(existingSprite);
@@ -4047,18 +4593,35 @@ export function GameCanvas({
               return;
             }
 
+            if (mouseSlotKey) {
+              const boundSkill = getMouseBoundSkill(mouseSlotKey);
+              if (boundSkill) {
+                pointer.event?.preventDefault();
+                const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
+                castMouseBoundSkill(boundSkill, worldPoint.x, worldPoint.y);
+                return;
+              }
+            }
+
             if (!activeSkillTargetingRef.current) {
+              if (mouseSlotKey === 'LMB') {
+                pointer.event?.preventDefault();
+                const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
+                castWoodStaffStrike(worldPoint.x, worldPoint.y);
+              }
               return;
             }
 
             const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
 
-            if (pointer.button === 2) {
+            if (mouseSlotKey === 'RMB') {
+              pointer.event?.preventDefault();
               skillTargetCancelRef.current?.();
               return;
             }
 
-            if (pointer.button === 0) {
+            if (mouseSlotKey === 'LMB') {
+              pointer.event?.preventDefault();
               if (activeSkillTargetingRef.current === 'fireball') {
                 castFireball(worldPoint.x, worldPoint.y);
               } else if (activeSkillTargetingRef.current === 'fireField') {
@@ -4281,11 +4844,14 @@ export function GameCanvas({
                   level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
                   experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
                 });
-                skillCooldownsChangeRef.current?.({
+                const nextCooldowns = {
+                  woodStaffStrike: networkPlayerState.woodStaffStrikeCooldownEndsAt ?? 0,
                   fireball: networkPlayerState.fireballCooldownEndsAt ?? 0,
                   fireNova: networkPlayerState.fireNovaCooldownEndsAt ?? 0,
                   fireField: networkPlayerState.fireFieldCooldownEndsAt ?? 0,
-                });
+                };
+                skillCooldownsRef.current = nextCooldowns;
+                skillCooldownsChangeRef.current?.(nextCooldowns);
                 if (isRaidScene) {
                   lastProcessedRaidInput = networkPlayerState.lastProcessedInput ?? 0;
                   pendingRaidInputs = pendingRaidInputs.filter(
@@ -4308,11 +4874,14 @@ export function GameCanvas({
                   level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
                   experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
                 });
-                skillCooldownsChangeRef.current?.({
+                const nextCooldowns = {
+                  woodStaffStrike: networkPlayerState.woodStaffStrikeCooldownEndsAt ?? 0,
                   fireball: networkPlayerState.fireballCooldownEndsAt ?? 0,
                   fireNova: networkPlayerState.fireNovaCooldownEndsAt ?? 0,
                   fireField: networkPlayerState.fireFieldCooldownEndsAt ?? 0,
-                });
+                };
+                skillCooldownsRef.current = nextCooldowns;
+                skillCooldownsChangeRef.current?.(nextCooldowns);
 
                 if (isRaidScene) {
                   const processedInput = networkPlayerState.lastProcessedInput ?? 0;
@@ -4321,14 +4890,14 @@ export function GameCanvas({
                     pendingRaidInputs = pendingRaidInputs.filter(
                       (input) => input.sequence > processedInput,
                     );
-                    reconcileRaidLocalCharacter(
-                      character,
-                      networkPlayerState.x,
-                      networkPlayerState.y,
-                      lastRaidTilesWidth || raidWidth,
-                      lastRaidTilesHeight || raidHeight,
-                    );
                   }
+                  reconcileRaidLocalCharacter(
+                    character,
+                    networkPlayerState.x,
+                    networkPlayerState.y,
+                    lastRaidTilesWidth || raidWidth,
+                    lastRaidTilesHeight || raidHeight,
+                  );
                 } else {
                   const processedInput = networkPlayerState.lastProcessedInput ?? 0;
                   if (processedInput > lastProcessedWorldInput) {
@@ -4336,12 +4905,12 @@ export function GameCanvas({
                     pendingWorldInputs = pendingWorldInputs.filter(
                       (input) => input.sequence > processedInput,
                     );
-                    reconcileWorldLocalCharacter(
-                      character,
-                      networkPlayerState.x,
-                      networkPlayerState.y,
-                    );
                   }
+                  reconcileWorldLocalCharacter(
+                    character,
+                    networkPlayerState.x,
+                    networkPlayerState.y,
+                  );
                 }
               }
             });
@@ -4421,22 +4990,24 @@ export function GameCanvas({
             const mapHeightPixels = height * tileSize;
             let resolvedX = authoritativeX;
             let resolvedY = authoritativeY;
+            const mobBlockers = getMovementMobBlockers();
 
             pendingRaidInputs.forEach((input) => {
               const replayed = applyRaidPredictedMovement(
-              resolvedX,
-              resolvedY,
-              input.x,
-              input.y,
-              input.durationMs / 1000,
-              tileSize,
-              mapWidthPixels,
+                resolvedX,
+                resolvedY,
+                input.x,
+                input.y,
+                input.durationMs / 1000,
+                tileSize,
+                mapWidthPixels,
                 mapHeightPixels,
                 raidBlockedTiles,
                 width,
                 height,
                 raidChestBlockedTiles,
                 CLIENT_RAID_PLAYER_SPEED,
+                mobBlockers,
               );
               resolvedX = replayed.x;
               resolvedY = replayed.y;
@@ -4449,24 +5020,29 @@ export function GameCanvas({
               resolvedY,
             );
 
-            if (reconciliationDistance <= 0.35) {
-              return;
-            }
-
-            if (reconciliationDistance > 18) {
+            if (reconciliationDistance > 18 * tileSize) {
               character.simPrevX = resolvedX;
               character.simPrevY = resolvedY;
               character.simX = resolvedX;
               character.simY = resolvedY;
+              character.simErrorX = 0;
+              character.simErrorY = 0;
               return;
             }
 
-            const correctedX = Phaser.Math.Linear(character.simX, resolvedX, 0.35);
-            const correctedY = Phaser.Math.Linear(character.simY, resolvedY, 0.35);
-            character.simPrevX = character.simX;
-            character.simPrevY = character.simY;
-            character.simX = correctedX;
-            character.simY = correctedY;
+            let errorX = character.container.x - resolvedX;
+            let errorY = character.container.y - resolvedY;
+            const maxError = tileSize * 2;
+            if (errorX > maxError) errorX = maxError;
+            else if (errorX < -maxError) errorX = -maxError;
+            if (errorY > maxError) errorY = maxError;
+            else if (errorY < -maxError) errorY = -maxError;
+            character.simErrorX = errorX;
+            character.simErrorY = errorY;
+            character.simPrevX = resolvedX;
+            character.simPrevY = resolvedY;
+            character.simX = resolvedX;
+            character.simY = resolvedY;
           };
 
           const reconcileWorldLocalCharacter = (
@@ -4476,6 +5052,7 @@ export function GameCanvas({
           ) => {
             let resolvedX = authoritativeX;
             let resolvedY = authoritativeY;
+            const mobBlockers = getMovementMobBlockers();
 
             pendingWorldInputs.forEach((input) => {
               const replayed = applyWorldPredictedMovement(
@@ -4490,6 +5067,7 @@ export function GameCanvas({
                 meadowMap,
                 meadowDecorations,
                 CLIENT_PLAYER_SPEED,
+                mobBlockers,
               );
               resolvedX = replayed.x;
               resolvedY = replayed.y;
@@ -4502,24 +5080,29 @@ export function GameCanvas({
               resolvedY,
             );
 
-            if (reconciliationDistance <= 0.35) {
-              return;
-            }
-
-            if (reconciliationDistance > 18) {
+            if (reconciliationDistance > 18 * tileSize) {
               character.simPrevX = resolvedX;
               character.simPrevY = resolvedY;
               character.simX = resolvedX;
               character.simY = resolvedY;
+              character.simErrorX = 0;
+              character.simErrorY = 0;
               return;
             }
 
-            const correctedX = Phaser.Math.Linear(character.simX, resolvedX, 0.35);
-            const correctedY = Phaser.Math.Linear(character.simY, resolvedY, 0.35);
-            character.simPrevX = character.simX;
-            character.simPrevY = character.simY;
-            character.simX = correctedX;
-            character.simY = correctedY;
+            let errorX = character.container.x - resolvedX;
+            let errorY = character.container.y - resolvedY;
+            const maxError = tileSize * 2;
+            if (errorX > maxError) errorX = maxError;
+            else if (errorX < -maxError) errorX = -maxError;
+            if (errorY > maxError) errorY = maxError;
+            else if (errorY < -maxError) errorY = -maxError;
+            character.simErrorX = errorX;
+            character.simErrorY = errorY;
+            character.simPrevX = resolvedX;
+            character.simPrevY = resolvedY;
+            character.simX = resolvedX;
+            character.simY = resolvedY;
           };
 
           const setCharacterVisibility = (character: CharacterVisual, visible: boolean, isLocalPlayer = false) => {
@@ -5265,6 +5848,7 @@ export function GameCanvas({
               room = joinedRoom as RealtimeRoom;
               roomRef.current = room;
               localSessionId = room.sessionId;
+              startLatencyPing();
               if (sceneActive && statusText.active) {
                 statusText.setText(isRaidScene ? 'Raid connected' : 'World connected');
               }
@@ -5306,6 +5890,7 @@ export function GameCanvas({
               });
 
               room.onLeave(() => {
+                stopLatencyPing();
                 if (sceneActive && statusText.active) {
                   statusText.setText(isRaidScene ? 'Disconnected from raid' : 'Disconnected from world');
                 }
@@ -5484,6 +6069,10 @@ export function GameCanvas({
             if (localCharacter) {
               const pointer = this.input.activePointer;
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
+              lastPointerWorldRef.current = {
+                x: pointerWorld.x,
+                y: pointerWorld.y,
+              };
               localLookTargetY = pointerWorld.y;
               const pointerDeltaX = pointerWorld.x - localCharacter.container.x;
               const pointerDeltaY = pointerWorld.y - localCharacter.container.y;
@@ -5508,24 +6097,16 @@ export function GameCanvas({
 
             const inputSignature = `${normalizedX.toFixed(2)}:${normalizedY.toFixed(2)}`;
             movementSimulationAccumulatorMs = Math.min(
-              CLIENT_SIMULATION_STEP_MS * 6,
+              clientSimulationStepMs * 6,
               movementSimulationAccumulatorMs + delta,
             );
 
-            while (localCharacter && movementSimulationAccumulatorMs >= CLIENT_SIMULATION_STEP_MS) {
-              movementSimulationAccumulatorMs -= CLIENT_SIMULATION_STEP_MS;
+            while (localCharacter && movementSimulationAccumulatorMs >= clientSimulationStepMs) {
+              movementSimulationAccumulatorMs -= clientSimulationStepMs;
               const inputChanged = inputSignature !== previousInput;
               const hasMotion = normalizedX !== 0 || normalizedY !== 0;
               const shouldSendInput = hasMotion || inputChanged;
-              const mobBlockers = Array.from(mobs.values()).flatMap((mob) =>
-                mob.isDead
-                  ? []
-                  : [{
-                    x: mob.sprite.x,
-                    y: mob.sprite.y,
-                    radius: 22,
-                  }],
-              );
+              const mobBlockers = getMovementMobBlockers();
 
               if (room && shouldSendInput) {
                 previousInput = inputSignature;
@@ -5544,11 +6125,11 @@ export function GameCanvas({
                     sequence,
                     x: normalizedX,
                     y: normalizedY,
-                    durationMs: CLIENT_SIMULATION_STEP_MS,
+                    durationMs: clientSimulationStepMs,
                   });
 
-                  if (pendingRaidInputs.length > 90) {
-                    pendingRaidInputs = pendingRaidInputs.slice(-90);
+                  if (pendingRaidInputs.length > maxPendingInputHistory) {
+                    pendingRaidInputs = pendingRaidInputs.slice(-maxPendingInputHistory);
                   }
                 } else {
                   const sequence = nextWorldInputSequence;
@@ -5564,11 +6145,11 @@ export function GameCanvas({
                     sequence,
                     x: normalizedX,
                     y: normalizedY,
-                    durationMs: CLIENT_SIMULATION_STEP_MS,
+                    durationMs: clientSimulationStepMs,
                   });
 
-                  if (pendingWorldInputs.length > 90) {
-                    pendingWorldInputs = pendingWorldInputs.slice(-90);
+                  if (pendingWorldInputs.length > maxPendingInputHistory) {
+                    pendingWorldInputs = pendingWorldInputs.slice(-maxPendingInputHistory);
                   }
                 }
               }
@@ -5583,7 +6164,7 @@ export function GameCanvas({
                   localCharacter.simY,
                   normalizedX,
                   normalizedY,
-                  CLIENT_SIMULATION_STEP_MS / 1000,
+                  clientSimulationStepMs / 1000,
                   tileSize,
                   mapWidth,
                   mapHeight,
@@ -5604,7 +6185,7 @@ export function GameCanvas({
                   localCharacter.simY,
                   normalizedX,
                   normalizedY,
-                  CLIENT_SIMULATION_STEP_MS,
+                  clientSimulationStepMs,
                   tileSize,
                   mapWidth,
                   mapHeight,
@@ -5622,7 +6203,7 @@ export function GameCanvas({
 
             const localInterpolationAlpha = localCharacter
               ? Phaser.Math.Clamp(
-                movementSimulationAccumulatorMs / CLIENT_SIMULATION_STEP_MS,
+                movementSimulationAccumulatorMs / clientSimulationStepMs,
                 0,
                 1,
               )
@@ -5638,46 +6219,11 @@ export function GameCanvas({
                   ? pendingRaidInputs.some((input) => input.x !== 0 || input.y !== 0)
                   : pendingWorldInputs.some((input) => input.x !== 0 || input.y !== 0);
 
-                const correctionDistance = Phaser.Math.Distance.Between(
-                  character.simX,
-                  character.simY,
-                  character.targetX,
-                  character.targetY,
-                );
-
-                if (isRaidScene) {
-                  if (pendingRaidInputs.length === 0) {
-                    if (correctionDistance > 48) {
-                      character.simPrevX = character.targetX;
-                      character.simPrevY = character.targetY;
-                      character.simX = character.targetX;
-                      character.simY = character.targetY;
-                    } else if (correctionDistance > 0.8) {
-                      const correctionLerp = Math.min(1, deltaSeconds * 14);
-                      const correctedX = Phaser.Math.Linear(character.simX, character.targetX, correctionLerp);
-                      const correctedY = Phaser.Math.Linear(character.simY, character.targetY, correctionLerp);
-                      character.simPrevX = character.simX;
-                      character.simPrevY = character.simY;
-                      character.simX = correctedX;
-                      character.simY = correctedY;
-                    }
-                  }
-                } else if (pendingWorldInputs.length === 0) {
-                  if (correctionDistance > 48) {
-                    character.simPrevX = character.targetX;
-                    character.simPrevY = character.targetY;
-                    character.simX = character.targetX;
-                    character.simY = character.targetY;
-                  } else if (!hasInput && correctionDistance > 0.8) {
-                    const correctionLerp = Math.min(1, deltaSeconds * 10);
-                    const correctedX = Phaser.Math.Linear(character.simX, character.targetX, correctionLerp);
-                    const correctedY = Phaser.Math.Linear(character.simY, character.targetY, correctionLerp);
-                    character.simPrevX = character.simX;
-                    character.simPrevY = character.simY;
-                    character.simX = correctedX;
-                    character.simY = correctedY;
-                  }
-                }
+                const decayFactor = Math.exp(-12 * deltaSeconds);
+                character.simErrorX *= decayFactor;
+                character.simErrorY *= decayFactor;
+                if (Math.abs(character.simErrorX) < 0.05) character.simErrorX = 0;
+                if (Math.abs(character.simErrorY) < 0.05) character.simErrorY = 0;
 
                 if (!hasInput && pendingInputs === 0) {
                   character.simPrevX = character.simX;
@@ -5695,8 +6241,8 @@ export function GameCanvas({
                 }
                 localMovementSignal = this.time.now <= character.idleGraceUntil;
                 character.container.setPosition(
-                  Phaser.Math.Linear(character.simPrevX, character.simX, localInterpolationAlpha),
-                  Phaser.Math.Linear(character.simPrevY, character.simY, localInterpolationAlpha),
+                  Phaser.Math.Linear(character.simPrevX, character.simX, localInterpolationAlpha) + character.simErrorX,
+                  Phaser.Math.Linear(character.simPrevY, character.simY, localInterpolationAlpha) + character.simErrorY,
                 );
               } else {
                 const distanceToTarget = Phaser.Math.Distance.Between(
@@ -5712,8 +6258,7 @@ export function GameCanvas({
                     character.targetY,
                   );
                 } else {
-                  const interpolationDelayMs = 160;
-                  const renderTime = this.time.now - interpolationDelayMs;
+                  const renderTime = this.time.now - remoteInterpolationDelayMs;
                   const span = Math.max(1, character.interpNextAt - character.interpPrevAt);
                   const t = Phaser.Math.Clamp(
                     (renderTime - character.interpPrevAt) / span,
@@ -5841,6 +6386,7 @@ export function GameCanvas({
                 deltaSeconds,
                 this.time.now,
                 isLocalPlayer ? localLookTargetY : undefined,
+                isLocalPlayer ? lastPointerWorldRef.current : undefined,
               );
               character.burnAura.setVisible(
                 character.currentBurnTicksRemaining > 0 &&
@@ -6875,6 +7421,7 @@ export function GameCanvas({
 
           this.events.once('shutdown', () => {
             sceneActive = false;
+            stopLatencyPing();
             chatSenderReadyRef.current?.(null);
             mobs.forEach((_mob, mobId) => destroyMob(mobId));
             projectileSprites.forEach((projectileVisual) => {
@@ -6964,9 +7511,17 @@ export function GameCanvas({
       roomRef.current?.leave();
       roomRef.current = null;
       playerVisualRef.current = null;
+      estimatedOneWayLatencyMsRef.current = 0;
       game?.destroy(true);
     };
   }, [activeRoomName, JSON.stringify(activeRoomOptions), playerName, JSON.stringify(skillEffectOverrides)]);
 
-  return <div ref={containerRef} className="h-full w-full" />;
+  return (
+    <div
+      ref={containerRef}
+      data-game-canvas-root="true"
+      onContextMenu={(event) => event.preventDefault()}
+      className="h-full w-full"
+    />
+  );
 }

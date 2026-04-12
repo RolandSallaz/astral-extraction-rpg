@@ -32,7 +32,7 @@ export const BASE_EQUIPMENT_SLOTS = [
 
 export type BaseEquipmentSlot = typeof BASE_EQUIPMENT_SLOTS[number];
 
-export const EQUIPMENT_ITEM_IDS = ["default_staff", "fire_robe"] as const;
+export const EQUIPMENT_ITEM_IDS = ["wood_staff", "fire_robe"] as const;
 export type EquipmentItemId = typeof EQUIPMENT_ITEM_IDS[number];
 
 export const GEM_ITEM_IDS = [
@@ -94,18 +94,22 @@ export type SharedItemDefinition = {
   fireResistancePercent?: number;
 };
 
+const LEGACY_ITEM_ID_ALIASES: Partial<Record<string, ItemId>> = {
+  default_staff: "wood_staff",
+};
+
 export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
-  default_staff: {
-    id: "default_staff",
+  wood_staff: {
+    id: "wood_staff",
     type: "equipment",
-    name: "Default Staff",
+    name: "Wood Staff",
     value: 90,
-    iconPath: "/items/equipment/default-staff.png",
+    iconPath: "/items/equipment/wood_staff.png",
     slot: "weapon",
     tier: 3,
     socketType: "weapon",
     socketCount: 3,
-    tooltipStats: ["Unlocks Fireball", "3 gem sockets"],
+    tooltipStats: ["Melee weapon", "Astral catalyst", "3 gem sockets"],
     fireResistancePercent: 0,
   },
   fire_robe: {
@@ -129,7 +133,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Fireball leaves burning trail", "Trail lasts 5s", "+0.2s cast time"],
     fireResistancePercent: 0,
   },
@@ -141,7 +145,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Fireball bursts into 9 shards", "Shards deal no direct damage"],
     fireResistancePercent: 0,
   },
@@ -153,7 +157,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Projectiles that miss return to cast point"],
     fireResistancePercent: 0,
   },
@@ -165,7 +169,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "+2 wall bounces per gem"],
     fireResistancePercent: 0,
   },
@@ -177,7 +181,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "+200% projectile range", "Damage falls from 100% to 0% over distance"],
     fireResistancePercent: 0,
   },
@@ -189,7 +193,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Fireball becomes 2 smaller shots", "Damage is split between them"],
     fireResistancePercent: 0,
   },
@@ -201,7 +205,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "+25% cast range", "+25% fireball cooldown"],
     fireResistancePercent: 0,
   },
@@ -213,7 +217,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "-35% cast time", "-12% direct damage"],
     fireResistancePercent: 0,
   },
@@ -225,7 +229,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Projectile pierces 2 targets", "-18% direct damage"],
     fireResistancePercent: 0,
   },
@@ -237,7 +241,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Projectile chains 2 times", "-15% direct damage"],
     fireResistancePercent: 0,
   },
@@ -249,7 +253,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Projectile seeks nearby targets", "-10% projectile speed"],
     fireResistancePercent: 0,
   },
@@ -261,7 +265,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Impact deals splash damage", "-20% direct damage"],
     fireResistancePercent: 0,
   },
@@ -273,7 +277,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "+50% burn and trail duration"],
     fireResistancePercent: 0,
   },
@@ -285,7 +289,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Hit pushes targets back"],
     fireResistancePercent: 0,
   },
@@ -297,7 +301,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Heal for 10% of direct damage dealt"],
     fireResistancePercent: 0,
   },
@@ -309,7 +313,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "+50% damage to targets below 30% HP"],
     fireResistancePercent: 0,
   },
@@ -321,7 +325,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "20% chance to crit for 200% damage"],
     fireResistancePercent: 0,
   },
@@ -333,7 +337,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Fires 3 projectiles in a fan", "-40% damage per projectile"],
     fireResistancePercent: 0,
   },
@@ -345,7 +349,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Fires 3 rapid shots", "-60% damage per shot", "+50% cooldown"],
     fireResistancePercent: 0,
   },
@@ -357,7 +361,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "On hit: ring of 6 mini-projectiles", "Mini-projectiles deal 30% damage", "-25% direct damage"],
     fireResistancePercent: 0,
   },
@@ -369,7 +373,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Projectile spirals in flight", "Covers wider area", "-15% projectile speed"],
     fireResistancePercent: 0,
   },
@@ -381,7 +385,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Splits into 2 at half range", "Forks deal 50% damage"],
     fireResistancePercent: 0,
   },
@@ -393,7 +397,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Projectile orbits caster before launch", "0.5s delay before flight"],
     fireResistancePercent: 0,
   },
@@ -405,7 +409,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "Second explosion after 0.3s", "Aftershock deals 50% damage", "-15% direct damage"],
     fireResistancePercent: 0,
   },
@@ -417,7 +421,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     iconPath: "/items/gems/gem_basic.png",
     slot: "weapon-gem-1",
     gemType: "weapon",
-    socketableInto: ["default_staff"],
+    socketableInto: ["wood_staff"],
     tooltipStats: ["Socket into staff", "On hit: clone flies to nearest enemy", "Clone deals 40% damage", "-20% direct damage"],
     fireResistancePercent: 0,
   },
@@ -463,6 +467,15 @@ export const TELEPORT_SCROLL_ID = "teleport_scroll" as const;
 
 export function isItemId(value: string): value is ItemId {
   return value in ITEM_DEFINITIONS;
+}
+
+export function canonicalizeItemId(value: string | null | undefined): ItemId | null {
+  if (!value) {
+    return null;
+  }
+
+  const canonical = LEGACY_ITEM_ID_ALIASES[value] ?? value;
+  return isItemId(canonical) ? canonical : null;
 }
 
 export function isGemItemId(value: string): value is GemItemId {

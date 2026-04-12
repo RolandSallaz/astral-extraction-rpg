@@ -35,11 +35,15 @@ export type {
 export type ItemDefinition = SharedItemDefinition & {
   textureKey: string;
   texturePath: string;
+  iconTint?: string;
   iconRotationDeg?: number;
   iconScale?: number;
   compactIconScale?: number;
+  equippedAnchorHand?: 'left' | 'right';
   equippedOffsetX?: number;
   equippedOffsetY?: number;
+  equippedOriginX?: number;
+  equippedOriginY?: number;
   worldRotationDeg?: number;
   worldScale?: number;
   worldEffects?: Array<{
@@ -62,39 +66,27 @@ type RawItemDefinition = Omit<ItemDefinition, 'iconPath'> & {
 };
 
 const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
-  default_staff: {
-    id: 'default_staff',
+  wood_staff: {
+    id: 'wood_staff',
     type: 'equipment',
-    name: 'Default Staff',
+    name: 'Wood Staff',
     value: 90,
     slot: 'weapon',
     tier: 3,
     socketType: 'weapon',
-    tooltipStats: ['Unlocks Fireball', '3 gem sockets'],
-    textureKey: 'item-default-staff',
-    texturePath: '/items/equipment/default-staff.png',
+    tooltipStats: ['Melee weapon', 'Astral catalyst', '3 gem sockets'],
+    textureKey: 'item-wood-staff',
+    texturePath: '/items/equipment/wood_staff.png',
     socketCount: 3,
     iconScale: 0.9,
     compactIconScale: 0.9,
-    equippedOffsetX: 3,
-    equippedOffsetY: 0,
-    worldRotationDeg: -45,
-    worldScale: 3,
-    worldEffects: [
-      {
-        textureKey: 'effect-fire-sheet',
-        texturePath: '/items/equipment/effects/fire-effect-sheet.png',
-        frameWidth: 32,
-        frameHeight: 32,
-        frameCount: 4,
-        frameDurationMs: 90,
-        offsetX: 11,
-        offsetY: -16,
-        scale: 0.3,
-        alpha: 0.95,
-        rotationDeg: 0,
-      },
-    ],
+    equippedAnchorHand: 'right',
+    equippedOffsetX: 0,
+    equippedOffsetY: 1,
+    equippedOriginX: 0.5,
+    equippedOriginY: 0.78,
+    worldRotationDeg: 0,
+    worldScale: 1.35,
   },
   fire_robe: {
     id: 'fire_robe',
@@ -118,7 +110,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 55,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Fireball leaves burning trail', 'Trail lasts 5s', '+0.2s cast time'],
     textureKey: 'item-fire-trail-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -132,7 +124,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 70,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Fireball bursts into 9 shards', 'Shards deal no direct damage'],
     textureKey: 'item-fire-shatter-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -146,7 +138,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 50,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Projectiles that miss return to cast point'],
     textureKey: 'item-fire-return-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -160,7 +152,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 45,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '+2 wall bounces per gem'],
     textureKey: 'item-fire-bounce-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -174,7 +166,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 65,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '+200% projectile range', 'Damage falls from 100% to 0% over distance'],
     textureKey: 'item-fire-longshot-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -188,7 +180,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 60,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Fireball becomes 2 smaller shots', 'Damage is split between them'],
     textureKey: 'item-fire-split-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -202,7 +194,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 50,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '+25% cast range', '+25% fireball cooldown'],
     textureKey: 'item-fire-range-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -216,7 +208,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 70,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '-35% cast time', '-12% direct damage'],
     textureKey: 'item-cast-speed-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -230,7 +222,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 65,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Projectile pierces 2 targets', '-18% direct damage'],
     textureKey: 'item-pierce-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -244,7 +236,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 75,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Projectile chains 2 times', '-15% direct damage'],
     textureKey: 'item-chain-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -258,7 +250,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 70,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Projectile seeks nearby targets', '-10% projectile speed'],
     textureKey: 'item-homing-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -272,7 +264,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 55,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Impact deals splash damage', '-20% direct damage'],
     textureKey: 'item-area-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -286,7 +278,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 50,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '+50% burn and trail duration'],
     textureKey: 'item-duration-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -300,7 +292,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 45,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Hit pushes targets back'],
     textureKey: 'item-knockback-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -314,7 +306,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 90,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Heal for 10% of direct damage dealt'],
     textureKey: 'item-lifesteal-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -328,7 +320,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 80,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '+50% damage to targets below 30% HP'],
     textureKey: 'item-execution-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -342,7 +334,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 85,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', '20% chance to crit for 200% damage'],
     textureKey: 'item-critical-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -356,7 +348,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 65,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Fires 3 projectiles in a fan', '-40% damage per projectile'],
     textureKey: 'item-fire-spread-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -370,7 +362,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 60,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Fires 3 rapid shots', '-60% damage per shot', '+50% cooldown'],
     textureKey: 'item-fire-burst-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -384,7 +376,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 75,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'On hit: ring of 6 mini-projectiles', 'Mini-projectiles deal 30% damage', '-25% direct damage'],
     textureKey: 'item-fire-nova-impact-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -398,7 +390,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 55,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Projectile spirals in flight', 'Covers wider area', '-15% projectile speed'],
     textureKey: 'item-fire-spiral-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -412,7 +404,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 70,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Splits into 2 at half range', 'Forks deal 50% damage'],
     textureKey: 'item-fire-fork-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -426,7 +418,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 60,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Projectile orbits caster before launch', '0.5s delay before flight'],
     textureKey: 'item-fire-orbit-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -440,7 +432,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 70,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'Second explosion after 0.3s', 'Aftershock deals 50% damage', '-15% direct damage'],
     textureKey: 'item-fire-aftershock-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -454,7 +446,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 80,
     slot: 'weapon-gem-1',
     gemType: 'weapon',
-    socketableInto: ['default_staff'],
+    socketableInto: ['wood_staff'],
     tooltipStats: ['Socket into staff', 'On hit: clone flies to nearest enemy', 'Clone deals 40% damage', '-20% direct damage'],
     textureKey: 'item-fire-clone-gem',
     texturePath: '/items/gems/gem_basic.png',
@@ -500,19 +492,131 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
   },
 };
 
+type ItemVisualOverride = Pick<ItemDefinition, 'texturePath' | 'iconTint'>;
+
+const ITEM_VISUAL_OVERRIDES: Partial<Record<ItemId, ItemVisualOverride>> = {
+  fire_trail_gem: {
+    texturePath: '/sprites/gems/round-faceted-white.png',
+    iconTint: '#ff8a3d',
+  },
+  fire_shatter_gem: {
+    texturePath: '/sprites/gems/square-faceted-white.png',
+    iconTint: '#ffbf69',
+  },
+  fire_return_gem: {
+    texturePath: '/sprites/gems/oval-faceted-white.png',
+    iconTint: '#ff6b6b',
+  },
+  fire_bounce_gem: {
+    texturePath: '/sprites/gems/round-cabochon-white.png',
+    iconTint: '#ff9f1c',
+  },
+  fire_longshot_gem: {
+    texturePath: '/sprites/gems/oval-cabochon-white.png',
+    iconTint: '#ffd166',
+  },
+  fire_split_gem: {
+    texturePath: '/sprites/gems/square-cabochon-white.png',
+    iconTint: '#ff8fab',
+  },
+  fire_range_gem: {
+    texturePath: '/sprites/gems/oval-cabochon-white.png',
+    iconTint: '#ffe66d',
+  },
+  cast_speed_gem: {
+    texturePath: '/sprites/gems/round-faceted-white.png',
+    iconTint: '#60c2ff',
+  },
+  pierce_gem: {
+    texturePath: '/sprites/gems/square-faceted-white.png',
+    iconTint: '#6ee7b7',
+  },
+  chain_gem: {
+    texturePath: '/sprites/gems/oval-faceted-white.png',
+    iconTint: '#7dd3fc',
+  },
+  homing_gem: {
+    texturePath: '/sprites/gems/round-cabochon-white.png',
+    iconTint: '#38bdf8',
+  },
+  area_gem: {
+    texturePath: '/sprites/gems/round-cabochon-white.png',
+    iconTint: '#c084fc',
+  },
+  duration_gem: {
+    texturePath: '/sprites/gems/oval-cabochon-white.png',
+    iconTint: '#93c5fd',
+  },
+  knockback_gem: {
+    texturePath: '/sprites/gems/square-cabochon-white.png',
+    iconTint: '#a3e635',
+  },
+  lifesteal_gem: {
+    texturePath: '/sprites/gems/round-faceted-white.png',
+    iconTint: '#f43f5e',
+  },
+  execution_gem: {
+    texturePath: '/sprites/gems/square-faceted-white.png',
+    iconTint: '#f59e0b',
+  },
+  critical_gem: {
+    texturePath: '/sprites/gems/oval-faceted-white.png',
+    iconTint: '#ec4899',
+  },
+  fire_spread_gem: {
+    texturePath: '/sprites/gems/square-cabochon-white.png',
+    iconTint: '#fb923c',
+  },
+  fire_burst_gem: {
+    texturePath: '/sprites/gems/round-faceted-white.png',
+    iconTint: '#f97316',
+  },
+  fire_nova_impact_gem: {
+    texturePath: '/sprites/gems/round-cabochon-white.png',
+    iconTint: '#ff7f50',
+  },
+  fire_spiral_gem: {
+    texturePath: '/sprites/gems/oval-faceted-white.png',
+    iconTint: '#22d3ee',
+  },
+  fire_fork_gem: {
+    texturePath: '/sprites/gems/square-faceted-white.png',
+    iconTint: '#fca5a5',
+  },
+  fire_orbit_gem: {
+    texturePath: '/sprites/gems/round-cabochon-white.png',
+    iconTint: '#818cf8',
+  },
+  fire_aftershock_gem: {
+    texturePath: '/sprites/gems/oval-cabochon-white.png',
+    iconTint: '#facc15',
+  },
+  fire_clone_gem: {
+    texturePath: '/sprites/gems/square-faceted-white.png',
+    iconTint: '#a78bfa',
+  },
+  sealed_relic: {
+    texturePath: '/sprites/gems/oval-faceted-white.png',
+    iconTint: '#e7c76c',
+  },
+};
+
 export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = Object.fromEntries(
   (Object.keys(RAW_ITEM_DEFINITIONS) as ItemId[]).map((itemId) => {
     const localDefinition = RAW_ITEM_DEFINITIONS[itemId];
     const sharedDefinition = SHARED_ITEM_DEFINITIONS[itemId];
+    const visualOverride = ITEM_VISUAL_OVERRIDES[itemId];
 
     return [
       itemId,
       {
         ...localDefinition,
+        texturePath: visualOverride?.texturePath ?? localDefinition.texturePath,
+        iconTint: visualOverride?.iconTint,
         name: sharedDefinition.name,
         type: sharedDefinition.type,
         value: sharedDefinition.value,
-        iconPath: sharedDefinition.iconPath,
+        iconPath: visualOverride?.texturePath ?? sharedDefinition.iconPath,
         slot: sharedDefinition.slot,
         tier: sharedDefinition.tier,
         socketType: sharedDefinition.socketType,
@@ -538,6 +642,14 @@ export {
 
 export function getItemValue(itemId: ItemId, quantity = 1) {
   return ITEM_DEFINITIONS[itemId].value * Math.max(1, quantity);
+}
+
+export function getItemIconTint(itemId: ItemId | string | null | undefined) {
+  if (!itemId || !(itemId in ITEM_DEFINITIONS)) {
+    return null;
+  }
+
+  return ITEM_DEFINITIONS[itemId as ItemId].iconTint ?? null;
 }
 
 export function getEquipmentGemSlotId(slot: BaseEquipmentSlot, index: number): EquipmentSlot {

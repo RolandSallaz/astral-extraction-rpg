@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
 import { GameCanvas, type MinimapSnapshot, type ObjectiveArrowState, type RealtimeChatMessage, type TraderQuestMarker, type WorldTraderInteraction } from '@/components/GameCanvas';
 import { GameChat } from '@/components/GameChat';
-import { GameHud, type ContainerView } from '@/components/GameHud';
+import { GameHud, type ContainerView, type MouseSkillBindings, type SkillId } from '@/components/GameHud';
+import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
 import {
   ITEM_DEFINITIONS,
@@ -113,7 +114,7 @@ type AuthFormState = {
   password: string;
 };
 
-type SkillCooldownState = Partial<Record<'fireball' | 'fireNova' | 'fireField', number>>;
+type SkillCooldownState = Partial<Record<SkillId, number>>;
 type ConsumableCooldownState = Partial<Record<'healing_potion', number>>;
 type AdminTabId = 'skills' | 'balance' | 'mobs' | 'items' | 'world' | 'assets' | 'system';
 type ActiveRoomTarget = {
@@ -342,6 +343,10 @@ const RAID_DEADLINE_MS = 15 * 60 * 1000;
 const ADMIN_ITEM_DEFINITIONS = Object.values(ITEM_DEFINITIONS);
 const TRADER_WINDOW_POSITION_STORAGE_KEY = 'mmorpg.ui.trader.position.v1';
 const PARTY_POLL_INTERVAL_MS = 2000;
+const EMPTY_MOUSE_SKILL_BINDINGS: MouseSkillBindings = {
+  LMB: null,
+  RMB: null,
+};
 function getTraderQuestDefinitions(locale: Locale): Partial<Record<string, TraderQuestDefinition[]>> {
   return {
     'old mage': [
@@ -384,7 +389,7 @@ function getTraderOffers(trader: WorldTraderInteraction): TraderOffer[] {
 
   if (normalizedName.includes('old mage')) {
     return [
-      { itemId: 'default_staff' },
+      { itemId: 'wood_staff' },
       { itemId: 'healing_potion', quantity: 1 },
       { itemId: 'fire_trail_gem' },
       { itemId: 'fire_return_gem' },
@@ -810,32 +815,7 @@ function QuestRequiredItemCard({
       <div className="mt-3 flex items-center justify-between gap-3">
         <div className="group relative flex items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-[#d9efbd]/20 bg-[#102108]/60 p-1">
-            {item.type === 'gem' || item.type === 'quest' ? (
-              <span
-                className="pixelated h-full w-full"
-                style={{
-                  backgroundColor: '#ffffff',
-                  WebkitMaskImage: `url(${item.texturePath})`,
-                  maskImage: `url(${item.texturePath})`,
-                  WebkitMaskRepeat: 'no-repeat',
-                  maskRepeat: 'no-repeat',
-                  WebkitMaskPosition: 'center',
-                  maskPosition: 'center',
-                  WebkitMaskSize: 'contain',
-                  maskSize: 'contain',
-                  transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                }}
-              />
-            ) : (
-              <img
-                src={item.texturePath}
-                alt={item.name}
-                className="pixelated h-full w-full object-contain"
-                style={{
-                  transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                }}
-              />
-            )}
+            <ItemIcon item={item} className="h-full w-full" />
           </div>
           <div>
             <div className="text-sm font-semibold text-[#f4ffe8]">{item.name}</div>
@@ -1373,12 +1353,14 @@ export default function Home() {
   const [selectedTraderPanel, setSelectedTraderPanel] = useState<'buy' | 'sell'>('buy');
   const [traderStatus, setTraderStatus] = useState('');
   const [activeSkillTargeting, setActiveSkillTargeting] = useState<ActiveSkillTargeting>(null);
+  const [mouseSkillBindings, setMouseSkillBindings] = useState<MouseSkillBindings>(EMPTY_MOUSE_SKILL_BINDINGS);
   const [skillCooldowns, setSkillCooldowns] = useState<SkillCooldownState>({});
   const [consumableCooldowns, setConsumableCooldowns] = useState<ConsumableCooldownState>({});
   const [isDead, setIsDead] = useState(false);
   const [respawnRequestNonce, setRespawnRequestNonce] = useState(0);
   const [pendingRaidWorldRespawn, setPendingRaidWorldRespawn] = useState(false);
   const [fireNovaCastNonce, setFireNovaCastNonce] = useState(0);
+  const [woodStaffStrikeCastNonce, setWoodStaffStrikeCastNonce] = useState(0);
   const [useConsumableRequest, setUseConsumableRequest] = useState<{
     source: 'inventory' | 'container';
     slotIndex: number;
@@ -1470,7 +1452,7 @@ export default function Home() {
   const [adminItemBusyId, setAdminItemBusyId] = useState<string | null>(null);
   const [adminItemStatus, setAdminItemStatus] = useState('');
   const [selectedAdminItemId, setSelectedAdminItemId] = useState<ItemId>(
-    ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'default_staff',
+    ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'wood_staff',
   );
   const skipFirstSaveRef = useRef(true);
   const skillBalanceLoadedRef = useRef(false);
@@ -2104,6 +2086,13 @@ export default function Home() {
 
   const preventPrimaryMouseDefault = (event: MouseEvent<HTMLElement>) => {
     if (event.button === 0) {
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('[data-game-canvas-root="true"]')
+      ) {
+        return;
+      }
+
       const activeElement = document.activeElement;
       if (activeElement instanceof HTMLElement) {
         activeElement.blur();
@@ -2729,7 +2718,7 @@ export default function Home() {
     setTraderStatus(`Sold ${ITEM_DEFINITIONS[parsed.itemId].name} for ${formatGoldValue(payout)}.`);
   };
 
-  const handleSkillTrigger = (skillId: 'fireball' | 'fireNova' | 'fireField') => {
+  const handleSkillTrigger = (skillId: SkillId) => {
     const readyAt = skillCooldowns[skillId] ?? 0;
     if (readyAt > Date.now()) {
       return;
@@ -2737,6 +2726,12 @@ export default function Home() {
 
     if (skillId === 'fireNova') {
       setFireNovaCastNonce((current) => current + 1);
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    if (skillId === 'woodStaffStrike') {
+      setWoodStaffStrikeCastNonce((current) => current + 1);
       setActiveSkillTargeting(null);
       return;
     }
@@ -3427,7 +3422,7 @@ export default function Home() {
     introductionQuest.currentStepId === 'loot_chest' &&
     isCryptSmallRaidActive &&
     activeContainer?.id === CRYPT_SMALL_TUTORIAL_CHEST_ID &&
-    activeContainer.slots.some((itemValue) => parseInventoryItem(itemValue)?.itemId === 'default_staff');
+    activeContainer.slots.some((itemValue) => parseInventoryItem(itemValue)?.itemId === 'wood_staff');
   const isPartyLocked = !hasFinishedIntroductionQuest;
   const isCryptSmallRaidLocked =
     selectedRaidTemplateCode === CRYPT_SMALL_TEMPLATE_CODE && introductionQuest.status !== 'active';
@@ -3578,7 +3573,7 @@ export default function Home() {
 
     const updateChestStaffUiArrow = () => {
       const targetElement = document.querySelector<HTMLElement>(
-        `[data-container-id="${CRYPT_SMALL_TUTORIAL_CHEST_ID}"][data-item-id="default_staff"]`,
+        `[data-container-id="${CRYPT_SMALL_TUTORIAL_CHEST_ID}"][data-item-id="wood_staff"]`,
       );
 
       if (!targetElement) {
@@ -3679,7 +3674,7 @@ export default function Home() {
 
         if (
           quest.currentStepId === 'socket_gem' &&
-          current.equipment.weapon === 'default_staff' &&
+          current.equipment.weapon === 'wood_staff' &&
           hasSocketedWeaponGem(current.equipment)
         ) {
           return {
@@ -4261,6 +4256,7 @@ export default function Home() {
           playerIntellect={character.intellect}
           playerRole={playerRole}
           activeSkillTargeting={activeSkillTargeting}
+          mouseSkillBindings={mouseSkillBindings}
           onChestInteract={handleChestInteract}
           onNearbyChestChange={setNearbyChestId}
           onTraderInteract={handleTraderInteract}
@@ -4374,6 +4370,7 @@ export default function Home() {
           onRaidExit={handleRaidExit}
           respawnRequestNonce={respawnRequestNonce}
           fireNovaCastNonce={fireNovaCastNonce}
+          woodStaffStrikeCastNonce={woodStaffStrikeCastNonce}
           useConsumableRequest={useConsumableRequest}
           skillEffectOverrides={skillEffectOverrides}
           skillBalanceConfig={skillBalanceConfig}
@@ -4441,6 +4438,7 @@ export default function Home() {
         skillCooldowns={skillCooldowns}
         consumableCooldowns={consumableCooldowns}
         onSkillTrigger={handleSkillTrigger}
+        onMouseSkillBindingsChange={setMouseSkillBindings}
         onEquipmentChange={handleEquipmentChange}
         onInventoryChange={handleInventoryChange}
         onInventoryUse={handleInventoryUse}
@@ -4716,32 +4714,7 @@ export default function Home() {
                           }`}
                         >
                           <div className="flex h-12 w-full items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#102108]/60 p-1">
-                            {item.type === 'gem' ? (
-                              <span
-                                className="pixelated h-full w-full"
-                                style={{
-                                  backgroundColor: '#ffffff',
-                                  WebkitMaskImage: `url(${item.texturePath})`,
-                                  maskImage: `url(${item.texturePath})`,
-                                  WebkitMaskRepeat: 'no-repeat',
-                                  maskRepeat: 'no-repeat',
-                                  WebkitMaskPosition: 'center',
-                                  maskPosition: 'center',
-                                  WebkitMaskSize: 'contain',
-                                  maskSize: 'contain',
-                                  transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                                }}
-                              />
-                            ) : (
-                              <img
-                                src={item.texturePath}
-                                alt={item.name}
-                                className="pixelated h-full w-full object-contain"
-                                style={{
-                                  transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                                }}
-                              />
-                            )}
+                            <ItemIcon item={item} className="h-full w-full" />
                           </div>
                           <div className="mt-2 truncate text-xs font-semibold text-[#f4ffe8]">
                             {item.name}
@@ -4786,32 +4759,7 @@ export default function Home() {
                             }`}
                           >
                             <div className="flex h-12 w-full items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#102108]/60 p-1">
-                              {item.type === 'gem' ? (
-                                <span
-                                  className="pixelated h-full w-full"
-                                  style={{
-                                    backgroundColor: '#ffffff',
-                                    WebkitMaskImage: `url(${item.texturePath})`,
-                                    maskImage: `url(${item.texturePath})`,
-                                    WebkitMaskRepeat: 'no-repeat',
-                                    maskRepeat: 'no-repeat',
-                                    WebkitMaskPosition: 'center',
-                                    maskPosition: 'center',
-                                    WebkitMaskSize: 'contain',
-                                    maskSize: 'contain',
-                                    transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                                  }}
-                                />
-                              ) : (
-                                <img
-                                  src={item.texturePath}
-                                  alt={item.name}
-                                  className="pixelated h-full w-full object-contain"
-                                  style={{
-                                    transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                                  }}
-                                />
-                              )}
+                              <ItemIcon item={item} className="h-full w-full" />
                             </div>
                             <div className="mt-2 truncate text-xs font-semibold text-[#f4ffe8]">
                               {item.name}
@@ -4837,32 +4785,7 @@ export default function Home() {
                   <div className="space-y-4">
                     <div className="flex items-start gap-4">
                       <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#d9efbd]/20 bg-[#102108]/60 p-2">
-                        {selectedSellItem.type === 'gem' ? (
-                          <span
-                            className="pixelated h-full w-full"
-                            style={{
-                              backgroundColor: '#ffffff',
-                              WebkitMaskImage: `url(${selectedSellItem.texturePath})`,
-                              maskImage: `url(${selectedSellItem.texturePath})`,
-                              WebkitMaskRepeat: 'no-repeat',
-                              maskRepeat: 'no-repeat',
-                              WebkitMaskPosition: 'center',
-                              maskPosition: 'center',
-                              WebkitMaskSize: 'contain',
-                              maskSize: 'contain',
-                              transform: `rotate(${selectedSellItem.iconRotationDeg ?? 0}deg) scale(${selectedSellItem.iconScale ?? 1})`,
-                            }}
-                          />
-                        ) : (
-                          <img
-                            src={selectedSellItem.texturePath}
-                            alt={selectedSellItem.name}
-                            className="pixelated h-full w-full object-contain"
-                            style={{
-                              transform: `rotate(${selectedSellItem.iconRotationDeg ?? 0}deg) scale(${selectedSellItem.iconScale ?? 1})`,
-                            }}
-                          />
-                        )}
+                        <ItemIcon item={selectedSellItem} className="h-full w-full" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">{text.selectedSale}</div>
@@ -4895,32 +4818,7 @@ export default function Home() {
                   <div className="space-y-4">
                     <div className="flex items-start gap-4">
                       <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#d9efbd]/20 bg-[#102108]/60 p-2">
-                        {selectedItem.type === 'gem' ? (
-                          <span
-                            className="pixelated h-full w-full"
-                            style={{
-                              backgroundColor: '#ffffff',
-                              WebkitMaskImage: `url(${selectedItem.texturePath})`,
-                              maskImage: `url(${selectedItem.texturePath})`,
-                              WebkitMaskRepeat: 'no-repeat',
-                              maskRepeat: 'no-repeat',
-                              WebkitMaskPosition: 'center',
-                              maskPosition: 'center',
-                              WebkitMaskSize: 'contain',
-                              maskSize: 'contain',
-                              transform: `rotate(${selectedItem.iconRotationDeg ?? 0}deg) scale(${selectedItem.iconScale ?? 1})`,
-                            }}
-                          />
-                        ) : (
-                          <img
-                            src={selectedItem.texturePath}
-                            alt={selectedItem.name}
-                            className="pixelated h-full w-full object-contain"
-                            style={{
-                              transform: `rotate(${selectedItem.iconRotationDeg ?? 0}deg) scale(${selectedItem.iconScale ?? 1})`,
-                            }}
-                          />
-                        )}
+                        <ItemIcon item={selectedItem} className="h-full w-full" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">{text.selectedItem}</div>
@@ -5648,32 +5546,7 @@ export default function Home() {
 
                   <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-4">
                     <div className="flex h-28 items-center justify-center rounded-2xl border border-[#d9efbd]/18 bg-[#102108]/60 p-3">
-                      {selectedAdminItem.type === 'gem' ? (
-                        <span
-                          className="pixelated h-16 w-16"
-                          style={{
-                            backgroundColor: '#ffffff',
-                            WebkitMaskImage: `url(${selectedAdminItem.texturePath})`,
-                            maskImage: `url(${selectedAdminItem.texturePath})`,
-                            WebkitMaskRepeat: 'no-repeat',
-                            maskRepeat: 'no-repeat',
-                            WebkitMaskPosition: 'center',
-                            maskPosition: 'center',
-                            WebkitMaskSize: 'contain',
-                            maskSize: 'contain',
-                            transform: `rotate(${selectedAdminItem.iconRotationDeg ?? 0}deg) scale(${selectedAdminItem.iconScale ?? 1})`,
-                          }}
-                        />
-                      ) : (
-                        <img
-                          src={selectedAdminItem.texturePath}
-                          alt={selectedAdminItem.name}
-                          className="pixelated h-16 w-16 object-contain"
-                          style={{
-                            transform: `rotate(${selectedAdminItem.iconRotationDeg ?? 0}deg) scale(${selectedAdminItem.iconScale ?? 1})`,
-                          }}
-                        />
-                      )}
+                      <ItemIcon item={selectedAdminItem} className="h-16 w-16" />
                     </div>
                     <div className="space-y-3">
                       <label className="block">
@@ -5740,32 +5613,7 @@ export default function Home() {
                     >
                       <div className="flex items-center gap-3">
                         <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#d9efbd]/20 bg-[#203b11]/65 p-1">
-                          {item.type === 'gem' ? (
-                            <span
-                              className="pixelated h-full w-full"
-                              style={{
-                                backgroundColor: '#ffffff',
-                                WebkitMaskImage: `url(${item.texturePath})`,
-                                maskImage: `url(${item.texturePath})`,
-                                WebkitMaskRepeat: 'no-repeat',
-                                maskRepeat: 'no-repeat',
-                                WebkitMaskPosition: 'center',
-                                maskPosition: 'center',
-                                WebkitMaskSize: 'contain',
-                                maskSize: 'contain',
-                                transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                              }}
-                            />
-                          ) : (
-                            <img
-                              src={item.texturePath}
-                              alt={item.name}
-                              className="pixelated h-full w-full object-contain"
-                              style={{
-                                transform: `rotate(${item.iconRotationDeg ?? 0}deg) scale(${item.iconScale ?? 1})`,
-                              }}
-                            />
-                          )}
+                          <ItemIcon item={item} className="h-full w-full" />
                         </div>
                         <div className="min-w-0">
                           <div className="truncate text-sm font-semibold text-[#f4ffe8]">{item.name}</div>
