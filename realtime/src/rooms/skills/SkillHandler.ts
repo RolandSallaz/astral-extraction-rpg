@@ -1,9 +1,7 @@
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import type { ProjectileGemConfig } from "../fireballGems.js";
-import type { BurstSpawnRequest, ProjectileSpawnRequest } from "../projectileSkills.js";
-import type { GroundEffectState } from "../schema/GroundEffectState.js";
-import type { MapSchema } from "@colyseus/schema";
+import type { BurstSpawnRequest } from "../projectileSkills.js";
 
 /**
  * Narrow interface that skill handlers receive instead of the entire room.
@@ -42,7 +40,7 @@ export interface SkillCastContext {
     damageScale?: number,
     sizeScale?: number,
   ): void;
-  pendingBurstSpawns: BurstSpawnRequest[];
+  queueBurstSpawns(bursts: BurstSpawnRequest[]): void;
 
   // FireField-specific helpers
   createFireField(player: BasePlayerState, targetX: number, targetY: number, now: number): void;

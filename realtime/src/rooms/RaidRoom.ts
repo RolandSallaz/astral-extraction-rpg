@@ -20,6 +20,7 @@ import {
   RAID_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
 } from "./sharedGameplay.js";
+import { INVENTORY_SIZE } from "@mmorpg/shared";
 import {
   getMobDefinition,
   type MobKind,
@@ -31,6 +32,7 @@ import {
 import { generateRaidLayoutForTemplate } from "./procgen/generateRaidLayout.js";
 import { createSeededRandom } from "./procgen/seededRandom.js";
 import {
+  normalizeRoomInventorySlots,
   parseRoomInventoryEntry,
 } from "./roomItems.js";
 import {
@@ -38,7 +40,6 @@ import {
 } from "./auth.js";
 import {
   replaceRoomStringSlots,
-  serializeRoomProfileInventoryEntries,
 } from "./runtime/inventoryRuntime.js";
 import {
   applyRoomProfilePatch,
@@ -291,8 +292,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           },
         })
       ) {
-        this.playerBurns.delete(player.id);
-        this.playerHealing.delete(player.id);
+        this.statusEffects.deletePlayerEffects(player.id);
       }
     });
 
@@ -381,7 +381,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.updatePlayers(deltaSeconds);
       this.recordPlayerPositionHistory(tickNow);
       this.updateMobs(deltaSeconds, tickNow);
-      this.sharedRaidCombatTickSystem.update(deltaSeconds, tickNow);
+      this.updateCombatSystems(deltaSeconds, tickNow, { includeMobBurns: true });
     }, this.simulationIntervalMs);
   }
 
@@ -428,8 +428,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         },
       })
     ) {
-      this.playerBurns.delete(player.id);
-      this.playerHealing.delete(player.id);
+      this.statusEffects.deletePlayerEffects(player.id);
     }
 
     this.state.players.set(client.sessionId, player);
@@ -443,21 +442,20 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   onLeave(client: Client) {
     this.pendingMovement.delete(client.sessionId);
-    this.pendingSkillCasts.delete(client.sessionId);
+    this.skillCastSystem.clearPlayer(client.sessionId);
     const player = this.state.players.get(client.sessionId);
     if (player) {
       this.clearPlayerCastState(player);
     }
     if (this.raidClosed) {
       this.state.players.delete(client.sessionId);
+      this.statusEffects.deletePlayerEffects(client.sessionId);
+      this.projectileSystem.clearOwnerData(client.sessionId);
       clearRoomSessionCollections(
         client.sessionId,
         this.offlineExpiresAt,
-        this.playerBurns,
-        this.playerHealing,
         this.consumableCooldownEndsAt,
         this.verifiedPlayers,
-        this.pendingTeleportScrollCasts,
       );
       return;
     }
@@ -971,10 +969,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     }
 
     this.pendingMovement.clear();
-    this.pendingSkillCasts.clear();
-    this.playerBurns.clear();
-    this.mobBurns.clear();
-    this.playerHealing.clear();
+    this.skillCastSystem.clearAll();
+    this.statusEffects.clearAll();
     this.consumableCooldownEndsAt.clear();
     this.offlineExpiresAt.clear();
     this.clearDisposeTimeout();
@@ -1001,7 +997,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   }
 
   private createRaidExitPayload(player: RaidPlayerState): RaidExitStateMessage {
-    const inventory = Array.from({ length: 24 }, (_, index) => player.inventory[index] || null);
+    const inventory = Array.from({ length: INVENTORY_SIZE }, (_, index) => player.inventory[index] || null);
     const equipment = createEquipmentStateSnapshot({
       headItem: player.headItem,
       bodyItem: player.bodyItem,
@@ -1029,10 +1025,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   private removePlayerFromRaidState(playerId: string) {
     this.pendingMovement.delete(playerId);
-    this.pendingSkillCasts.delete(playerId);
+    this.skillCastSystem.clearPlayer(playerId);
     this.offlineExpiresAt.delete(playerId);
-    this.playerBurns.delete(playerId);
-    this.playerHealing.delete(playerId);
+    this.statusEffects.deletePlayerEffects(playerId);
     this.consumableCooldownEndsAt.delete(playerId);
     this.state.players.delete(playerId);
   }
@@ -1057,7 +1052,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     const preservedMaxHealth = player.maxHealth;
     const preservedLevel = player.level;
     const preservedExperience = player.experience;
-    const inventory = Array.from({ length: 24 }, () => null as string | null);
+    const inventory = Array.from({ length: INVENTORY_SIZE }, () => null as string | null);
     const equipment = {
       head: "",
       body: "",
@@ -1098,9 +1093,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.weaponGemItem3 = "";
     player.inventory.clear();
     this.pendingMovement.delete(player.id);
+    this.skillCastSystem.clearPlayer(player.id);
     this.offlineExpiresAt.delete(player.id);
-    this.playerBurns.delete(player.id);
-    this.playerHealing.delete(player.id);
+    this.statusEffects.deletePlayerEffects(player.id);
     this.consumableCooldownEndsAt.delete(player.id);
 
     return {
@@ -1174,13 +1169,11 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         previousSessionId,
         this.offlineExpiresAt,
         this.pendingMovement,
-        this.pendingSkillCasts,
-        this.pendingTeleportScrollCasts,
       );
+      this.skillCastSystem.clearPlayer(previousSessionId);
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
-      this.playerBurns.move(previousSessionId, client.sessionId);
-      this.playerHealing.move(previousSessionId, client.sessionId);
+      this.statusEffects.movePlayerEffects(previousSessionId, client.sessionId);
       player.id = client.sessionId;
       this.state.players.set(client.sessionId, player);
       this.clearPlayerCastState(player);
@@ -1193,8 +1186,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           },
         })
       ) {
-        this.playerBurns.delete(player.id);
-        this.playerHealing.delete(player.id);
+        this.statusEffects.deletePlayerEffects(player.id);
       } else {
         player.dead = false;
       }
@@ -1204,9 +1196,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         mobs: this.state.mobs.values(),
         projectiles: this.state.projectiles.values(),
         groundEffects: this.state.groundEffects.values(),
-        pendingBurstSpawns: this.pendingBurstSpawns,
-        pendingAftershocks: this.pendingAftershocks,
       });
+      this.projectileSystem.transferOwnerReferences(previousSessionId, client.sessionId);
       sendRoomBalanceSnapshots(
         client,
         this.serializeSkillBalanceConfig(),
@@ -1226,17 +1217,16 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         continue;
       }
 
+      this.statusEffects.deletePlayerEffects(sessionId);
+      this.projectileSystem.clearOwnerData(sessionId);
       clearRoomSessionCollections(
         sessionId,
         this.offlineExpiresAt,
         this.pendingMovement,
-        this.playerBurns,
-        this.playerHealing,
-        this.pendingSkillCasts,
-        this.pendingTeleportScrollCasts,
         this.consumableCooldownEndsAt,
         this.verifiedPlayers,
       );
+      this.skillCastSystem.clearPlayer(sessionId);
       this.state.players.delete(sessionId);
     }
 
@@ -1268,7 +1258,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     });
     replaceRoomStringSlots(
       player.inventory,
-      serializeRoomProfileInventoryEntries(profile.inventory),
+      normalizeRoomInventorySlots(profile.inventory ?? [], INVENTORY_SIZE),
     );
   }
 }

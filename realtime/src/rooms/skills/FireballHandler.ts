@@ -41,7 +41,7 @@ export const FireballHandler: SkillHandler = {
       gemConfig,
     });
 
-    plan.delayedSpawns.forEach((burst) => ctx.pendingBurstSpawns.push(burst));
+    ctx.queueBurstSpawns(plan.delayedSpawns);
     plan.immediateSpawns.forEach((spawn) => {
       ctx.spawnProjectile(
         spawn.ownerId,

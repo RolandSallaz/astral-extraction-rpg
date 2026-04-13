@@ -15,23 +15,16 @@ import {
   type PlayerEyeLookDirection,
 } from '@mmorpg/shared/player/visuals';
 import type {
-  AdminUpdateMobBalanceMessage,
-  AdminUpdateSkillBalanceMessage,
   BaseProfileMessage,
   CastSkillMessage,
   ChatInputMessage,
-  ConsumableCooldownMessage,
-  DamageTextMessage,
   DiedMessage,
   EquipmentSyncFields,
-  InventoryUpdateMessage,
   MoveMessage,
   RaidExitStateMessage,
   RaidRoomJoinOptions,
   RealtimeChatMessage,
   RespawnedMessage,
-  SyncChestMessage,
-  UseConsumableMessage,
   UseExitMessage,
   WorldProfileMessage,
   WorldRoomJoinOptions,
@@ -99,6 +92,11 @@ import {
   resolveSpriteSheetAnimationColumns,
   type SpriteSheetAnimation,
 } from '@/lib/animations/runtime';
+import { useRoomOutboundSync } from '@/components/game-canvas/useRoomOutboundSync';
+import { useRoomInboundSync } from '@/components/game-canvas/useRoomInboundSync';
+import { useProjectileEffectsRenderer } from '@/components/game-canvas/useProjectileEffectsRenderer';
+import { useMobRenderer } from '@/components/game-canvas/useMobRenderer';
+import { usePlayerRenderer } from '@/components/game-canvas/usePlayerRenderer';
 
 type PhaserGame = import('phaser').Game;
 type PhaserImage = Phaser.GameObjects.Image;
@@ -2386,8 +2384,38 @@ export function GameCanvas({
     playerStrength,
   ]);
 
-  useEffect(() => {
-    const profileMessage = createWorldProfileMessage({
+  const { attachRoomInboundHandlers } = useRoomInboundSync({
+    chatHistoryRef,
+    chatMessageRef,
+    hasReceivedSkillBalanceRef,
+    lastKnownSkillBalanceSerializedRef,
+    skillBalanceConfigChangeRef,
+    hasReceivedMobBalanceRef,
+    lastKnownMobBalanceSerializedRef,
+    mobBalanceConfigChangeRef,
+    playerDeathRef,
+    playerRespawnRef,
+    playerInventoryChangeRef,
+    consumableCooldownChangeRef,
+    raidExitRef,
+  });
+  const {
+    syncProjectilesFromRoom: syncProjectilesFromRoomShared,
+    syncGroundEffectsFromRoom: syncGroundEffectsFromRoomShared,
+  } = useProjectileEffectsRenderer();
+  const {
+    syncMobsFromRoom: syncMobsFromRoomShared,
+    setMobVisibility: setMobVisibilityShared,
+  } = useMobRenderer();
+  const {
+    syncPlayersFromRoom: syncPlayersFromRoomShared,
+    setCharacterVisibility: setCharacterVisibilityShared,
+  } = usePlayerRenderer();
+
+  useRoomOutboundSync({
+    activeRoomName,
+    playerRole,
+    playerProfile: {
       playerName,
       playerRole,
       playerPosition,
@@ -2400,130 +2428,28 @@ export function GameCanvas({
       playerIntellect,
       playerInventory,
       playerEquipment,
-    });
-    roomRef.current?.send('profile', profileMessage);
-  }, [activeRoomName, playerAgility, playerEquipment, playerExperience, playerHealth, playerIntellect, playerInventory, playerLevel, playerMaxHealth, playerName, playerRole, playerStrength]);
-
-  useEffect(() => {
-    if (activeRoomName !== 'world' || !roomRef.current || playerRole !== 'admin' || !hasReceivedSkillBalanceRef.current) {
-      return;
-    }
-
-    const nextSerialized = JSON.stringify(skillBalanceConfig);
-    if (nextSerialized === lastKnownSkillBalanceSerializedRef.current) {
-      return;
-    }
-
-    lastKnownSkillBalanceSerializedRef.current = nextSerialized;
-    const updateMessage: AdminUpdateSkillBalanceMessage = skillBalanceConfig;
-    roomRef.current.send('adminUpdateSkillBalance', updateMessage);
-  }, [activeRoomName, playerRole, skillBalanceConfig]);
-
-  useEffect(() => {
-    if (activeRoomName !== 'world' || !roomRef.current || playerRole !== 'admin' || !hasReceivedMobBalanceRef.current) {
-      return;
-    }
-
-    const nextSerialized = JSON.stringify(mobBalanceConfig);
-    if (nextSerialized === lastKnownMobBalanceSerializedRef.current) {
-      return;
-    }
-
-    lastKnownMobBalanceSerializedRef.current = nextSerialized;
-    const updateMessage: AdminUpdateMobBalanceMessage = mobBalanceConfig;
-    roomRef.current.send('adminUpdateMobBalance', updateMessage);
-  }, [activeRoomName, playerRole, mobBalanceConfig]);
-
-  useEffect(() => {
-    if (!roomRef.current || !useConsumableRequest || useConsumableRequest.nonce <= 0) {
-      return;
-    }
-
-    const useConsumableMessage: UseConsumableMessage = {
-      source: useConsumableRequest.source,
-      slotIndex: useConsumableRequest.slotIndex,
-      containerId: useConsumableRequest.containerId,
-    };
-    roomRef.current.send('useConsumable', useConsumableMessage);
-  }, [useConsumableRequest]);
-
-  useEffect(() => {
-    if (!roomRef.current || !containerStates || !('chests' in roomRef.current.state)) {
-      return;
-    }
-
-    Object.entries(containerStates).forEach(([chestId, slots]) => {
-      const knownSlots = serverContainersRef.current[chestId] ?? [];
-      const nextSerialized = JSON.stringify(slots);
-      const knownSerialized = JSON.stringify(knownSlots);
-
-      if (nextSerialized === knownSerialized) {
-        return;
-      }
-
-      const syncChestMessage: SyncChestMessage = {
-        chestId,
-        slots: slots.map((itemId) => itemId ?? ''),
-      };
-      roomRef.current?.send('syncChest', syncChestMessage);
-    });
-  }, [containerStates]);
-
-  useEffect(() => {
-    if (activeRoomName !== 'world') {
-      return;
-    }
-
-    if (respawnRequestNonce <= 0) {
-      return;
-    }
-
-    pendingRespawnNonceRef.current = Math.max(pendingRespawnNonceRef.current, respawnRequestNonce);
-    if (!roomRef.current || lastSentRespawnNonceRef.current >= pendingRespawnNonceRef.current) {
-      return;
-    }
-
-    roomRef.current.send('respawn', {});
-    lastSentRespawnNonceRef.current = pendingRespawnNonceRef.current;
-  }, [activeRoomName, respawnRequestNonce]);
-
-  useEffect(() => {
-    if (fireNovaCastNonce <= 0) {
-      return;
-    }
-
-    const castSkillMessage = createTimedCastSkillMessage(
-      { skillId: 'fireNova' },
-      estimatedOneWayLatencyMsRef.current,
-    );
-    roomRef.current?.send('castSkill', castSkillMessage);
-  }, [activeRoomName, fireNovaCastNonce]);
-
-  useEffect(() => {
-    if (woodStaffStrikeCastNonce <= 0) {
-      return;
-    }
-
-    if (!roomRef.current) {
-      return;
-    }
-
-    const now = Date.now();
-    if ((skillCooldownsRef.current.woodStaffStrike ?? 0) > now) {
-      return;
-    }
-
-    const target = lastPointerWorldRef.current;
-    const castSkillMessage = createTimedCastSkillMessage(
-      {
-        skillId: 'woodStaffStrike',
-        targetX: target.x,
-        targetY: target.y,
-      },
-      estimatedOneWayLatencyMsRef.current,
-    );
-    roomRef.current.send('castSkill', castSkillMessage);
-  }, [activeRoomName, woodStaffStrikeCastNonce]);
+    },
+    roomRef,
+    skillBalanceConfig,
+    mobBalanceConfig,
+    hasReceivedSkillBalanceRef,
+    lastKnownSkillBalanceSerializedRef,
+    hasReceivedMobBalanceRef,
+    lastKnownMobBalanceSerializedRef,
+    useConsumableRequest,
+    containerStates,
+    serverContainersRef,
+    respawnRequestNonce,
+    pendingRespawnNonceRef,
+    lastSentRespawnNonceRef,
+    fireNovaCastNonce,
+    woodStaffStrikeCastNonce,
+    estimatedOneWayLatencyMsRef,
+    lastPointerWorldRef,
+    skillCooldownsRef,
+    createWorldProfileMessage,
+    createTimedCastSkillMessage,
+  });
 
   useEffect(() => {
     let game: PhaserGame | null = null;
@@ -2789,6 +2715,31 @@ export function GameCanvas({
           };
           let lastSyncedPositionX = latestProfileRef.current.playerPosition.x;
           let lastSyncedPositionY = latestProfileRef.current.playerPosition.y;
+          const movementState = {
+            getPendingRaidInputs: () => pendingRaidInputs,
+            setPendingRaidInputs: (next: PendingRaidInputSample[]) => {
+              pendingRaidInputs = next;
+            },
+            getPendingWorldInputs: () => pendingWorldInputs,
+            setPendingWorldInputs: (next: PendingWorldInputSample[]) => {
+              pendingWorldInputs = next;
+            },
+            getLastProcessedRaidInput: () => lastProcessedRaidInput,
+            setLastProcessedRaidInput: (value: number) => {
+              lastProcessedRaidInput = value;
+            },
+            getLastProcessedWorldInput: () => lastProcessedWorldInput,
+            setLastProcessedWorldInput: (value: number) => {
+              lastProcessedWorldInput = value;
+            },
+          };
+          const positionSyncState = {
+            setLastSyncedPosition: (x: number, y: number, at: number) => {
+              lastSyncedPositionX = x;
+              lastSyncedPositionY = y;
+              lastPositionSyncAt = at;
+            },
+          };
           let canOpenChest = false;
           let interactableChestId: string | null = null;
           let canInteractWithTrader = false;
@@ -4698,227 +4649,40 @@ export function GameCanvas({
           });
 
           const syncPlayersFromRoom = () => {
-            if (!room) {
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.players.forEach((networkPlayer, sessionId) => {
-              const networkPlayerState = networkPlayer as Partial<NetworkPlayerState> & RaidNetworkPlayerState;
-              seen.add(sessionId);
-
-              if (networkPlayerState.dead !== true) {
-                completedDeadPlayerIds.delete(sessionId);
-              }
-
-              let character = characters.get(sessionId);
-              if (!character) {
-                if (networkPlayerState.dead === true && completedDeadPlayerIds.has(sessionId)) {
-                  return;
-                }
-              }
-              const equipment = {
-                body: toEquipmentItemId(networkPlayerState.bodyItem ?? ''),
-                head: toEquipmentItemId(networkPlayerState.headItem ?? ''),
-                weapon: toEquipmentItemId(networkPlayerState.weaponItem ?? ''),
-                'head-gem-1': networkPlayerState.headGemItem1 ? (networkPlayerState.headGemItem1 as EquippableItemId) : undefined,
-                'head-gem-2': networkPlayerState.headGemItem2 ? (networkPlayerState.headGemItem2 as EquippableItemId) : undefined,
-                'head-gem-3': networkPlayerState.headGemItem3 ? (networkPlayerState.headGemItem3 as EquippableItemId) : undefined,
-                'body-gem-1': networkPlayerState.bodyGemItem1 ? (networkPlayerState.bodyGemItem1 as EquippableItemId) : undefined,
-                'body-gem-2': networkPlayerState.bodyGemItem2 ? (networkPlayerState.bodyGemItem2 as EquippableItemId) : undefined,
-                'body-gem-3': networkPlayerState.bodyGemItem3 ? (networkPlayerState.bodyGemItem3 as EquippableItemId) : undefined,
-                'weapon-gem-1': networkPlayerState.weaponGemItem1 ? (networkPlayerState.weaponGemItem1 as EquippableItemId) : undefined,
-                'weapon-gem-2': networkPlayerState.weaponGemItem2 ? (networkPlayerState.weaponGemItem2 as EquippableItemId) : undefined,
-                'weapon-gem-3': networkPlayerState.weaponGemItem3 ? (networkPlayerState.weaponGemItem3 as EquippableItemId) : undefined,
-              };
-
-              if (!character) {
-                character = createCharacter(
-                  networkPlayerState.x,
-                  networkPlayerState.y,
-                  networkPlayerState.name,
-                  networkPlayerState.health,
-                  networkPlayerState.maxHealth,
-                  equipment,
-                );
-                characters.set(sessionId, character);
-              }
-
-              const wasDead = character.isDead;
-              syncDeathState(character, networkPlayerState.dead === true, this.time.now);
-              if (wasDead !== character.isDead) {
-                setCharacterVisibility(
-                  character,
-                  character.isVisible ?? true,
-                  sessionId === localSessionId,
-                );
-              }
-
-              character.targetX = networkPlayerState.x;
-              character.targetY = networkPlayerState.y;
-              if (sessionId !== localSessionId) {
-                const now = this.time.now;
-                const distance = Phaser.Math.Distance.Between(
-                  character.interpNextX,
-                  character.interpNextY,
-                  character.targetX,
-                  character.targetY,
-                );
-                if (distance > 64) {
-                  character.container.setPosition(character.targetX, character.targetY);
-                  character.interpPrevX = character.targetX;
-                  character.interpPrevY = character.targetY;
-                  character.interpPrevAt = now;
-                  character.interpNextX = character.targetX;
-                  character.interpNextY = character.targetY;
-                  character.interpNextAt = now;
-                } else if (
-                  character.targetX !== character.interpNextX ||
-                  character.targetY !== character.interpNextY
-                ) {
-                  character.interpPrevX = character.interpNextX;
-                  character.interpPrevY = character.interpNextY;
-                  character.interpPrevAt = character.interpNextAt;
-                  character.interpNextX = character.targetX;
-                  character.interpNextY = character.targetY;
-                  character.interpNextAt = now;
-                }
-              }
-              if (character.currentName !== networkPlayerState.name) {
-                character.nameplate.setText(networkPlayerState.name);
-                character.currentName = networkPlayerState.name;
-              }
-              if (
-                character.currentHealth !== networkPlayerState.health ||
-                character.currentMaxHealth !== networkPlayerState.maxHealth
-              ) {
-                applyCharacterHealthToVisual(character, networkPlayerState.health, networkPlayerState.maxHealth);
-              }
-              if (
-                character.currentBurnTicksRemaining !== (networkPlayerState.burnTicksRemaining ?? 0) ||
-                character.currentBurnEndsAt !== (networkPlayerState.burnEndsAt ?? 0)
-              ) {
-                applyBurningToCharacterVisual(
-                  character,
-                  networkPlayerState.burnTicksRemaining ?? 0,
-                  networkPlayerState.burnEndsAt ?? 0,
-                );
-              }
-              if (
-                character.currentHealingTicksRemaining !== (networkPlayerState.healingTicksRemaining ?? 0) ||
-                character.currentHealingEndsAt !== (networkPlayerState.healingEndsAt ?? 0)
-              ) {
-                applyHealingToCharacterVisual(
-                  character,
-                  networkPlayerState.healingTicksRemaining ?? 0,
-                  networkPlayerState.healingEndsAt ?? 0,
-                );
-              }
-              if (
-                character.currentCastingSkillId !== (networkPlayerState.castingSkillId ?? '') ||
-                character.currentCastStartedAt !== (networkPlayerState.castStartedAt ?? 0) ||
-                character.currentCastEndsAt !== (networkPlayerState.castEndsAt ?? 0)
-              ) {
-                applyCastingToCharacterVisual(
-                  character,
-                  networkPlayerState.castingSkillId ?? '',
-                  networkPlayerState.castStartedAt ?? 0,
-                  networkPlayerState.castEndsAt ?? 0,
-                );
-              }
-              applyEquipmentToVisual(this, tileSize, character, equipment);
-
-              if (sessionId === localSessionId && !character.isFollowTarget) {
-                playerVisualRef.current = {
-                  weaponItem: character.weaponItem,
-                };
-                lastSyncedPositionX = networkPlayerState.x;
-                lastSyncedPositionY = networkPlayerState.y;
-                lastPositionSyncAt = this.time.now;
-                playerVitalsChangeRef.current?.({
-                  health: networkPlayerState.health,
-                  maxHealth: networkPlayerState.maxHealth,
-                });
-                playerProgressChangeRef.current?.({
-                  level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
-                  experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
-                });
-                const nextCooldowns = {
-                  woodStaffStrike: networkPlayerState.woodStaffStrikeCooldownEndsAt ?? 0,
-                  fireball: networkPlayerState.fireballCooldownEndsAt ?? 0,
-                  fireNova: networkPlayerState.fireNovaCooldownEndsAt ?? 0,
-                  fireField: networkPlayerState.fireFieldCooldownEndsAt ?? 0,
-                };
-                skillCooldownsRef.current = nextCooldowns;
-                skillCooldownsChangeRef.current?.(nextCooldowns);
-                if (isRaidScene) {
-                  lastProcessedRaidInput = networkPlayerState.lastProcessedInput ?? 0;
-                  pendingRaidInputs = pendingRaidInputs.filter(
-                    (input) => input.sequence > lastProcessedRaidInput,
-                  );
-                } else {
-                  lastProcessedWorldInput = networkPlayerState.lastProcessedInput ?? 0;
-                  pendingWorldInputs = pendingWorldInputs.filter(
-                    (input) => input.sequence > lastProcessedWorldInput,
-                  );
-                }
-                camera.startFollow(character.container, true, 0.18, 0.18);
-                character.isFollowTarget = true;
-              } else if (sessionId === localSessionId) {
-                playerVitalsChangeRef.current?.({
-                  health: networkPlayerState.health,
-                  maxHealth: networkPlayerState.maxHealth,
-                });
-                playerProgressChangeRef.current?.({
-                  level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
-                  experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
-                });
-                const nextCooldowns = {
-                  woodStaffStrike: networkPlayerState.woodStaffStrikeCooldownEndsAt ?? 0,
-                  fireball: networkPlayerState.fireballCooldownEndsAt ?? 0,
-                  fireNova: networkPlayerState.fireNovaCooldownEndsAt ?? 0,
-                  fireField: networkPlayerState.fireFieldCooldownEndsAt ?? 0,
-                };
-                skillCooldownsRef.current = nextCooldowns;
-                skillCooldownsChangeRef.current?.(nextCooldowns);
-
-                if (isRaidScene) {
-                  const processedInput = networkPlayerState.lastProcessedInput ?? 0;
-                  if (processedInput > lastProcessedRaidInput) {
-                    lastProcessedRaidInput = processedInput;
-                    pendingRaidInputs = pendingRaidInputs.filter(
-                      (input) => input.sequence > processedInput,
-                    );
-                  }
-                  reconcileRaidLocalCharacter(
-                    character,
-                    networkPlayerState.x,
-                    networkPlayerState.y,
-                    lastRaidTilesWidth || raidWidth,
-                    lastRaidTilesHeight || raidHeight,
-                  );
-                } else {
-                  const processedInput = networkPlayerState.lastProcessedInput ?? 0;
-                  if (processedInput > lastProcessedWorldInput) {
-                    lastProcessedWorldInput = processedInput;
-                    pendingWorldInputs = pendingWorldInputs.filter(
-                      (input) => input.sequence > processedInput,
-                    );
-                  }
-                  reconcileWorldLocalCharacter(
-                    character,
-                    networkPlayerState.x,
-                    networkPlayerState.y,
-                  );
-                }
-              }
-            });
-
-            [...characters.keys()].forEach((sessionId) => {
-              if (!seen.has(sessionId)) {
-                destroyCharacter(sessionId);
-              }
+            syncPlayersFromRoomShared({
+              scene: this,
+              Phaser,
+              room,
+              characters,
+              completedDeadPlayerIds,
+              localSessionId,
+              isRaidScene,
+              raidWidth,
+              raidHeight,
+              getLastRaidTilesWidth: () => lastRaidTilesWidth,
+              getLastRaidTilesHeight: () => lastRaidTilesHeight,
+              tileSize,
+              createCharacter,
+              destroyCharacter,
+              syncDeathState,
+              applyCharacterHealthToVisual,
+              applyBurningToCharacterVisual,
+              applyHealingToCharacterVisual,
+              applyCastingToCharacterVisual,
+              applyEquipmentToVisual,
+              toEquipmentItemId,
+              playerVisualRef,
+              playerVitalsChangeRef,
+              playerProgressChangeRef,
+              skillCooldownsRef,
+              skillCooldownsChangeRef,
+              latestProfileRef,
+              movementState,
+              positionSyncState,
+              camera,
+              reconcileRaidLocalCharacter,
+              reconcileWorldLocalCharacter,
+              hideStatusIcon,
             });
           };
 
@@ -5105,98 +4869,14 @@ export function GameCanvas({
             character.simY = resolvedY;
           };
 
-          const setCharacterVisibility = (character: CharacterVisual, visible: boolean, isLocalPlayer = false) => {
-            const shouldShowActor = visible || isLocalPlayer;
-            const shouldShowAliveVisuals = shouldShowActor && !character.isDead;
-            const alpha = shouldShowAliveVisuals ? 1 : 0;
-            character.shadow.setVisible(shouldShowAliveVisuals);
-            character.container.setVisible(shouldShowAliveVisuals);
-            character.deathEffect.setVisible(shouldShowActor && character.isDead);
-            character.nameplate.setVisible(shouldShowAliveVisuals);
-            character.healthBarFrame.setVisible(shouldShowAliveVisuals);
-            character.healthBarBack.setVisible(shouldShowAliveVisuals);
-            character.healthBarFill.setVisible(shouldShowAliveVisuals);
-            character.castBarFrame.setVisible(false);
-            character.castBarBack.setVisible(false);
-            character.castBarFill.setVisible(false);
-            character.healthText.setVisible(false);
-            character.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
-            character.burnAura.setVisible(
-              shouldShowAliveVisuals &&
-                character.currentBurnTicksRemaining > 0 &&
-                character.currentBurnEndsAt > Date.now(),
-            );
-            if (!shouldShowAliveVisuals) {
-              hideStatusIcon(character.burnStatusIcon);
-              hideStatusIcon(character.healingStatusIcon);
-            }
-            character.container.setAlpha(alpha);
-            character.shadow.setAlpha(shouldShowAliveVisuals ? 0.18 : 0);
-            character.deathEffect.setAlpha(shouldShowActor && character.isDead ? 1 : 0);
-            character.nameplate.setAlpha(alpha);
-            character.burnStatusIcon.back.setAlpha(alpha);
-            character.burnStatusIcon.cooldownOverlay.setAlpha(alpha);
-            character.burnStatusIcon.icon.setAlpha(alpha);
-            character.burnStatusIcon.timerText.setAlpha(alpha);
-            character.healingStatusIcon.back.setAlpha(alpha);
-            character.healingStatusIcon.cooldownOverlay.setAlpha(alpha);
-            character.healingStatusIcon.icon.setAlpha(alpha);
-            character.healingStatusIcon.timerText.setAlpha(alpha);
-            character.healthBarFrame.setAlpha(alpha);
-            character.healthBarBack.setAlpha(alpha);
-            character.healthBarFill.setAlpha(alpha);
-            character.castBarFrame.setAlpha(alpha);
-            character.castBarBack.setAlpha(alpha);
-            character.castBarFill.setAlpha(alpha);
-            character.healthText.setAlpha(0);
-            character.healthSegments.forEach((segment) => segment.setAlpha(alpha));
-          };
+          const setCharacterVisibility = (
+            character: CharacterVisual,
+            visible: boolean,
+            isLocalPlayer = false,
+          ) => setCharacterVisibilityShared(character, visible, isLocalPlayer, hideStatusIcon);
 
-          const setMobVisibility = (mob: MobVisual, visible: boolean) => {
-            const shouldShowAliveVisuals = visible && !mob.isDead;
-            mob.shadow.setVisible(shouldShowAliveVisuals);
-            mob.sprite.setVisible(shouldShowAliveVisuals);
-            mob.deathEffect.setVisible(visible && mob.isDead);
-            mob.nameplate.setVisible(false);
-            mob.healthBarFrame.setVisible(shouldShowAliveVisuals);
-            mob.healthBarBack.setVisible(shouldShowAliveVisuals);
-            mob.healthBarFill.setVisible(shouldShowAliveVisuals);
-            const shouldShowCastBar =
-              shouldShowAliveVisuals &&
-              mob.currentCastingSkillId.length > 0 &&
-              mob.currentCastEndsAt > Date.now() &&
-              mob.currentCastEndsAt > mob.currentCastStartedAt;
-            mob.castBarFrame.setVisible(shouldShowCastBar);
-            mob.castBarBack.setVisible(shouldShowCastBar);
-            mob.castBarFill.setVisible(shouldShowCastBar);
-            mob.healthText.setVisible(false);
-            mob.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
-            mob.burnAura.setVisible(
-              shouldShowAliveVisuals &&
-                mob.currentBurnTicksRemaining > 0 &&
-                mob.currentBurnEndsAt > Date.now(),
-            );
-            const alpha = shouldShowAliveVisuals ? 1 : 0;
-            mob.shadow.setAlpha(shouldShowAliveVisuals ? 0.18 : 0);
-            mob.sprite.setAlpha(alpha);
-            mob.deathEffect.setAlpha(visible && mob.isDead ? 1 : 0);
-            mob.nameplate.setAlpha(0);
-            if (!shouldShowAliveVisuals) {
-              hideStatusIcon(mob.burnStatusIcon);
-            }
-            mob.burnStatusIcon.back.setAlpha(alpha);
-            mob.burnStatusIcon.cooldownOverlay.setAlpha(alpha);
-            mob.burnStatusIcon.icon.setAlpha(alpha);
-            mob.burnStatusIcon.timerText.setAlpha(alpha);
-            mob.healthBarFrame.setAlpha(alpha);
-            mob.healthBarBack.setAlpha(alpha);
-            mob.healthBarFill.setAlpha(alpha);
-            mob.castBarFrame.setAlpha(alpha);
-            mob.castBarBack.setAlpha(alpha);
-            mob.castBarFill.setAlpha(alpha);
-            mob.healthText.setAlpha(0);
-            mob.healthSegments.forEach((segment) => segment.setAlpha(alpha));
-          };
+          const setMobVisibility = (mob: MobVisual, visible: boolean) =>
+            setMobVisibilityShared(mob, visible, hideStatusIcon);
 
           const updateRaidVisibility = (force = false) => {
             if (!isRaidScene || !room || !('tiles' in room.state)) {
@@ -5401,84 +5081,17 @@ export function GameCanvas({
           };
 
           const syncMobsFromRoom = () => {
-            if (!room || !('mobs' in room.state)) {
-              [...mobs.keys()].forEach((mobId) => destroyMob(mobId));
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.mobs.forEach((networkMob, mobId) => {
-              seen.add(mobId);
-
-              if (networkMob.dead !== true) {
-                completedDeadMobIds.delete(mobId);
-              }
-
-              let mob = mobs.get(mobId);
-              if (!mob) {
-                if (networkMob.dead === true && completedDeadMobIds.has(mobId)) {
-                  return;
-                }
-
-                mob = createMob(
-                  networkMob.x,
-                  networkMob.y,
-                  networkMob.texture,
-                  networkMob.name,
-                  networkMob.health,
-                  networkMob.maxHealth,
-                );
-                mobs.set(mobId, mob);
-              }
-
-              if (
-                Math.abs(networkMob.x - mob.targetX) > 0.25 ||
-                Math.abs(networkMob.y - mob.targetY) > 0.25
-              ) {
-                mob.lastMovedAt = this.time.now;
-              }
-
-              mob.targetX = networkMob.x;
-              mob.targetY = networkMob.y;
-              const wasDead = mob.isDead;
-              syncDeathState(mob, networkMob.dead === true, this.time.now);
-              if (wasDead !== mob.isDead) {
-                setMobVisibility(mob, mob.isVisible ?? true);
-              }
-              mob.currentAttackCooldownEndsAt = networkMob.attackCooldownEndsAt ?? 0;
-              mob.currentAttackCooldownMs = networkMob.attackCooldownMs ?? 0;
-              mob.currentCastingSkillId = networkMob.castingSkillId ?? "";
-              mob.currentCastStartedAt = networkMob.castStartedAt ?? 0;
-              mob.currentCastEndsAt = networkMob.castEndsAt ?? 0;
-              mob.currentSkillLungeStartedAt = networkMob.skillLungeStartedAt ?? 0;
-              mob.currentSkillLungeEndsAt = networkMob.skillLungeEndsAt ?? 0;
-              if (mob.currentName !== networkMob.name) {
-                mob.nameplate.setText(networkMob.name);
-                mob.currentName = networkMob.name;
-              }
-              if (
-                mob.currentHealth !== networkMob.health ||
-                mob.currentMaxHealth !== networkMob.maxHealth
-              ) {
-                applyMobHealthToVisual(mob, networkMob.health, networkMob.maxHealth);
-              }
-              if (
-                mob.currentBurnTicksRemaining !== (networkMob.burnTicksRemaining ?? 0) ||
-                mob.currentBurnEndsAt !== (networkMob.burnEndsAt ?? 0)
-              ) {
-                applyBurningToMobVisual(
-                  mob,
-                  networkMob.burnTicksRemaining ?? 0,
-                  networkMob.burnEndsAt ?? 0,
-                );
-              }
-            });
-
-            [...mobs.keys()].forEach((mobId) => {
-              if (!seen.has(mobId)) {
-                destroyMob(mobId);
-              }
+            syncMobsFromRoomShared({
+              scene: this,
+              room,
+              mobs,
+              completedDeadMobIds,
+              createMob,
+              destroyMob,
+              syncDeathState,
+              applyMobHealthToVisual,
+              applyBurningToMobVisual,
+              hideStatusIcon,
             });
           };
 
@@ -5615,158 +5228,27 @@ export function GameCanvas({
           };
 
           const syncProjectilesFromRoom = () => {
-            if (!room || !('projectiles' in room.state)) {
-              projectileSprites.forEach((projectileVisual) => {
-                projectileVisual.aura.destroy();
-                projectileVisual.sprite.destroy();
-              });
-              projectileSprites.clear();
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.projectiles.forEach((projectile, projectileId) => {
-              seen.add(projectileId);
-              let projectileVisual = projectileSprites.get(projectileId);
-
-              if (!projectileVisual) {
-                const isShard = projectile.skillId === 'fireballShard';
-                const aura = this.add
-                  .ellipse(
-                    projectile.x,
-                    projectile.y,
-                    isShard ? 14 : 22,
-                    isShard ? 14 : 22,
-                    0xff962f,
-                    projectile.skillId === 'fireNova' ? 0.32 : isShard ? 0.18 : 0.24,
-                  )
-                  .setDepth(34);
-                const animation = getProjectileAnimation(projectile.skillId, projectileAnimations);
-                const projectileDisplaySize = getProjectileDisplaySize(projectile.skillId, resolvedSkillEffects);
-                const sprite = this.add
-                  .image(projectile.x, projectile.y, animation.textureKey, 0)
-                  .setDisplaySize(
-                    projectileDisplaySize,
-                    projectileDisplaySize,
-                  )
-                  .setDepth(35)
-                  .setOrigin(0.5)
-                  .setAlpha(0.98);
-                projectileVisual = {
-                  aura,
-                  sprite,
-                  targetX: projectile.x,
-                  targetY: projectile.y,
-                  animation,
-                };
-                projectileSprites.set(projectileId, projectileVisual);
-              }
-
-              projectileVisual.targetX = projectile.x;
-              projectileVisual.targetY = projectile.y;
-              projectileVisual.sprite.setAngle(
-                Phaser.Math.RadToDeg(
-                  Phaser.Math.Angle.Between(
-                    projectile.x,
-                    projectile.y,
-                    projectile.x + projectile.directionX,
-                    projectile.y + projectile.directionY,
-                  ),
-                ),
-              );
-              projectileVisual.sprite.setFrame(
-                getSpriteSheetAnimationFrame(
-                  projectileVisual.animation,
-                  Math.max(0, projectile.lifetime * 1000),
-                ),
-              );
+            syncProjectilesFromRoomShared({
+              scene: this,
+              Phaser,
+              room,
+              projectileSprites,
+              projectileAnimations,
+              resolvedSkillEffects,
+              getProjectileAnimation,
+              getProjectileDisplaySize,
             });
-
-            for (const [projectileId, projectileVisual] of projectileSprites.entries()) {
-              if (seen.has(projectileId)) {
-                continue;
-              }
-
-              projectileVisual.aura.destroy();
-              projectileVisual.sprite.destroy();
-              projectileSprites.delete(projectileId);
-            }
           };
 
           const syncGroundEffectsFromRoom = () => {
-            if (!room || !('groundEffects' in room.state)) {
-              groundEffects.forEach((effectVisual) => {
-                effectVisual.tile.destroy();
-                effectVisual.aura.destroy();
-                effectVisual.flames.forEach((flame) => flame.destroy());
-              });
-              groundEffects.clear();
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.groundEffects.forEach((effect, effectId) => {
-              seen.add(effectId);
-              let effectVisual = groundEffects.get(effectId);
-
-              if (!effectVisual) {
-                const isFireTrail = effect.skillId === 'fireTrail';
-                const trailDisplaySize = isFireTrail
-                  ? Math.max(18, resolvedSkillEffects.fireField.displaySize * 0.75)
-                  : resolvedSkillEffects.fireField.displaySize;
-                const tile = this.add
-                  .rectangle(effect.x, effect.y, meadowMap.tileSize, meadowMap.tileSize, isFireTrail ? 0xff7d1f : 0xff5e1a, isFireTrail ? 0.11 : 0.14)
-                  .setOrigin(0.5)
-                  .setDepth(0.4);
-                const aura = this.add
-                  .ellipse(effect.x, effect.y + 7, meadowMap.tileSize * 0.95, meadowMap.tileSize * 0.68, isFireTrail ? 0xffb347 : 0xff9f38, isFireTrail ? 0.14 : 0.18)
-                  .setOrigin(0.5)
-                  .setDepth(0.5);
-                const flames = [
-                  { x: -8, y: -7, scale: 0.56, alpha: 0.9 },
-                  { x: 8, y: -7, scale: 0.56, alpha: 0.9 },
-                  { x: -8, y: 7, scale: 0.56, alpha: 0.86 },
-                  { x: 8, y: 7, scale: 0.56, alpha: 0.86 },
-                ].map((offset) =>
-                  this.add
-                    .image(effect.x + offset.x, effect.y + offset.y, groundAnimation.textureKey, 0)
-                    .setDisplaySize(
-                      trailDisplaySize,
-                      trailDisplaySize,
-                    )
-                    .setScale(isFireTrail ? offset.scale * 0.82 : offset.scale)
-                    .setOrigin(0.5)
-                    .setDepth(0.6)
-                    .setAlpha(isFireTrail ? offset.alpha * 0.88 : offset.alpha),
-                );
-                effectVisual = {
-                  tile,
-                  aura,
-                  flames,
-                  x: effect.x,
-                  y: effect.y,
-                };
-                groundEffects.set(effectId, effectVisual);
-              }
-
-              effectVisual.x = effect.x;
-              effectVisual.y = effect.y;
-              effectVisual.tile.setPosition(effect.x, effect.y);
-              effectVisual.aura.setPosition(effect.x, effect.y + 6);
+            syncGroundEffectsFromRoomShared({
+              scene: this,
+              room,
+              groundEffects,
+              resolvedSkillEffects,
+              groundAnimation,
+              meadowMap,
             });
-
-            for (const [effectId, effectVisual] of groundEffects.entries()) {
-              if (seen.has(effectId)) {
-                continue;
-              }
-
-              effectVisual.tile.destroy();
-              effectVisual.aura.destroy();
-              effectVisual.flames.forEach((flame) => flame.destroy());
-              groundEffects.delete(effectId);
-            }
           };
 
           const createFloatingDamageText = (x: number, y: number, text: string, color = '#ff5959') => {
@@ -5820,22 +5302,11 @@ export function GameCanvas({
             playerInventory: latestProfileRef.current.playerInventory,
             playerEquipment: latestProfileRef.current.playerEquipment,
           };
-          const defaultWorldSpawn = {
-            x: meadowAsset.spawn.x * tileSize + tileSize / 2,
-            y: meadowAsset.spawn.y * tileSize + tileSize / 2,
-          };
           const joinOptions: WorldRoomJoinOptions | RaidRoomJoinOptions = activeRoomName === 'world'
             ? {
               ...(activeRoomOptions ?? {}),
-              ...createWorldProfileMessage(
-                latestProfileSnapshot,
-                latestProfileSnapshot.playerPosition.x <= 0 &&
-                  latestProfileSnapshot.playerPosition.y <= 0
-                  ? defaultWorldSpawn
-                  : latestProfileSnapshot.playerPosition,
-              ),
+              ...createWorldProfileMessage(latestProfileSnapshot),
               worldOwner: latestProfileSnapshot.playerName,
-              worldSpawn: defaultWorldSpawn,
             }
             : {
               ...(activeRoomOptions ?? {}),
@@ -5896,112 +5367,21 @@ export function GameCanvas({
                 }
                 chatSenderReadyRef.current?.(null);
               });
-
-              room.onMessage('chatHistory', (messages: RealtimeChatMessage[]) => {
-                chatHistoryRef.current?.(messages);
-              });
-
-              room.onMessage('chat', (message: RealtimeChatMessage) => {
-                chatMessageRef.current?.(message);
-              });
-
-              room.onMessage('skillBalanceConfig', (config: SkillBalanceConfig) => {
-                hasReceivedSkillBalanceRef.current = true;
-                lastKnownSkillBalanceSerializedRef.current = JSON.stringify(config);
-                skillBalanceConfigChangeRef.current?.(config);
-              });
-
-              room.onMessage('mobBalanceConfig', (config: MobBalanceConfig) => {
-                hasReceivedMobBalanceRef.current = true;
-                lastKnownMobBalanceSerializedRef.current = JSON.stringify(config);
-                mobBalanceConfigChangeRef.current?.(config);
-              });
-
-              room.onMessage(
-                'died',
-                (payload: DiedMessage) => {
-                  playerDeathRef.current?.(payload);
+              attachRoomInboundHandlers(
+                room,
+                {
+                  syncRaidTilesFromRoom,
+                  syncPlayersFromRoom,
+                  syncMobsFromRoom,
+                  syncChestsFromRoom,
+                  syncRaidExitPointsFromRoom,
+                  syncGroundEffectsFromRoom,
+                  syncProjectilesFromRoom,
+                  updateRaidVisibility,
+                  createFloatingDamageText,
                 },
+                true,
               );
-
-              room.onMessage(
-                'respawned',
-                (payload: RespawnedMessage) => {
-                  playerRespawnRef.current?.(payload);
-                },
-              );
-
-              room.onMessage(
-                'inventoryUpdate',
-                (payload: InventoryUpdateMessage) => {
-                  if (!Array.isArray(payload.inventory)) {
-                    return;
-                  }
-
-                  playerInventoryChangeRef.current?.(
-                    payload.inventory.map((item) => item || null),
-                  );
-                },
-              );
-
-              room.onMessage(
-                'consumableCooldown',
-                (payload: ConsumableCooldownMessage) => {
-                  if (
-                    typeof payload.itemId !== 'string' ||
-                    typeof payload.cooldownEndsAt !== 'number' ||
-                    !Number.isFinite(payload.cooldownEndsAt)
-                  ) {
-                    return;
-                  }
-
-                  consumableCooldownChangeRef.current?.({
-                    itemId: payload.itemId,
-                    cooldownEndsAt: payload.cooldownEndsAt,
-                  });
-                },
-              );
-
-              room.onMessage(
-                'damageText',
-                (payload: DamageTextMessage) => {
-                  if (
-                    typeof payload?.x !== 'number' ||
-                    typeof payload?.y !== 'number' ||
-                    typeof payload?.text !== 'string' ||
-                    !Number.isFinite(payload.x) ||
-                    !Number.isFinite(payload.y) ||
-                    payload.text.length === 0
-                  ) {
-                    return;
-                  }
-
-                  createFloatingDamageText(payload.x, payload.y, payload.text, payload.color ?? '#ff5959');
-                },
-              );
-
-              room.onMessage(
-                'raidExited',
-                (payload: RaidExitStateMessage) => {
-                  raidExitRef.current?.(payload);
-                },
-              );
-
-              room.onMessage(
-                'raidExpired',
-                (payload: RaidExitStateMessage) => {
-                  raidExitRef.current?.(payload);
-                },
-              );
-
-              syncRaidTilesFromRoom();
-              syncPlayersFromRoom();
-              syncMobsFromRoom();
-              syncChestsFromRoom();
-              syncRaidExitPointsFromRoom();
-              syncGroundEffectsFromRoom();
-              syncProjectilesFromRoom();
-              updateRaidVisibility(true);
             })
             .catch(() => {
               if (sceneActive && statusText.active) {

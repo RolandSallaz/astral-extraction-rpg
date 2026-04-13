@@ -61,46 +61,22 @@ export class PlayersService {
       );
     }
 
-    if (input.position) {
+    const patch = {
+      ...(typeof input.gold === 'number' ? { gold: input.gold } : {}),
+      ...(typeof input.health === 'number' ? { health: input.health } : {}),
+      ...(typeof input.maxHealth === 'number' ? { maxHealth: input.maxHealth } : {}),
+      ...(typeof input.level === 'number' ? { level: input.level } : {}),
+      ...(typeof input.experience === 'number' ? { experience: input.experience } : {}),
+      ...(typeof input.strength === 'number' ? { strength: input.strength } : {}),
+      ...(typeof input.agility === 'number' ? { agility: input.agility } : {}),
+      ...(typeof input.intellect === 'number' ? { intellect: input.intellect } : {}),
+      ...(input.quests ? { quests: input.quests } : {}),
+    };
+
+    if (Object.keys(patch).length > 0) {
       await this.playersRepository.update(
         { id: player.id },
-        {
-          position: input.position,
-          ...(typeof input.gold === 'number' ? { gold: input.gold } : {}),
-          ...(typeof input.health === 'number' ? { health: input.health } : {}),
-          ...(typeof input.maxHealth === 'number' ? { maxHealth: input.maxHealth } : {}),
-          ...(typeof input.level === 'number' ? { level: input.level } : {}),
-          ...(typeof input.experience === 'number' ? { experience: input.experience } : {}),
-          ...(typeof input.strength === 'number' ? { strength: input.strength } : {}),
-          ...(typeof input.agility === 'number' ? { agility: input.agility } : {}),
-          ...(typeof input.intellect === 'number' ? { intellect: input.intellect } : {}),
-          ...(input.quests ? { quests: input.quests } : {}),
-        },
-      );
-    } else if (
-      typeof input.gold === 'number' ||
-      typeof input.health === 'number' ||
-      typeof input.maxHealth === 'number' ||
-      typeof input.level === 'number' ||
-      typeof input.experience === 'number' ||
-      typeof input.strength === 'number' ||
-      typeof input.agility === 'number' ||
-      typeof input.intellect === 'number' ||
-      Boolean(input.quests)
-    ) {
-      await this.playersRepository.update(
-        { id: player.id },
-        {
-          ...(typeof input.gold === 'number' ? { gold: input.gold } : {}),
-          ...(typeof input.health === 'number' ? { health: input.health } : {}),
-          ...(typeof input.maxHealth === 'number' ? { maxHealth: input.maxHealth } : {}),
-          ...(typeof input.level === 'number' ? { level: input.level } : {}),
-          ...(typeof input.experience === 'number' ? { experience: input.experience } : {}),
-          ...(typeof input.strength === 'number' ? { strength: input.strength } : {}),
-          ...(typeof input.agility === 'number' ? { agility: input.agility } : {}),
-          ...(typeof input.intellect === 'number' ? { intellect: input.intellect } : {}),
-          ...(input.quests ? { quests: input.quests } : {}),
-        },
+        patch,
       );
     }
 

@@ -1,4 +1,4 @@
-import { Schema, type } from "@colyseus/schema";
+import { ArraySchema, Schema, type } from "@colyseus/schema";
 
 export class BasePlayerState extends Schema {
   @type("string") id = "";
@@ -38,4 +38,5 @@ export class BasePlayerState extends Schema {
   @type("string") weaponGemItem1 = "";
   @type("string") weaponGemItem2 = "";
   @type("string") weaponGemItem3 = "";
+  @type(["string"]) inventory = new ArraySchema<string>();
 }

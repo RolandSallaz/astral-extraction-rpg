@@ -3,6 +3,8 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
 import { MobState } from "../src/rooms/schema/MobState.js";
+import { WORLD_GAMEPLAY_PROFILE } from "../src/rooms/sharedGameplay.js";
+import { loadWorldDefinition } from "../src/rooms/worldDefinition.js";
 import {
   SKELETON_DASH_SKILL,
   SKELETON_DASH_SKILL_ID,
@@ -142,6 +144,29 @@ describe("world room", () => {
     const movedPlayer = room.state.players.get(client1.sessionId);
     assert.ok(movedPlayer);
     assert.ok((movedPlayer?.x ?? 0) > startX);
+  });
+
+  it("spawns world players at the server spawn regardless of join position", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const worldDefinition = loadWorldDefinition("lobby");
+    const tileSize = WORLD_GAMEPLAY_PROFILE.tileSize;
+    const expectedSpawn = {
+      x: worldDefinition.spawn.x * tileSize + tileSize / 2,
+      y: worldDefinition.spawn.y * tileSize + tileSize / 2,
+    };
+
+    const client = await colyseus.connectTo(room, {
+      name: "Spawn Tester",
+      position: { x: expectedSpawn.x + 400, y: expectedSpawn.y + 400 },
+      worldSpawn: { x: expectedSpawn.x + 800, y: expectedSpawn.y + 800 },
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+    assert.strictEqual(player?.x, expectedSpawn.x);
+    assert.strictEqual(player?.y, expectedSpawn.y);
   });
 
   it("acknowledges the latest world move sequence after simulation", async () => {
@@ -557,6 +582,10 @@ describe("world room", () => {
       assert.fail("Expected casters to exist");
     }
 
+    // Move the second player away so the fireball doesn't collide immediately.
+    fireFieldPlayer.x = fireballPlayer.x - 200;
+    fireFieldPlayer.y = fireballPlayer.y + 200;
+
     const requestedTargetX = fireballPlayer.x + 1000;
     const requestedTargetY = fireballPlayer.y;
 
@@ -875,8 +904,8 @@ describe("world room", () => {
     player.health = 50;
     (
       room as unknown as {
-        playerHealing: {
-          start: (
+        statusEffects: {
+          startHealing: (
             playerId: string,
             totalTicks: number,
             tickMs: number,
@@ -886,7 +915,7 @@ describe("world room", () => {
           ) => void;
         };
       }
-    ).playerHealing.start(client.sessionId, 4, 1000, 4000, player, Date.now());
+    ).statusEffects.startHealing(client.sessionId, 4, 1000, 4000, player, Date.now());
 
     await waitForNextSimulation(room, 220);
 

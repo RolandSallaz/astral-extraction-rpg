@@ -73,11 +73,8 @@ import {
 } from "./roomItems.js";
 import {
   verifySessionToken,
-  applyVerifiedProfile,
   type VerifiedPlayer,
 } from "./auth.js";
-import { BurnService } from "./services/BurnService.js";
-import { HealingService } from "./services/HealingService.js";
 import { SpatialGrid } from "./services/SpatialGrid.js";
 import { ContentSnapshotPoller } from "./services/ContentSnapshotPoller.js";
 import { canCastSkill, type SkillId } from "@mmorpg/shared/skills/registry";
@@ -103,11 +100,6 @@ import {
   rebuildRoomSpatialGrid,
 } from "./runtime/spatialRuntime.js";
 import {
-  applyRoomBurnToEntity,
-  updateRoomBurningEntities,
-  updateRoomHealingTargets,
-} from "./runtime/statusRuntime.js";
-import {
   consumeSupportedRoomConsumable,
   replaceRoomStringSlots,
   syncRoomChestSlots,
@@ -125,7 +117,9 @@ import type { ChestState } from "./schema/ChestState.js";
 import { GroundEffectState } from "./schema/GroundEffectState.js";
 import { type ProjectileState, type ProjectileServerData, createDefaultProjectileServerData } from "./schema/ProjectileState.js";
 import { applyDamageToPlayer as applyDamageToPlayerService } from "./services/CombatService.js";
-import { SharedCombatTickSystem } from "./systems/RoomTickSystems.js";
+import { SkillCastSystem } from "./systems/SkillCastSystem.js";
+import { StatusEffectSystem } from "./systems/StatusEffectSystem.js";
+import { ProjectileSystem } from "./systems/ProjectileSystem.js";
 
 // Re-export types subclasses need
 export type { DamageType } from "./projectileSkills.js";
@@ -195,34 +189,48 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   // ── Shared services ──────────────────────────────────────────────
   protected readonly skillBalance = cloneSkillBalanceConfig(DEFAULT_SKILL_BALANCE_CONFIG);
   protected readonly mobBalance = cloneMobBalanceConfig(DEFAULT_MOB_BALANCE_CONFIG);
-  protected readonly playerBurns = new BurnService();
-  protected readonly mobBurns = new BurnService();
-  protected readonly playerHealing = new HealingService();
-  protected readonly pendingSkillCasts = new Map<string, {
-    skillId: SkillId;
-    targetX?: number;
-    targetY?: number;
-  }>();
+  protected readonly statusEffects = new StatusEffectSystem({
+    getProfile: () => this.profile,
+    getSkillBalance: () => this.skillBalance,
+    getPlayer: (playerId) => this.getPlayer(playerId),
+    getMob: (mobId) => this.roomMobs.get(mobId),
+    getPlayers: () => this.roomPlayers.values(),
+    getMobs: () => this.roomMobs.values(),
+    getGroundEffects: () => this.roomGroundEffects,
+    applyDamageToPlayer: (player, amount, damageType) => this.applyDamageToPlayer(player, amount, damageType),
+    handlePlayerKilled: (player) => this.handlePlayerKilled(player),
+    handleMobDeath: (mob) => this.handleMobDeath(mob),
+    onCombatLog: (text) => this.onCombatLog(text),
+    awardExperience: (playerId, amount) => this.awardExperience(playerId, amount),
+    getOwnerProjectileGemConfig: (ownerId) => this.getOwnerProjectileGemConfig(ownerId, "fireball"),
+  });
+  protected readonly projectileSystem = new ProjectileSystem({
+    getProfile: () => this.profile,
+    getPlayer: (playerId) => this.getPlayer(playerId),
+    getPlayers: () => this.roomPlayers.values(),
+    getMobs: () => this.roomMobs.values(),
+    spawnProjectile: (
+      ownerId,
+      skillId,
+      x,
+      y,
+      directionX,
+      directionY,
+      lifetime,
+      damageScale,
+      sizeScale,
+    ) => this.spawnProjectile(ownerId, skillId, x, y, directionX, directionY, lifetime, damageScale, sizeScale),
+    updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
+    applyDamageToPlayer: (player, amount, damageType) => this.applyDamageToPlayer(player, amount, damageType),
+    handlePlayerKilled: (player) => this.handlePlayerKilled(player),
+    handleMobDeath: (mob) => this.handleMobDeath(mob),
+    awardExperience: (playerId, amount) => this.awardExperience(playerId, amount),
+  });
+  protected readonly skillCastSystem = new SkillCastSystem();
   protected readonly playerPositionHistory = new Map<string, PlayerPositionHistorySample[]>();
   protected readonly projectileHitHistory = new Map<string, Set<string>>();
   protected readonly projectileServerData = new Map<string, ProjectileServerData>();
-  protected readonly pendingBurstSpawns: {
-    ownerId: string;
-    x: number;
-    y: number;
-    directionX: number;
-    directionY: number;
-    spawnAt: number;
-  }[] = [];
-  protected readonly pendingAftershocks: {
-    ownerId: string;
-    x: number;
-    y: number;
-    damageScale: number;
-    triggerAt: number;
-  }[] = [];
   protected readonly consumableCooldownEndsAt = new Map<string, number>();
-  protected readonly pendingTeleportScrollCasts = new Set<string>();
   protected readonly mobPathCache = new Map<string, MobPathCacheEntry>();
   protected readonly losCache = new Map<string, boolean>();
   protected readonly itemFireResistance = createDefaultItemFireResistanceMap();
@@ -240,27 +248,6 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   });
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
   protected readonly skillHandlers = createSkillHandlers();
-  protected readonly sharedCombatTickSystem = new SharedCombatTickSystem({
-    updatePendingCasts: (now) => this.updatePendingCasts(now),
-    updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
-    updatePendingAftershocks: (now) => this.updatePendingAftershocks(now),
-    updateBurningTargets: (now) => this.updateBurningTargets(now),
-    updateHealingTargets: (now) => this.updateHealingTargets(now),
-    updateGroundEffects: (now) => this.updateGroundEffects(now),
-    updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
-  });
-  protected readonly sharedRaidCombatTickSystem = new SharedCombatTickSystem(
-    {
-      updatePendingCasts: (now) => this.updatePendingCasts(now),
-      updatePendingBurstSpawns: (now) => this.updatePendingBurstSpawns(now),
-      updatePendingAftershocks: (now) => this.updatePendingAftershocks(now),
-      updateBurningTargets: (now) => this.updateBurningTargets(now),
-      updateHealingTargets: (now) => this.updateHealingTargets(now),
-      updateGroundEffects: (now) => this.updateGroundEffects(now),
-      updateProjectiles: (deltaSeconds, now) => this.updateProjectilesShared(deltaSeconds, now),
-      updateBurningMobs: (now) => this.updateBurningMobs(now),
-    },
-  );
 
   // ── Auth (identical in both rooms) ───────────────────────────────
   protected async verifyAuth(options?: Record<string, unknown>) {
@@ -278,9 +265,9 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   // ── Dispose (identical in both rooms) ────────────────────────────
   protected disposeShared() {
     this.contentSnapshotPoller.stop();
-    this.playerBurns.clear();
-    this.mobBurns.clear();
-    this.playerHealing.clear();
+    this.statusEffects.clearAll();
+    this.projectileSystem.clearAll();
+    this.skillCastSystem.clearAll();
     this.playerSpatialGrid.clear();
     this.mobSpatialGrid.clear();
     this.playerPositionHistory.clear();
@@ -297,6 +284,23 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.onMessage("castSkill", (client: Client, message: CastSkillMessage) => {
       this.handleCastSkillMessage(client.sessionId, message);
     });
+  }
+
+  protected updateCombatSystems(
+    deltaSeconds: number,
+    now: number,
+    options: { includeMobBurns?: boolean } = {},
+  ) {
+    this.skillCastSystem.update(now, {
+      getPlayer: (playerId) => this.getPlayer(playerId),
+      getSkillHandler: (skillId) => this.skillHandlers.get(skillId),
+      createSkillCastContext: (playerId, player, castNow) =>
+        this.createSkillCastContext(playerId, player, castNow),
+      clearPlayerCastState: (player) => this.clearPlayerCastState(player),
+      performTeleportScroll: (playerId, player) => this.performTeleportScroll(playerId, player),
+    });
+    this.statusEffects.update(now, { includeMobBurns: options.includeMobBurns });
+    this.projectileSystem.update(deltaSeconds, now);
   }
 
   // ── Skill casting ────────────────────────────────────────────────
@@ -349,7 +353,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       player.castStartedAt = now;
       player.castEndsAt = now + castTimeMs;
       this.clearPlayerMovement(sessionId);
-      this.pendingSkillCasts.set(sessionId, {
+      this.skillCastSystem.queueSkillCast(sessionId, {
         skillId: skillId as SkillId,
         targetX,
         targetY,
@@ -386,7 +390,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       hasSplitProjectileGem: (oid) => this.hasSplitProjectileGem(oid),
       spawnProjectile: (oid, sid, x, y, dx, dy, lt, ds, ss) =>
         this.spawnProjectile(oid, sid, x, y, dx, dy, lt, ds, ss),
-      pendingBurstSpawns: this.pendingBurstSpawns,
+      queueBurstSpawns: (bursts) => this.projectileSystem.queueBurstSpawns(bursts),
       createFireField: (p, tx, ty, n) => this.createFireField(p, tx, ty, n),
     };
   }
@@ -422,7 +426,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       const healingTicks = p.healingPotionDurationMs / p.healingPotionTickMs;
       const nextCooldownEndsAt = now + p.healingPotionCooldownMs;
       this.consumableCooldownEndsAt.set(sessionId, nextCooldownEndsAt);
-      this.playerHealing.start(
+      this.statusEffects.startHealing(
         sessionId,
         healingTicks,
         p.healingPotionTickMs,
@@ -444,7 +448,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     player.castingSkillId = TELEPORT_SCROLL_ID;
     player.castStartedAt = now;
     player.castEndsAt = now + p.teleportScrollCastMs;
-    this.pendingTeleportScrollCasts.add(sessionId);
+    this.skillCastSystem.queueTeleportScroll(sessionId);
   }
 
   // ── SyncChest (identical in both rooms) ──────────────────────────
@@ -460,227 +464,6 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   }
 
   // ── Pending cast resolution ──────────────────────────────────────
-  protected updatePendingCasts(now = Date.now()) {
-    for (const [playerId, cast] of this.pendingSkillCasts.entries()) {
-      const player = this.getPlayer(playerId);
-      if (!player || player.dead) {
-        this.pendingSkillCasts.delete(playerId);
-        continue;
-      }
-
-      if (player.castEndsAt > now) {
-        continue;
-      }
-
-      const handler = this.skillHandlers.get(cast.skillId);
-      const ctx = this.createSkillCastContext(playerId, player, now);
-      const postCastLockMs = handler
-        ? handler.performCast(ctx, cast.targetX ?? player.x, cast.targetY ?? player.y)
-        : 0;
-
-      this.pendingSkillCasts.delete(playerId);
-      if (postCastLockMs > 0) {
-        player.castingSkillId = cast.skillId;
-        player.castStartedAt = now;
-        player.castEndsAt = now + postCastLockMs;
-        continue;
-      }
-
-      this.clearPlayerCastState(player);
-    }
-
-    for (const playerId of Array.from(this.pendingTeleportScrollCasts)) {
-      const player = this.getPlayer(playerId);
-      if (!player || player.dead) {
-        this.pendingTeleportScrollCasts.delete(playerId);
-        continue;
-      }
-
-      if (player.castEndsAt > now) {
-        continue;
-      }
-
-      this.performTeleportScroll(playerId, player);
-      this.clearPlayerCastState(player);
-    }
-  }
-
-  // ── Pending burst spawns ─────────────────────────────────────────
-  protected updatePendingBurstSpawns(now = Date.now()) {
-    let i = 0;
-    while (i < this.pendingBurstSpawns.length) {
-      const burst = this.pendingBurstSpawns[i];
-      if (burst.spawnAt > now) {
-        i++;
-        continue;
-      }
-
-      const player = this.getPlayer(burst.ownerId);
-      if (!player || player.dead) {
-        this.pendingBurstSpawns.splice(i, 1);
-        continue;
-      }
-
-      this.spawnProjectile(
-        burst.ownerId,
-        "fireball",
-        burst.x,
-        burst.y,
-        burst.directionX,
-        burst.directionY,
-        this.profile.fireballLifetime,
-      );
-      this.pendingBurstSpawns.splice(i, 1);
-    }
-  }
-
-  // ── Pending aftershocks ──────────────────────────────────────────
-  protected updatePendingAftershocks(now = Date.now()) {
-    const AFTERSHOCK_RADIUS = 48;
-    let i = 0;
-    while (i < this.pendingAftershocks.length) {
-      const shock = this.pendingAftershocks[i];
-      if (shock.triggerAt > now) {
-        i++;
-        continue;
-      }
-
-      const damage = Math.max(0, Math.round(this.profile.fireballBaseDamage * shock.damageScale));
-      if (damage > 0) {
-        for (const player of this.roomPlayers.values()) {
-          if (player.dead || player.id === shock.ownerId) {
-            continue;
-          }
-          if (Math.hypot(player.x - shock.x, player.y - shock.y) > AFTERSHOCK_RADIUS) {
-            continue;
-          }
-          this.applyDamageToPlayer(player, damage, "fire");
-          if (player.health <= 0) {
-            this.handlePlayerKilled(player);
-          }
-        }
-
-        for (const mob of this.roomMobs.values()) {
-          if (mob.dead) {
-            continue;
-          }
-          if (Math.hypot(mob.x - shock.x, mob.y - shock.y) > AFTERSHOCK_RADIUS) {
-            continue;
-          }
-          mob.health = Math.max(0, mob.health - damage);
-          if (mob.health <= 0) {
-            this.handleMobDeath(mob);
-            this.awardExperience(shock.ownerId, mob.experienceReward);
-          }
-        }
-      }
-
-      this.pendingAftershocks.splice(i, 1);
-    }
-  }
-
-  // ── Burn / healing updates ───────────────────────────────────────
-  protected updateBurningTargets(now = Date.now()) {
-    updateRoomBurningEntities({
-      service: this.playerBurns,
-      now,
-      burnTickMs: this.profile.fireballBurnTickMs,
-      skillBalance: this.skillBalance,
-      getEntity: (playerId) => this.getPlayer(playerId),
-      onTick: (_playerId, player, damage) => {
-        const resolvedDamage = this.applyDamageToPlayer(player, damage, "fire");
-        this.onCombatLog(`${player.name} burns for ${resolvedDamage}.`);
-        if (player.health <= 0) {
-          this.handlePlayerKilled(player);
-        }
-      },
-    });
-  }
-
-  protected updateBurningMobs(now = Date.now()) {
-    updateRoomBurningEntities({
-      service: this.mobBurns,
-      now,
-      burnTickMs: this.profile.fireballBurnTickMs,
-      skillBalance: this.skillBalance,
-      getEntity: (mobId) => this.roomMobs.get(mobId),
-      onTick: (_mobId, mob, damage) => {
-        mob.health = Math.max(0, mob.health - damage);
-        this.onCombatLog(`${mob.name} burns for ${damage}.`);
-        if (mob.health <= 0) {
-          this.handleMobDeath(mob);
-        }
-      },
-    });
-  }
-
-  protected updateHealingTargets(now = Date.now()) {
-    const p = this.profile;
-    updateRoomHealingTargets({
-      service: this.playerHealing,
-      now,
-      tickMs: p.healingPotionTickMs,
-      healPerTick: p.healingPotionTotalHeal / (p.healingPotionDurationMs / p.healingPotionTickMs),
-      getPlayer: (playerId) => this.getPlayer(playerId),
-    });
-  }
-
-  // ── Ground effects ───────────────────────────────────────────────
-  protected updateGroundEffects(now = Date.now()) {
-    const p = this.profile;
-
-    for (const [effectId, effect] of this.roomGroundEffects.entries()) {
-      if (effect.expiresAt <= now) {
-        this.roomGroundEffects.delete(effectId);
-        continue;
-      }
-
-      if (effect.nextTickAt > now) {
-        continue;
-      }
-
-      const owner = this.getPlayer(effect.ownerId);
-      const effectDamage =
-        effect.skillId === "fireTrail"
-          ? this.skillBalance.fireball.burnDamage
-          : this.skillBalance.fireField.damage;
-
-      for (const player of this.roomPlayers.values()) {
-        if (player.dead || !this.isEntityOnGroundEffect(player.x, player.y, effect)) {
-          continue;
-        }
-
-        const resolvedDamage = this.applyDamageToPlayer(player, effectDamage, "fire");
-        this.applyBurnToPlayer(player, effect.skillId === "fireTrail" ? "fireball" : "fireField", effect.ownerId);
-        this.onCombatLog(`${player.name} scorches for ${resolvedDamage}.`);
-
-        if (player.health <= 0) {
-          this.handlePlayerKilled(player);
-        }
-      }
-
-      for (const mob of this.roomMobs.values()) {
-        if (mob.dead || !this.isEntityOnGroundEffect(mob.x, mob.y, effect)) {
-          continue;
-        }
-
-        mob.health = Math.max(0, mob.health - effectDamage);
-        this.applyBurnToMob(mob, effect.skillId === "fireTrail" ? "fireball" : "fireField", effect.ownerId);
-        if (owner && !owner.dead) {
-          setMobAggroTarget(mob, owner);
-        }
-        this.onCombatLog(`${mob.name} scorches for ${effectDamage}.`);
-
-        if (mob.health <= 0) {
-          this.handleMobDeath(mob);
-          this.awardExperience(effect.ownerId, mob.experienceReward);
-        }
-      }
-
-      effect.nextTickAt = now + (effect.skillId === "fireTrail" ? p.fireTrailTickMs : p.fireFieldTickMs);
-    }
-  }
-
   protected isEntityOnGroundEffect(x: number, y: number, effect: GroundEffectState) {
     const tileSize = this.profile.tileSize;
     return Math.abs(x - effect.x) <= tileSize / 2 && Math.abs(y - effect.y) <= tileSize / 2;
@@ -704,7 +487,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         if (mob.respawnAt > 0 && now >= mob.respawnAt) {
           resetMobToSpawn(mob);
           clearMobPath(this.mobPathCache, mob.id);
-          this.mobBurns.delete(mob.id);
+          this.statusEffects.deleteMobBurn(mob.id);
         }
         continue;
       }
@@ -1651,7 +1434,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     });
 
     if (aftershock) {
-      this.pendingAftershocks.push(aftershock);
+      this.projectileSystem.queueAftershock(aftershock);
     }
   }
 
@@ -1683,7 +1466,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       gemConfig,
     });
 
-    plan.delayedSpawns.forEach((burst) => this.pendingBurstSpawns.push(burst));
+    this.projectileSystem.queueBurstSpawns(plan.delayedSpawns);
     plan.immediateSpawns.forEach((spawn) => {
       this.spawnProjectile(
         spawn.ownerId,
@@ -1820,29 +1603,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   // ── Burn helpers ─────────────────────────────────────────────────
 
   protected applyBurnToPlayer(player: BasePlayerState, sourceSkill: keyof SkillBalanceConfig, ownerId?: string) {
-    applyRoomBurnToEntity({
-      service: this.playerBurns,
-      entityId: player.id,
-      entity: player,
-      sourceSkill,
-      ownerId,
-      skillBalance: this.skillBalance,
-      burnTickMs: this.profile.fireballBurnTickMs,
-      getDurationMultiplier: (nextOwnerId) => this.getOwnerProjectileGemConfig(nextOwnerId, "fireball").durationMultiplier,
-    });
+    this.statusEffects.applyBurnToPlayer(player, sourceSkill, ownerId);
   }
 
   protected applyBurnToMob(mob: MobState, sourceSkill: keyof SkillBalanceConfig, ownerId?: string) {
-    applyRoomBurnToEntity({
-      service: this.mobBurns,
-      entityId: mob.id,
-      entity: mob,
-      sourceSkill,
-      ownerId,
-      skillBalance: this.skillBalance,
-      burnTickMs: this.profile.fireballBurnTickMs,
-      getDurationMultiplier: (nextOwnerId) => this.getOwnerProjectileGemConfig(nextOwnerId, "fireball").durationMultiplier,
-    });
+    this.statusEffects.applyBurnToMob(mob, sourceSkill, ownerId);
   }
 
   // ── Damage (overridable for tutorial protection) ─────────────────
@@ -1867,7 +1632,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     mob.attackCooldownEndsAt = 0;
     this.clearMobSkillState(mob);
     clearMobPath(this.mobPathCache, mob.id);
-    this.mobBurns.delete(mob.id);
+    this.statusEffects.deleteMobBurn(mob.id);
     this.onCombatLog(`${mob.name} collapses.`);
   }
 
@@ -1885,8 +1650,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     player.castingSkillId = "";
     player.castStartedAt = 0;
     player.castEndsAt = 0;
-    this.pendingSkillCasts.delete(player.id);
-    this.pendingTeleportScrollCasts.delete(player.id);
+    this.skillCastSystem.clearPlayer(player.id);
   }
 
   // ── Skill runtime delegates ──────────────────────────────────────

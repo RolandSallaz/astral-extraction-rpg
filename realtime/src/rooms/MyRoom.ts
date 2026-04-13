@@ -23,13 +23,13 @@ import {
   WORLD_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
 } from "./sharedGameplay.js";
+import { INVENTORY_SIZE } from "@mmorpg/shared";
 import {
   getMobDefinition,
   MOB_KINDS,
   type MobKind,
 } from "@mmorpg/shared/mobs/catalog";
 import {
-  normalizeRoomInventoryEntry,
   normalizeRoomInventorySlots,
   parseRoomInventoryEntry,
 } from "./roomItems.js";
@@ -69,9 +69,11 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     this.worldDefinition.blockedTiles.map((tile) => `${tile.x}:${tile.y}`),
   );
   private readonly chatHistory: RealtimeChatMessage[] = [];
-  private readonly playerInventories = new Map<string, string[]>();
   private readonly pendingMovementSequence = new Map<string, number>();
-  private worldSpawnPosition?: { x: number; y: number };
+  private readonly worldSpawnPosition = {
+    x: this.worldDefinition.spawn.x * TILE_SIZE + TILE_SIZE / 2,
+    y: this.worldDefinition.spawn.y * TILE_SIZE + TILE_SIZE / 2,
+  };
 
   // ── Abstract method implementations ─────────────────────────────
 
@@ -270,12 +272,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         roleTransform: (value) => value.toUpperCase(),
       });
 
-      if (Array.isArray(message?.inventory)) {
-        this.playerInventories.set(
-          client.sessionId,
-          message.inventory.map((itemId) => normalizeRoomInventoryEntry(itemId)),
-        );
-      }
+      this.syncPlayerInventory(player, message?.inventory);
 
       if (
         applyRoomZeroHealthState(player, {
@@ -288,8 +285,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
           },
         })
       ) {
-        this.playerBurns.delete(player.id);
-        this.playerHealing.delete(player.id);
+        this.statusEffects.deletePlayerEffects(player.id);
       }
     });
 
@@ -339,7 +335,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
       const slotIndex = typeof message?.slotIndex === "number" ? Math.floor(message.slotIndex) : -1;
       const source = message?.source === "container" ? "container" : "inventory";
-      const inventory = this.playerInventories.get(client.sessionId) ?? [];
+      const inventory = Array.from(player.inventory);
       let sourceSlots: string[] | null = null;
 
       if (source === "inventory") {
@@ -362,7 +358,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         slotIndex,
         (nextSlots) => {
           if (source === "inventory") {
-            this.playerInventories.set(client.sessionId, nextSlots);
+            replaceRoomStringSlots(player.inventory, nextSlots);
             client.send("inventoryUpdate", {
               inventory: nextSlots.map((item) => item || ""),
             });
@@ -386,8 +382,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       const respawnedPlayer = this.createRespawnedPlayerState(player, respawnPosition.x, respawnPosition.y);
       this.state.players.set(client.sessionId, respawnedPlayer);
       this.pendingMovementSequence.delete(client.sessionId);
-      this.playerBurns.delete(player.id);
-      this.playerHealing.delete(player.id);
+      this.statusEffects.deletePlayerEffects(player.id);
       client.send("respawned", {
         x: respawnedPlayer.x,
         y: respawnedPlayer.y,
@@ -407,18 +402,6 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       this.verifiedPlayers.set(client.sessionId, verified);
     }
 
-    if (
-      typeof options?.worldSpawn?.x === "number" &&
-      Number.isFinite(options.worldSpawn.x) &&
-      typeof options?.worldSpawn?.y === "number" &&
-      Number.isFinite(options.worldSpawn.y)
-    ) {
-      this.worldSpawnPosition = {
-        x: options.worldSpawn.x,
-        y: options.worldSpawn.y,
-      };
-    }
-
     const restoredPlayer = this.restoreOfflinePlayer(client, options);
     if (restoredPlayer) {
       client.send("chatHistory", this.chatHistory);
@@ -436,20 +419,16 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         defaultRole: "USER",
         roleTransform: (value) => value.toUpperCase(),
       });
+      this.syncPlayerInventory(player, options?.inventory);
     }
 
     initializeRoomPlayerTransientState(player);
 
-    const spawnPosition = verified
-      ? this.resolveSpawnPosition(verified.position)
-      : this.resolveSpawnPosition(options?.position);
+    const spawnPosition = this.resolveSpawnPosition(this.worldSpawnPosition);
     player.x = spawnPosition.x;
     player.y = spawnPosition.y;
 
     this.state.players.set(client.sessionId, player);
-    if (!this.playerInventories.has(client.sessionId)) {
-      this.playerInventories.set(client.sessionId, []);
-    }
     client.send("chatHistory", this.chatHistory);
     sendRoomBalanceSnapshots(
       client,
@@ -473,6 +452,21 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
   }
 
   // ── World-specific methods ──────────────────────────────────────
+
+  private syncPlayerInventory(
+    player: PlayerState,
+    inventory: Array<string | null | undefined> | null | undefined,
+  ) {
+    if (Array.isArray(inventory)) {
+      const normalizedInventory = normalizeRoomInventorySlots(inventory, INVENTORY_SIZE);
+      replaceRoomStringSlots(player.inventory, normalizedInventory);
+      return;
+    }
+
+    if (player.inventory.length === 0) {
+      replaceRoomStringSlots(player.inventory, normalizeRoomInventorySlots([], INVENTORY_SIZE));
+    }
+  }
 
   private createStaticChests() {
     for (const definition of this.worldDefinition.staticChests) {
@@ -552,7 +546,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
     this.recordPlayerPositionHistory(tickNow);
     this.updateMobs(deltaSeconds, tickNow);
-    this.sharedCombatTickSystem.update(deltaSeconds, tickNow);
+    this.updateCombatSystems(deltaSeconds, tickNow, { includeMobBurns: false });
   }
 
   private canPlayerMoveTo(x: number, y: number, player?: PlayerState) {
@@ -651,32 +645,23 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       this.clearPlayerCastState(player);
       this.state.players.set(client.sessionId, player);
 
-      moveRoomMapValue(this.playerInventories, previousSessionId, client.sessionId);
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
       clearRoomSessionCollections(
         previousSessionId,
         this.pendingMovementSequence,
-        this.pendingSkillCasts,
-        this.pendingTeleportScrollCasts,
       );
-      this.playerBurns.move(previousSessionId, client.sessionId);
-      this.playerHealing.move(previousSessionId, client.sessionId);
+      this.skillCastSystem.clearPlayer(previousSessionId);
+      this.statusEffects.movePlayerEffects(previousSessionId, client.sessionId);
 
       applyRoomProfilePatch(player, options, {
         roleTransform: (value) => value.toUpperCase(),
       });
-      if (Array.isArray(options?.inventory)) {
-        const normalizedInventory = normalizeRoomInventorySlots(options.inventory, 24);
-        this.playerInventories.set(client.sessionId, normalizedInventory);
-      } else if (!this.playerInventories.has(client.sessionId)) {
-        this.playerInventories.set(client.sessionId, []);
-      }
+      this.syncPlayerInventory(player, options?.inventory);
       if (player.health > 0) {
         player.dead = false;
       } else {
-        this.playerBurns.delete(player.id);
-        this.playerHealing.delete(player.id);
+        this.statusEffects.deletePlayerEffects(player.id);
         applyRoomZeroHealthState(player, {
           resetMovement: () => {
             player.moveX = 0;
@@ -694,9 +679,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         mobs: this.state.mobs.values(),
         projectiles: this.state.projectiles.values(),
         groundEffects: this.state.groundEffects.values(),
-        pendingBurstSpawns: this.pendingBurstSpawns,
-        pendingAftershocks: this.pendingAftershocks,
       });
+      this.projectileSystem.transferOwnerReferences(previousSessionId, client.sessionId);
 
       sendRoomBalanceSnapshots(
         client,
@@ -740,6 +724,10 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     nextPlayer.weaponGemItem1 = player.weaponGemItem1;
     nextPlayer.weaponGemItem2 = player.weaponGemItem2;
     nextPlayer.weaponGemItem3 = player.weaponGemItem3;
+    replaceRoomStringSlots(
+      nextPlayer.inventory,
+      normalizeRoomInventorySlots(Array.from(player.inventory), INVENTORY_SIZE),
+    );
     return nextPlayer;
   }
 
@@ -782,17 +770,15 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       }
 
       this.state.players.delete(sessionId);
+      this.statusEffects.deletePlayerEffects(sessionId);
+      this.projectileSystem.clearOwnerData(sessionId);
       clearRoomSessionCollections(
         sessionId,
-        this.playerInventories,
-        this.playerBurns,
-        this.playerHealing,
         this.consumableCooldownEndsAt,
         this.pendingMovementSequence,
-        this.pendingSkillCasts,
-        this.pendingTeleportScrollCasts,
         this.verifiedPlayers,
       );
+      this.skillCastSystem.clearPlayer(sessionId);
     }
   }
 
@@ -811,8 +797,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.fireFieldCooldownEndsAt = 0;
     player.woodStaffStrikeCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
-    this.playerBurns.delete(player.id);
-    this.playerHealing.delete(player.id);
+    this.statusEffects.deletePlayerEffects(player.id);
 
     const droppedItems = [
       player.headItem,
@@ -827,7 +812,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       player.weaponGemItem1,
       player.weaponGemItem2,
       player.weaponGemItem3,
-      ...(this.playerInventories.get(player.id) ?? []),
+      ...Array.from(player.inventory),
     ].filter((itemId) => {
       return parseRoomInventoryEntry(itemId) !== null;
     });
@@ -861,7 +846,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.weaponGemItem1 = "";
     player.weaponGemItem2 = "";
     player.weaponGemItem3 = "";
-    this.playerInventories.set(player.id, []);
+    replaceRoomStringSlots(player.inventory, normalizeRoomInventorySlots([], INVENTORY_SIZE));
 
     const client = this.clients.find((entry: Client): boolean => entry.sessionId === player.id);
     client?.send("died", {
@@ -870,7 +855,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       level: player.level,
       experience: player.experience,
       equipment: createEquipmentStateSnapshot({}),
-      inventory: new Array<string | null>(24).fill(null),
+      inventory: new Array<string | null>(INVENTORY_SIZE).fill(null),
     });
   }
 

@@ -225,7 +225,6 @@ export async function saveCharacter(character: CharacterProfile) {
         equipment: character.equipment,
         inventory: character.inventory,
         gold: character.gold,
-        position: character.position,
         health: character.health,
         maxHealth: character.maxHealth,
         level: character.level,

@@ -1,15 +1,6 @@
-import { IsArray, IsNumber, IsObject, IsOptional, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsArray, IsNumber, IsObject, IsOptional } from 'class-validator';
 import type { CharacterProfile } from '@mmorpg/shared/player/contracts';
 import type { QuestLog } from '@mmorpg/shared/quests/core';
-
-class PositionDto {
-  @IsNumber()
-  x: number;
-
-  @IsNumber()
-  y: number;
-}
 
 export class UpdatePlayerDto {
   @IsOptional()
@@ -19,11 +10,6 @@ export class UpdatePlayerDto {
   @IsOptional()
   @IsArray()
   inventory?: CharacterProfile['inventory'];
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => PositionDto)
-  position?: PositionDto;
 
   @IsOptional()
   @IsNumber()
