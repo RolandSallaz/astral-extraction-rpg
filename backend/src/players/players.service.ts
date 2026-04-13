@@ -63,13 +63,6 @@ export class PlayersService {
 
     const patch = {
       ...(typeof input.gold === 'number' ? { gold: input.gold } : {}),
-      ...(typeof input.health === 'number' ? { health: input.health } : {}),
-      ...(typeof input.maxHealth === 'number' ? { maxHealth: input.maxHealth } : {}),
-      ...(typeof input.level === 'number' ? { level: input.level } : {}),
-      ...(typeof input.experience === 'number' ? { experience: input.experience } : {}),
-      ...(typeof input.strength === 'number' ? { strength: input.strength } : {}),
-      ...(typeof input.agility === 'number' ? { agility: input.agility } : {}),
-      ...(typeof input.intellect === 'number' ? { intellect: input.intellect } : {}),
       ...(input.quests ? { quests: input.quests } : {}),
     };
 

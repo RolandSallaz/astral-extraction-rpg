@@ -16,34 +16,6 @@ export class UpdatePlayerDto {
   gold?: number;
 
   @IsOptional()
-  @IsNumber()
-  health?: number;
-
-  @IsOptional()
-  @IsNumber()
-  maxHealth?: number;
-
-  @IsOptional()
-  @IsNumber()
-  level?: number;
-
-  @IsOptional()
-  @IsNumber()
-  experience?: number;
-
-  @IsOptional()
-  @IsNumber()
-  strength?: number;
-
-  @IsOptional()
-  @IsNumber()
-  agility?: number;
-
-  @IsOptional()
-  @IsNumber()
-  intellect?: number;
-
-  @IsOptional()
   @IsObject()
   quests?: QuestLog;
 }

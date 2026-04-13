@@ -78,7 +78,7 @@ const COMMON_GAMEPLAY: Omit<
   playerHitRadius: 18,
   mobHitRadius: 18,
   playerMobCollisionRadius: 22,
-  meleeStrikeDamage: 2,
+  meleeStrikeDamage: 5,
   meleeStrikeRange: 46,
   meleeStrikeCooldownMs: 450,
   meleeStrikeArcHalfAngleRad: Math.PI * 0.5,

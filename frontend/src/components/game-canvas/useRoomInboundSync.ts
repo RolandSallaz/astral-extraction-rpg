@@ -38,6 +38,7 @@ type UseRoomInboundSyncParams = {
   lastKnownMobBalanceSerializedRef: MutableRefObject<string>;
   mobBalanceConfigChangeRef: MutableRefObject<((config: MobBalanceConfig) => void) | undefined>;
   playerDeathRef: MutableRefObject<((payload: DiedMessage) => void) | undefined>;
+  beforePlayerRespawnRef: MutableRefObject<((payload: RespawnedMessage) => void) | undefined>;
   playerRespawnRef: MutableRefObject<((payload: RespawnedMessage) => void) | undefined>;
   playerInventoryChangeRef: MutableRefObject<((inventory: Array<string | null>) => void) | undefined>;
   consumableCooldownChangeRef: MutableRefObject<
@@ -56,6 +57,7 @@ export function useRoomInboundSync({
   lastKnownMobBalanceSerializedRef,
   mobBalanceConfigChangeRef,
   playerDeathRef,
+  beforePlayerRespawnRef,
   playerRespawnRef,
   playerInventoryChangeRef,
   consumableCooldownChangeRef,
@@ -99,6 +101,7 @@ export function useRoomInboundSync({
       });
 
       room.onMessage('respawned', (payload: RespawnedMessage) => {
+        beforePlayerRespawnRef.current?.(payload);
         playerRespawnRef.current?.(payload);
       });
 
@@ -171,6 +174,7 @@ export function useRoomInboundSync({
       lastKnownMobBalanceSerializedRef,
       mobBalanceConfigChangeRef,
       playerDeathRef,
+      beforePlayerRespawnRef,
       playerRespawnRef,
       playerInventoryChangeRef,
       consumableCooldownChangeRef,

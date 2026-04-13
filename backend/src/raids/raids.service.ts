@@ -65,7 +65,7 @@ export class RaidsService {
         isActive: true,
       }),
       partyId: run.party?.id ?? null,
-      generatedLayout: run.generatedLayout,
+      generatedLayout: null,
       startedAt: run.startedAt?.toISOString() ?? null,
       finishedAt: run.finishedAt?.toISOString() ?? null,
       createdAt: run.createdAt.toISOString(),

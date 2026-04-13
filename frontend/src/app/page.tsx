@@ -147,6 +147,7 @@ type AdminMobPanelMode = 'edit' | 'spawn';
 type WorldEditorDebugState = {
   textureKey: string;
   textureLoaded: boolean;
+  showCollisionOverlay: boolean;
 };
 type TraderOffer = {
   itemId: ItemId;
@@ -1418,6 +1419,7 @@ export default function Home() {
   const [worldEditorDebug, setWorldEditorDebug] = useState<WorldEditorDebugState>({
     textureKey: '',
     textureLoaded: false,
+    showCollisionOverlay: false,
   });
   const [skillEffectOverrides, setSkillEffectOverrides] = useState<SkillEffectOverrides>(
     DEFAULT_SKILL_EFFECT_OVERRIDES,
@@ -4242,7 +4244,13 @@ export default function Home() {
           selectedWorldTrader={selectedWorldTrader}
           onWorldEditPaint={handleWorldPaint}
           onWorldEditHoverChange={setWorldHoverTile}
-          onWorldEditDebugChange={setWorldEditorDebug}
+          onWorldEditDebugChange={(debug) => {
+            setWorldEditorDebug((current) => ({
+              ...current,
+              ...debug,
+            }));
+          }}
+          debugCollisionEnabled={playerRole === 'admin' && worldEditorDebug.showCollisionOverlay}
           playerEquipment={character.equipment}
           playerInventory={character.inventory}
           playerName={username}
@@ -6064,6 +6072,21 @@ export default function Home() {
                       <div>Draft NPCs: {worldMapDraft.traders.length}</div>
                       <div>Texture key: {worldEditorDebug.textureKey || 'none'}</div>
                       <div>Texture loaded: {worldEditorDebug.textureLoaded ? 'yes' : 'no'}</div>
+                      <label className="flex items-center gap-2 text-sm text-[#d8ebc7]">
+                        <input
+                          type="checkbox"
+                          checked={worldEditorDebug.showCollisionOverlay}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setWorldEditorDebug((current) => ({
+                              ...current,
+                              showCollisionOverlay: checked,
+                            }));
+                          }}
+                          className="h-4 w-4 rounded border border-[#d9efbd]/30 bg-[#203b11]/70"
+                        />
+                        <span>Show collision overlay</span>
+                      </label>
                       {worldEditorMode === 'sprite' ? (
                         <div>
                           Transform:

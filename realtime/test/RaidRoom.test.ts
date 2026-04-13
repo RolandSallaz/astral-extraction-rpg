@@ -167,6 +167,11 @@ describe("raid room", () => {
     assert.strictEqual(room.state.width, 32);
     assert.strictEqual(room.state.height, 16);
     assert.deepStrictEqual(Array.from(room.state.exitPoints), ["27:7"]);
+    const tileAt = (x: number, y: number) => room.state.tiles[y * room.state.width + x];
+    assert.notStrictEqual(tileAt(8, 7), "wall");
+    assert.notStrictEqual(tileAt(8, 8), "wall");
+    assert.notStrictEqual(tileAt(9, 7), "wall");
+    assert.notStrictEqual(tileAt(9, 8), "wall");
 
     const tutorialChest = room.state.chests.get("raid-chest-0-13-7");
     assert.ok(tutorialChest);

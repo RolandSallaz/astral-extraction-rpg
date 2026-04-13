@@ -10,7 +10,6 @@ import {
 } from '../../players/player-quest.types';
 import { StartRaidDto } from '../dto/start-raid.dto';
 import { RaidRunEntity } from '../entities/raid-run.entity';
-import { generateRaidLayoutForTemplate } from '../raid-procgen';
 import { RaidTemplateFiles } from '../raid-template-files';
 
 const RECENT_RAID_REUSE_WINDOW_MS = 60_000;
@@ -57,17 +56,11 @@ export class StartRaidUseCase {
     }
 
     const seed = `${template.code}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const layout = generateRaidLayoutForTemplate(
-      template.code,
-      seed,
-      template.width,
-      template.height,
-    );
     const run = this.raidRunsRepository.create({
       seed,
       status: 'ready',
       playerCount,
-      generatedLayout: layout,
+      generatedLayout: null,
       startedAt: new Date(),
       finishedAt: null,
       templateCode: template.code,
@@ -144,7 +137,7 @@ export class StartRaidUseCase {
         isActive: true,
       }),
       partyId: run.party?.id ?? null,
-      generatedLayout: run.generatedLayout,
+      generatedLayout: null,
       startedAt: run.startedAt?.toISOString() ?? null,
       finishedAt: run.finishedAt?.toISOString() ?? null,
       createdAt: run.createdAt.toISOString(),

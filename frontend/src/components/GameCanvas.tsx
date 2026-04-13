@@ -92,11 +92,31 @@ import {
   resolveSpriteSheetAnimationColumns,
   type SpriteSheetAnimation,
 } from '@/lib/animations/runtime';
+import { getProjectileAnimation, getProjectileDisplaySize } from '@/components/game-canvas/projectileHelpers';
+import {
+  clampTargetToCastRange,
+  getCharacterCastRange,
+  getCharacterCastTimeMs,
+  hasWoodStaffEquipped,
+} from '@/components/game-canvas/castHelpers';
+import { createWorldEditorInputHandler } from '@/components/game-canvas/worldEditorInput';
+import {
+  getWorldTraderAnimationKey,
+  getWorldTraderBodyOverlayAnimation,
+  getWorldTraderSpriteSheetKey,
+} from '@/components/game-canvas/worldTraderHelpers';
+import {
+  getAnimatedMobTexture,
+  getMobRenderScale,
+  getMobVisualKind,
+  toRuntimeAnimationFromMobClip,
+} from '@/components/game-canvas/mobRenderHelpers';
 import { useRoomOutboundSync } from '@/components/game-canvas/useRoomOutboundSync';
 import { useRoomInboundSync } from '@/components/game-canvas/useRoomInboundSync';
 import { useProjectileEffectsRenderer } from '@/components/game-canvas/useProjectileEffectsRenderer';
 import { useMobRenderer } from '@/components/game-canvas/useMobRenderer';
 import { usePlayerRenderer } from '@/components/game-canvas/usePlayerRenderer';
+import { createMinimapEmitter, type MinimapSnapshot } from '@/components/game-canvas/minimapEmitter';
 
 type PhaserGame = import('phaser').Game;
 type PhaserImage = Phaser.GameObjects.Image;
@@ -185,6 +205,19 @@ type MovementBlocker = {
   radius: number;
 };
 
+const ENTITY_SORT_BASE_DEPTH = 1;
+const ENTITY_SORT_DEPTH_RANGE = 2.2;
+const ENTITY_SORT_SHADOW_OFFSET = 0.24;
+const ENTITY_SORT_AURA_OFFSET = 0.12;
+const ENTITY_SORT_LABEL_OFFSET = 0.16;
+const ENTITY_SORT_EFFECT_OFFSET = 0.04;
+const DEBUG_COLLISION_OVERLAY_DEPTH = 4.4;
+const DEBUG_COLLISION_TILE_COLOR = 0xff6b6b;
+const DEBUG_COLLISION_CHEST_TILE_COLOR = 0xffc857;
+const DEBUG_COLLISION_PLAYER_COLOR = 0x5edfff;
+const DEBUG_COLLISION_REMOTE_PLAYER_COLOR = 0x8af28a;
+const DEBUG_COLLISION_MOB_COLOR = 0xffa552;
+
 export type PlayerEquipment = EquipmentState;
 export type ContainerSnapshot = {
   id: string;
@@ -195,19 +228,7 @@ export type ContainerSnapshot = {
   slots: Array<string | null>;
 };
 export type { RealtimeChatMessage };
-
-export type MinimapSnapshot = {
-  roomName: 'world' | 'raid';
-  width: number;
-  height: number;
-  tiles: string[];
-  explored: number[];
-  visible: number[];
-  playerTile: {
-    x: number;
-    y: number;
-  };
-};
+export type { MinimapSnapshot };
 
 export type WorldTraderInteraction = MeadowTraderAsset;
 export type TraderQuestMarker = {
@@ -481,6 +502,7 @@ type MobVisual = {
   castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
+  currentHealthSegmentCount: number;
   targetX: number;
   targetY: number;
   lastX: number;
@@ -549,6 +571,7 @@ type CharacterVisual = {
   castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
+  currentHealthSegmentCount: number;
   targetX: number;
   targetY: number;
   lastX: number;
@@ -678,9 +701,16 @@ const FIRE_TRAIL_CAST_PENALTY_MS = WORLD_GAMEPLAY_PROFILE.fireTrailCastPenaltyMs
 const FIRE_BURST_EXTRA_LOCK_MS = 200;
 const WOOD_STAFF_STRIKE_LOCK_MS = 180;
 const FIRE_RANGE_GEM_ID = 'fire_range_gem';
-const SKELETON_RENDER_SCALE = 2;
 const DEFAULT_MOB_BURN_SCALE = 1;
 const STAFF_CAST_RANGE = WORLD_GAMEPLAY_PROFILE.staffCastRange;
+const CAST_HELPERS_CONFIG = {
+  fireballBaseCastTimeMs: FIREBALL_BASE_CAST_TIME_MS,
+  fireTrailCastPenaltyMs: FIRE_TRAIL_CAST_PENALTY_MS,
+  fireBurstExtraLockMs: FIRE_BURST_EXTRA_LOCK_MS,
+  staffCastRange: STAFF_CAST_RANGE,
+  fireRangeGemId: FIRE_RANGE_GEM_ID,
+  woodStaffItemId: WOOD_STAFF_ITEM_ID,
+};
 const RAID_VISIBILITY_UPDATE_INTERVAL_MS = 90;
 const RAID_MINIMAP_UPDATE_INTERVAL_MS = 260;
 const RAID_OBJECT_VISIBILITY_UPDATE_INTERVAL_MS = 140;
@@ -688,6 +718,11 @@ const WORLD_CLIENT_SIMULATION_STEP_MS = 1000 / WORLD_GAMEPLAY_PROFILE.networkTic
 const RAID_CLIENT_SIMULATION_STEP_MS = 1000 / RAID_GAMEPLAY_PROFILE.networkTickRate;
 const WORLD_REMOTE_INTERPOLATION_DELAY_MS = WORLD_GAMEPLAY_PROFILE.remoteInterpolationDelayMs;
 const RAID_REMOTE_INTERPOLATION_DELAY_MS = RAID_GAMEPLAY_PROFILE.remoteInterpolationDelayMs;
+const LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES = 6;
+const HEALTH_PER_BAR_SEGMENT = 10;
+const MAX_HEALTH_BAR_SEGMENTS = 24;
+const HEALTH_BAR_WIDTH_PX = 24;
+const HEALTH_SEGMENT_GAP_PX = 0.4;
 const RAID_VISION_RADIUS_TILES = 6;
 const RAID_FOOT_TILE_OFFSET_Y = 32 * 0.375;
 const RAID_MINIMAP_EXPLORED_STORAGE_PREFIX = 'mmorpg.raid-minimap-explored.v1';
@@ -972,6 +1007,21 @@ function getSharedDeathAnimationScale(tileSize: number) {
 
 function getMobDeathAnimationCenterY(mob: Pick<MobVisual, 'sprite'>) {
   return mob.sprite.y + (0.5 - mob.sprite.originY) * mob.sprite.displayHeight;
+}
+
+function getEntitySortDepth(footY: number, mapHeight: number) {
+  return (
+    ENTITY_SORT_BASE_DEPTH +
+    Phaser.Math.Clamp(footY / Math.max(1, mapHeight), 0, 1) * ENTITY_SORT_DEPTH_RANGE
+  );
+}
+
+function getCharacterFootY(character: Pick<CharacterVisual, 'container'>, tileSize: number) {
+  return character.container.y + tileSize * 0.42;
+}
+
+function getWorldTraderFootY(trader: Pick<WorldTraderVisual, 'container'>, tileSize: number) {
+  return trader.container.y + tileSize * 0.42;
 }
 
 function createSkillAnimation(skillId: SkillEffectId, config: SkillEffectConfig): SheetAnimation {
@@ -1457,7 +1507,7 @@ function applyEquipmentToVisual(
 function applyMobHealthToVisual(
   visual: Pick<
     MobVisual,
-    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth'
+    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth' | 'currentHealthSegmentCount'
   >,
   health: number,
   maxHealth: number,
@@ -1465,15 +1515,19 @@ function applyMobHealthToVisual(
   const safeMaxHealth = Math.max(1, Math.floor(maxHealth));
   const safeHealth = Phaser.Math.Clamp(Math.floor(health), 0, safeMaxHealth);
   const hpRatio = Phaser.Math.Clamp(safeHealth / safeMaxHealth, 0, 1);
-  const filledSegments = Math.round(hpRatio * visual.healthSegments.length);
+  const segmentCount = Math.max(1, Math.min(MAX_HEALTH_BAR_SEGMENTS, Math.ceil(safeMaxHealth / HEALTH_PER_BAR_SEGMENT)));
+  const filledSegments = Math.round(hpRatio * segmentCount);
 
   visual.currentHealth = safeHealth;
   visual.currentMaxHealth = safeMaxHealth;
-  visual.healthBarFill.width = 24 * hpRatio;
+  visual.currentHealthSegmentCount = segmentCount;
+  visual.healthBarFill.width = HEALTH_BAR_WIDTH_PX * hpRatio;
   visual.healthText.setText(`${safeHealth}/${safeMaxHealth}`);
 
   visual.healthSegments.forEach((segment, index) => {
-    const isFilled = index < filledSegments;
+    const isActive = index < segmentCount;
+    const isFilled = isActive && index < filledSegments;
+    segment.setVisible(isActive);
     segment.setFillStyle(isFilled ? 0xef4444 : 0x2a140f, isFilled ? 1 : 0.9);
   });
 }
@@ -1481,7 +1535,7 @@ function applyMobHealthToVisual(
 function applyCharacterHealthToVisual(
   visual: Pick<
     CharacterVisual,
-    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth'
+    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth' | 'currentHealthSegmentCount'
   >,
   health: number,
   maxHealth: number,
@@ -1489,16 +1543,41 @@ function applyCharacterHealthToVisual(
   const safeMaxHealth = Math.max(1, Math.floor(maxHealth));
   const safeHealth = Phaser.Math.Clamp(Math.floor(health), 0, safeMaxHealth);
   const hpRatio = Phaser.Math.Clamp(safeHealth / safeMaxHealth, 0, 1);
-  const filledSegments = Math.round(hpRatio * visual.healthSegments.length);
+  const segmentCount = Math.max(1, Math.min(MAX_HEALTH_BAR_SEGMENTS, Math.ceil(safeMaxHealth / HEALTH_PER_BAR_SEGMENT)));
+  const filledSegments = Math.round(hpRatio * segmentCount);
 
   visual.currentHealth = safeHealth;
   visual.currentMaxHealth = safeMaxHealth;
-  visual.healthBarFill.width = 24 * hpRatio;
+  visual.currentHealthSegmentCount = segmentCount;
+  visual.healthBarFill.width = HEALTH_BAR_WIDTH_PX * hpRatio;
   visual.healthText.setText(`${safeHealth}/${safeMaxHealth}`);
 
   visual.healthSegments.forEach((segment, index) => {
-    const isFilled = index < filledSegments;
+    const isActive = index < segmentCount;
+    const isFilled = isActive && index < filledSegments;
+    segment.setVisible(isActive);
     segment.setFillStyle(isFilled ? 0xef4444 : 0x2a140f, isFilled ? 1 : 0.9);
+  });
+}
+
+function layoutHealthSegments(
+  segments: Phaser.GameObjects.Rectangle[],
+  centerX: number,
+  centerY: number,
+  activeSegmentCount: number,
+) {
+  const count = Math.max(1, Math.min(segments.length, activeSegmentCount));
+  const totalGapWidth = Math.max(0, (count - 1) * HEALTH_SEGMENT_GAP_PX);
+  const segmentWidth = Math.max(1, (HEALTH_BAR_WIDTH_PX - totalGapWidth) / count);
+  const startX = centerX - HEALTH_BAR_WIDTH_PX / 2 + segmentWidth / 2;
+
+  segments.forEach((segment, index) => {
+    if (index >= count) {
+      return;
+    }
+
+    segment.setPosition(startX + index * (segmentWidth + HEALTH_SEGMENT_GAP_PX), centerY);
+    segment.setSize(segmentWidth, 4);
   });
 }
 
@@ -1651,52 +1730,6 @@ function updateCharacterEffectDisplay(
   });
 }
 
-function getCharacterCastTimeMs(equipment: PlayerEquipment) {
-  let castTimeMs = FIREBALL_BASE_CAST_TIME_MS;
-
-  if (
-    equipment['weapon-gem-1'] === 'fire_trail_gem' ||
-    equipment['weapon-gem-2'] === 'fire_trail_gem' ||
-    equipment['weapon-gem-3'] === 'fire_trail_gem'
-  ) {
-    castTimeMs += FIRE_TRAIL_CAST_PENALTY_MS;
-  }
-
-  if (
-    equipment['weapon-gem-1'] === 'cast_speed_gem' ||
-    equipment['weapon-gem-2'] === 'cast_speed_gem' ||
-    equipment['weapon-gem-3'] === 'cast_speed_gem'
-  ) {
-    castTimeMs *= 0.65;
-  }
-
-  if (
-    equipment['weapon-gem-1'] === 'fire_burst_gem' ||
-    equipment['weapon-gem-2'] === 'fire_burst_gem' ||
-    equipment['weapon-gem-3'] === 'fire_burst_gem'
-  ) {
-    castTimeMs += FIRE_BURST_EXTRA_LOCK_MS;
-  }
-
-  return Math.round(castTimeMs);
-}
-
-function getCharacterCastRange(equipment: PlayerEquipment) {
-  if (
-    equipment['weapon-gem-1'] === FIRE_RANGE_GEM_ID ||
-    equipment['weapon-gem-2'] === FIRE_RANGE_GEM_ID ||
-    equipment['weapon-gem-3'] === FIRE_RANGE_GEM_ID
-  ) {
-    return STAFF_CAST_RANGE * 1.25;
-  }
-
-  return STAFF_CAST_RANGE;
-}
-
-function hasWoodStaffEquipped(equipment: PlayerEquipment) {
-  return equipment.weapon === WOOD_STAFF_ITEM_ID;
-}
-
 function applyCastingToCharacterVisual(
   visual: Pick<CharacterVisual, 'currentCastingSkillId' | 'currentCastStartedAt' | 'currentCastEndsAt'>,
   castingSkillId: string,
@@ -1807,137 +1840,7 @@ async function loadWorldMapAsset(): Promise<MeadowMapAsset> {
   }
 }
 
-function getMobRenderScale(texture: string) {
-  if (texture === 'skeleton') {
-    return SKELETON_RENDER_SCALE;
-  }
 
-  if (texture === 'skeleton-npc-16x16') {
-    return SKELETON_RENDER_SCALE;
-  }
-
-  if (texture === 'bat') {
-    return 2;
-  }
-
-  if (texture === 'rat') {
-    return 2;
-  }
-
-  return 1;
-}
-
-function getAnimatedMobTexture(texture: string, timeMs: number) {
-  if (texture === 'bat' || texture === 'rat') {
-    const frame = Math.floor(timeMs / 240) % 2 === 0 ? 1 : 2;
-    return `${texture}_${frame}`;
-  }
-
-  return texture;
-}
-
-function getMobClipTextureKey(spritesheet: string) {
-  return `mob-clip:${encodeURIComponent(spritesheet)}`;
-}
-
-function getMobVisualKind(texture: string) {
-  return texture === 'bat' || texture === 'rat' || texture === 'skeleton' ? texture : null;
-}
-
-function toRuntimeAnimationFromMobClip(clip: MobAnimationClipDefinition): SheetAnimation {
-  return {
-    textureKey: getMobClipTextureKey(clip.spritesheet),
-    texturePath: clip.spritesheet,
-    frameWidth: clip.frameWidth,
-    frameHeight: clip.frameHeight,
-    startFrame: clip.startFrame,
-    startRowFrames: 0,
-    frameCount: Math.max(1, clip.endFrame - clip.startFrame + 1),
-    fps: Math.max(1, clip.frameRate),
-    columns: Math.max(1, clip.columns),
-    loop: clip.repeat !== 0,
-  };
-}
-
-function getWorldTraderSpriteSheetKey(texturePath: string) {
-  return `world-trader-sheet:${texturePath}`;
-}
-
-function getWorldTraderBodyOverlayTextureKey(texturePath: string) {
-  return `world-trader-body-overlay:${encodeURIComponent(texturePath)}`;
-}
-
-function isAnimatedWorldTraderBodyOverlay(texturePath: string | undefined) {
-  return typeof texturePath === 'string' && /^\/character\/equipment\/.+_idle\.(png|jpg|jpeg|webp|gif)$/i.test(texturePath);
-}
-
-function getWorldTraderBodyOverlayAnimation(texturePath: string | undefined): PlayerSheetAnimation | null {
-  if (!texturePath || !isAnimatedWorldTraderBodyOverlay(texturePath)) {
-    return null;
-  }
-
-  const idleAnimation = PLAYER_ANIMATIONS.idle;
-  if (!idleAnimation) {
-    return null;
-  }
-
-  return {
-    ...idleAnimation,
-    textureKey: getWorldTraderBodyOverlayTextureKey(texturePath),
-    texturePath,
-  };
-}
-
-function getWorldTraderAnimationKey(traderId: string) {
-  return `world-trader-anim:${traderId}`;
-}
-
-function getProjectileAnimation(
-  skillId: string,
-  projectileAnimations: Pick<Record<SkillEffectId, SheetAnimation>, 'fireball' | 'fireNova'>,
-) {
-  return skillId === 'fireNova' ? projectileAnimations.fireNova : projectileAnimations.fireball;
-}
-
-function getProjectileDisplaySize(skillId: string, skillEffects: SkillEffectOverrides) {
-  if (skillId === 'fireNova') {
-    return skillEffects.fireNova.displaySize;
-  }
-
-  if (skillId === 'fireballShard') {
-    return Math.max(12, Math.round(skillEffects.fireball.displaySize * 0.6));
-  }
-
-  if (skillId === 'fireballSplit') {
-    return Math.max(14, Math.round(skillEffects.fireball.displaySize * 0.8));
-  }
-
-  return skillEffects.fireball.displaySize;
-}
-
-function clampTargetToCastRange(
-  equipment: PlayerEquipment,
-  originX: number,
-  originY: number,
-  targetX: number,
-  targetY: number,
-) {
-  const deltaX = targetX - originX;
-  const deltaY = targetY - originY;
-  const distance = Math.hypot(deltaX, deltaY);
-  const castRange = getCharacterCastRange(equipment);
-
-  if (distance <= castRange || distance <= 0.001) {
-    return { x: targetX, y: targetY, clamped: false };
-  }
-
-  const scale = castRange / distance;
-  return {
-    x: originX + deltaX * scale,
-    y: originY + deltaY * scale,
-    clamped: true,
-  };
-}
 
 export function GameCanvas({
   playerEquipment,
@@ -2098,6 +2001,7 @@ export function GameCanvas({
   onWorldEditPaint?: (tileX: number, tileY: number, eraseOverlay?: boolean) => void;
   onWorldEditHoverChange?: (tile: { x: number; y: number } | null) => void;
   onWorldEditDebugChange?: (debug: { textureKey: string; textureLoaded: boolean }) => void;
+  debugCollisionEnabled?: boolean;
   locale?: 'ru' | 'en';
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -2130,6 +2034,7 @@ export function GameCanvas({
   const playerDeathRef = useRef(onPlayerDeath);
   const playerInventoryChangeRef = useRef(onPlayerInventoryChange);
   const consumableCooldownChangeRef = useRef(onConsumableCooldownChange);
+  const beforePlayerRespawnRef = useRef<((payload: RespawnedMessage) => void) | undefined>(undefined);
   const playerRespawnRef = useRef(onPlayerRespawn);
   const roomConnectedRef = useRef(onRoomConnected);
   const raidExitRef = useRef(onRaidExit);
@@ -2147,6 +2052,7 @@ export function GameCanvas({
   const worldEditPaintRef = useRef(onWorldEditPaint);
   const worldEditHoverChangeRef = useRef(onWorldEditHoverChange);
   const worldEditDebugChangeRef = useRef(onWorldEditDebugChange);
+  const debugCollisionEnabledRef = useRef(debugCollisionEnabled);
   const worldEditorEnabledRef = useRef(worldEditorEnabled);
   const worldEditorModeRef = useRef(worldEditorMode);
   const selectedWorldTileRef = useRef(selectedWorldTile);
@@ -2289,6 +2195,9 @@ export function GameCanvas({
     worldEditDebugChangeRef.current = onWorldEditDebugChange;
   }, [onWorldEditDebugChange]);
   useEffect(() => {
+    debugCollisionEnabledRef.current = debugCollisionEnabled;
+  }, [debugCollisionEnabled]);
+  useEffect(() => {
     worldEditorEnabledRef.current = worldEditorEnabled;
   }, [worldEditorEnabled]);
   useEffect(() => {
@@ -2394,6 +2303,7 @@ export function GameCanvas({
     lastKnownMobBalanceSerializedRef,
     mobBalanceConfigChangeRef,
     playerDeathRef,
+    beforePlayerRespawnRef,
     playerRespawnRef,
     playerInventoryChangeRef,
     consumableCooldownChangeRef,
@@ -2648,6 +2558,7 @@ export function GameCanvas({
           const worldStampSpritesByTile = new Map<string, Phaser.GameObjects.Image>();
           const worldMobVisuals = new Map<string, WorldMobVisual>();
           const worldTraderVisuals = new Map<string, WorldTraderVisual>();
+          const collisionDebugGraphics = this.add.graphics().setDepth(DEBUG_COLLISION_OVERLAY_DEPTH);
           const worldTradersById = new Map<string, MeadowTraderAsset>();
           const pendingWorldTextureKeys = new Set<string>();
           const pendingWorldTraderSheetKeys = new Set<string>();
@@ -2665,14 +2576,11 @@ export function GameCanvas({
           let previousInput = '0:0';
           let lastLookX = 0;
           let lastLookY = 1;
-          let lastMinimapPlayerTileKey = '';
-          let lastRaidMinimapVisionKey = '';
           let lastRaidTilesWidth = 0;
           let lastRaidTilesHeight = 0;
           let lastRaidVisibilityRenderKey = '';
           let lastRaidVisibilityUpdateAt = 0;
           let lastRaidObjectVisibilityUpdateAt = 0;
-          let lastRaidMinimapUpdateAt = 0;
           let latencyPingIntervalId: ReturnType<typeof window.setInterval> | null = null;
           let nextRaidInputSequence = 1;
           let lastProcessedRaidInput = 0;
@@ -2715,6 +2623,36 @@ export function GameCanvas({
           };
           let lastSyncedPositionX = latestProfileRef.current.playerPosition.x;
           let lastSyncedPositionY = latestProfileRef.current.playerPosition.y;
+          beforePlayerRespawnRef.current = ({ x, y }) => {
+            pendingRaidInputs = [];
+            pendingWorldInputs = [];
+            lastProcessedRaidInput = 0;
+            lastProcessedWorldInput = 0;
+            movementSimulationAccumulatorMs = 0;
+            previousInput = '0:0';
+            lastSyncedPositionX = x;
+            lastSyncedPositionY = y;
+            lastPositionSyncAt = this.time.now;
+
+            if (!localSessionId) {
+              return;
+            }
+
+            const localCharacter = characters.get(localSessionId);
+            if (!localCharacter) {
+              return;
+            }
+
+            localCharacter.simPrevX = x;
+            localCharacter.simPrevY = y;
+            localCharacter.simX = x;
+            localCharacter.simY = y;
+            localCharacter.simErrorX = 0;
+            localCharacter.simErrorY = 0;
+            localCharacter.targetX = x;
+            localCharacter.targetY = y;
+            localCharacter.container.setPosition(x, y);
+          };
           const movementState = {
             getPendingRaidInputs: () => pendingRaidInputs,
             setPendingRaidInputs: (next: PendingRaidInputSample[]) => {
@@ -2746,9 +2684,6 @@ export function GameCanvas({
           let interactableTraderId: string | null = null;
           let canUseRaidExit = false;
           let interactableRaidExitId: string | null = null;
-          let worldEditPointerActive = false;
-          let worldEditEraseMode = false;
-          let lastWorldEditedTileKey = '';
           const statusText = this.add
             .text(24, 118, isRaidScene ? 'Connecting to raid...' : 'Connecting to world...', {
               color: '#d7efc9',
@@ -2873,6 +2808,21 @@ export function GameCanvas({
             worldEditTraderRightEye,
             worldEditTraderHeadLayer,
           ]);
+          const worldEditorInput = createWorldEditorInputHandler({
+            scene: this,
+            camera,
+            tileSize,
+            meadowWidth: meadowMap.width,
+            meadowHeight: meadowMap.height,
+            isRaidScene,
+            worldEditorEnabledRef,
+            worldEditorModeRef,
+            selectedWorldSpriteRef,
+            worldEditPaintRef,
+            worldStampSprites,
+            worldStampSpritesByTile,
+            getWorldStampTextureKey,
+          });
           const castRangeIndicator = this.add
             .circle(0, 0, STAFF_CAST_RANGE, 0xffb15a, 0.05)
             .setStrokeStyle(2, 0xffd59a, 0.35)
@@ -2897,67 +2847,16 @@ export function GameCanvas({
               return tile;
             }),
           );
-
-          const emitLobbyMinimapSnapshot = (playerWorldX: number, playerWorldY: number) => {
-            const playerTileX = Math.max(0, Math.min(meadowMap.width - 1, Math.floor(playerWorldX / tileSize)));
-            const playerTileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(playerWorldY / tileSize)));
-            const playerTileKey = `${playerTileX}:${playerTileY}`;
-
-            if (playerTileKey === lastMinimapPlayerTileKey) {
-              return;
-            }
-
-            lastMinimapPlayerTileKey = playerTileKey;
-            minimapChangeRef.current?.({
-              roomName: 'world',
-              width: meadowMap.width,
-              height: meadowMap.height,
-              tiles: meadowMinimapTiles,
-              explored: meadowMinimapTiles.map((_, index) => index),
-              visible: meadowMinimapTiles.map((_, index) => index),
-              playerTile: {
-                x: playerTileX,
-                y: playerTileY,
-              },
-            });
-          };
-
-          const emitRaidMinimapSnapshot = (
-            playerTileX: number,
-            playerTileY: number,
-            width: number,
-            height: number,
-            tiles: string[],
-            visionKey: string,
-            now: number,
-            force = false,
-          ) => {
-            if (!force && now - lastRaidMinimapUpdateAt < RAID_MINIMAP_UPDATE_INTERVAL_MS) {
-              return;
-            }
-            if (visionKey === lastRaidMinimapVisionKey) {
-              return;
-            }
-
-            const explored = Array.from(exploredRaidTiles.values()).sort((left, right) => left - right);
-            const visible = Array.from(visibleRaidTiles.values()).sort((left, right) => left - right);
-            const playerTileKey = `${playerTileX}:${playerTileY}`;
-            lastRaidMinimapVisionKey = visionKey;
-            lastRaidMinimapUpdateAt = now;
-            lastMinimapPlayerTileKey = playerTileKey;
-            minimapChangeRef.current?.({
-              roomName: 'raid',
-              width,
-              height,
-              tiles: [...tiles],
-              explored,
-              visible,
-              playerTile: {
-                x: playerTileX,
-                y: playerTileY,
-              },
-            });
-          };
+          const minimapEmitter = createMinimapEmitter({
+            tileSize,
+            meadowWidth: meadowMap.width,
+            meadowHeight: meadowMap.height,
+            meadowTiles: meadowMinimapTiles,
+            raidMinimapUpdateIntervalMs: RAID_MINIMAP_UPDATE_INTERVAL_MS,
+            onMinimapChange: (snapshot) => {
+              minimapChangeRef.current?.(snapshot);
+            },
+          });
           camera.setBackgroundColor(isRaidScene ? '#1d1a16' : '#6fbe4a');
           camera.setBounds(0, 0, mapWidth, mapHeight);
           camera.setZoom(2.25);
@@ -2990,7 +2889,10 @@ export function GameCanvas({
           };
 
           const ensureWorldTraderBodyOverlayLoaded = (texturePath: string) => {
-            const overlayAnimation = getWorldTraderBodyOverlayAnimation(texturePath);
+            const overlayAnimation = getWorldTraderBodyOverlayAnimation(
+              texturePath,
+              PLAYER_ANIMATIONS.idle,
+            );
             if (!overlayAnimation) {
               return ensureWorldTextureLoaded(texturePath);
             }
@@ -3203,7 +3105,8 @@ export function GameCanvas({
                   (trader.headItemId ? getEquipmentBodyTexturePath(trader.headItemId) : undefined) ??
                   trader.headTexturePath ??
                   '';
-                bodyOverlayAnimation = getWorldTraderBodyOverlayAnimation(resolvedBodyTexturePath) ?? undefined;
+                bodyOverlayAnimation =
+                  getWorldTraderBodyOverlayAnimation(resolvedBodyTexturePath, PLAYER_ANIMATIONS.idle) ?? undefined;
                 const bodyTextureKey = resolvedBodyTexturePath
                   ? bodyOverlayAnimation
                     ? ensureWorldTraderBodyOverlayLoaded(resolvedBodyTexturePath)
@@ -3679,9 +3582,9 @@ export function GameCanvas({
               .setOrigin(0, 0.5)
               .setDepth(6.2)
               .setVisible(false);
-            const healthSegments = Array.from({ length: 10 }, (_, index) =>
+            const healthSegments = Array.from({ length: MAX_HEALTH_BAR_SEGMENTS }, () =>
               this.add
-                .rectangle(x - 10.8 + index * 2.4, y + 22, 2, 4, 0xef4444, 1)
+                .rectangle(x, y + 22, 2, 4, 0xef4444, 1)
                 .setOrigin(0.5)
                 .setDepth(7),
             );
@@ -3737,6 +3640,7 @@ export function GameCanvas({
               castBarFill,
               healthText,
               healthSegments,
+              currentHealthSegmentCount: 1,
               targetX: x,
               targetY: y,
               lastX: x,
@@ -3895,9 +3799,9 @@ export function GameCanvas({
               .setOrigin(0, 0.5)
               .setDepth(6.2)
               .setVisible(false);
-            const healthSegments = Array.from({ length: 10 }, (_, index) =>
+            const healthSegments = Array.from({ length: MAX_HEALTH_BAR_SEGMENTS }, () =>
               this.add
-                .rectangle(x - 10.8 + index * 2.4, y + 22, 2, 4, 0xef4444, 1)
+                .rectangle(x, y + 22, 2, 4, 0xef4444, 1)
                 .setOrigin(0.5)
                 .setDepth(7),
             );
@@ -3936,6 +3840,7 @@ export function GameCanvas({
               castBarFill,
               healthText,
               healthSegments,
+              currentHealthSegmentCount: 1,
               targetX: x,
               targetY: y,
               lastX: x,
@@ -4340,7 +4245,14 @@ export function GameCanvas({
               return;
             }
             const resolvedTarget = localCharacter
-              ? clampTargetToCastRange(latestProfileRef.current.playerEquipment, localCharacter.container.x, localCharacter.container.y, targetX, targetY)
+              ? clampTargetToCastRange(
+                  latestProfileRef.current.playerEquipment,
+                  localCharacter.container.x,
+                  localCharacter.container.y,
+                  targetX,
+                  targetY,
+                  CAST_HELPERS_CONFIG,
+                )
               : { x: targetX, y: targetY, clamped: false };
             const castSkillMessage = createTimedCastSkillMessage(
               {
@@ -4354,7 +4266,10 @@ export function GameCanvas({
 
             if (localCharacter) {
               const castStartedAt = Date.now();
-              const castTimeMs = getCharacterCastTimeMs(latestProfileRef.current.playerEquipment);
+              const castTimeMs = getCharacterCastTimeMs(
+                latestProfileRef.current.playerEquipment,
+                CAST_HELPERS_CONFIG,
+              );
               if (castTimeMs > 0) {
                 applyCastingToCharacterVisual(
                   localCharacter,
@@ -4403,7 +4318,14 @@ export function GameCanvas({
               return;
             }
             const resolvedTarget = localCharacter
-              ? clampTargetToCastRange(latestProfileRef.current.playerEquipment, localCharacter.container.x, localCharacter.container.y, targetX, targetY)
+              ? clampTargetToCastRange(
+                  latestProfileRef.current.playerEquipment,
+                  localCharacter.container.x,
+                  localCharacter.container.y,
+                  targetX,
+                  targetY,
+                  CAST_HELPERS_CONFIG,
+                )
               : { x: targetX, y: targetY, clamped: false };
 
             const castSkillMessage = createTimedCastSkillMessage(
@@ -4437,7 +4359,10 @@ export function GameCanvas({
           };
 
           const castWoodStaffStrike = (targetX: number, targetY: number) => {
-            if (!roomRef.current || !hasWoodStaffEquipped(latestProfileRef.current.playerEquipment)) {
+            if (
+              !roomRef.current ||
+              !hasWoodStaffEquipped(latestProfileRef.current.playerEquipment, CAST_HELPERS_CONFIG)
+            ) {
               return;
             }
 
@@ -4483,64 +4408,7 @@ export function GameCanvas({
             const { isLeftButton, isRightButton } = resolvePointerButtons(pointer);
             const mouseSlotKey = resolveMouseActionSlotKey(isLeftButton, isRightButton);
 
-            if (!isRaidScene && worldEditorEnabledRef.current) {
-              const activeElement = document.activeElement;
-              if (activeElement instanceof HTMLElement) {
-                activeElement.blur();
-              }
-              const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-              const tileX = Math.max(0, Math.min(meadowMap.width - 1, Math.floor(worldPoint.x / tileSize)));
-              const tileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(worldPoint.y / tileSize)));
-              const currentEditorMode = worldEditorModeRef.current;
-              const canEraseWorldEdit =
-                currentEditorMode === 'sprite' || currentEditorMode === 'trader' || currentEditorMode === 'mob';
-
-              if (mouseSlotKey) {
-                pointer.event?.preventDefault();
-                worldEditPointerActive = true;
-                worldEditEraseMode = mouseSlotKey === 'RMB' && canEraseWorldEdit;
-                lastWorldEditedTileKey = `${tileX}:${tileY}:${worldEditEraseMode ? 'erase' : 'paint'}`;
-                worldEditPaintRef.current?.(tileX, tileY, mouseSlotKey === 'RMB' && canEraseWorldEdit);
-
-                if (currentEditorMode === 'sprite') {
-                  const tileKey = `${tileX}:${tileY}`;
-                  if (mouseSlotKey === 'RMB') {
-                    const existingSprite = worldStampSpritesByTile.get(tileKey);
-                    if (existingSprite) {
-                      const existingIndex = worldStampSprites.indexOf(existingSprite);
-                      if (existingIndex >= 0) {
-                        worldStampSprites.splice(existingIndex, 1);
-                      }
-                      existingSprite.destroy();
-                      worldStampSpritesByTile.delete(tileKey);
-                    }
-                  } else {
-                    const currentSelectedWorldSprite = selectedWorldSpriteRef.current;
-                    const previewTextureKey = getWorldStampTextureKey(currentSelectedWorldSprite.texturePath);
-                    if (currentSelectedWorldSprite.texturePath && this.textures.exists(previewTextureKey)) {
-                      const existingSprite = worldStampSpritesByTile.get(tileKey);
-                      if (existingSprite) {
-                        const existingIndex = worldStampSprites.indexOf(existingSprite);
-                        if (existingIndex >= 0) {
-                          worldStampSprites.splice(existingIndex, 1);
-                        }
-                        existingSprite.destroy();
-                      }
-                      const worldX = tileX * tileSize + tileSize / 2;
-                      const worldY = tileY * tileSize + tileSize / 2;
-                      const stampSprite = this.add
-                        .image(worldX, worldY, previewTextureKey)
-                        .setDisplaySize(tileSize * currentSelectedWorldSprite.scale, tileSize * currentSelectedWorldSprite.scale)
-                        .setAngle(currentSelectedWorldSprite.rotation)
-                        .setFlipX(currentSelectedWorldSprite.flipX)
-                        .setOrigin(0.5)
-                        .setDepth(1.5);
-                      worldStampSprites.push(stampSprite);
-                      worldStampSpritesByTile.set(tileKey, stampSprite);
-                    }
-                  }
-                }
-              }
+            if (worldEditorInput.handlePointerDown(pointer, mouseSlotKey)) {
               return;
             }
 
@@ -4583,69 +4451,15 @@ export function GameCanvas({
           });
 
           this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-            if (!worldEditPointerActive || isRaidScene || !worldEditorEnabledRef.current) {
-              return;
-            }
-
-            const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-            const tileX = Math.max(0, Math.min(meadowMap.width - 1, Math.floor(worldPoint.x / tileSize)));
-            const tileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(worldPoint.y / tileSize)));
-            const tileKey = `${tileX}:${tileY}:${worldEditEraseMode ? 'erase' : 'paint'}`;
-            if (tileKey === lastWorldEditedTileKey) {
-              return;
-            }
-
-            lastWorldEditedTileKey = tileKey;
-            worldEditPaintRef.current?.(tileX, tileY, worldEditEraseMode);
-
-            if (worldEditorModeRef.current === 'sprite') {
-              const mapTileKey = `${tileX}:${tileY}`;
-              if (worldEditEraseMode) {
-                const existingSprite = worldStampSpritesByTile.get(mapTileKey);
-                if (existingSprite) {
-                  const existingIndex = worldStampSprites.indexOf(existingSprite);
-                  if (existingIndex >= 0) {
-                    worldStampSprites.splice(existingIndex, 1);
-                  }
-                  existingSprite.destroy();
-                  worldStampSpritesByTile.delete(mapTileKey);
-                }
-              } else {
-                const currentSelectedWorldSprite = selectedWorldSpriteRef.current;
-                const previewTextureKey = getWorldStampTextureKey(currentSelectedWorldSprite.texturePath);
-                if (currentSelectedWorldSprite.texturePath && this.textures.exists(previewTextureKey)) {
-                  const existingSprite = worldStampSpritesByTile.get(mapTileKey);
-                  if (existingSprite) {
-                    const existingIndex = worldStampSprites.indexOf(existingSprite);
-                    if (existingIndex >= 0) {
-                      worldStampSprites.splice(existingIndex, 1);
-                    }
-                    existingSprite.destroy();
-                  }
-                  const worldX = tileX * tileSize + tileSize / 2;
-                  const worldY = tileY * tileSize + tileSize / 2;
-                  const stampSprite = this.add
-                    .image(worldX, worldY, previewTextureKey)
-                    .setDisplaySize(tileSize * currentSelectedWorldSprite.scale, tileSize * currentSelectedWorldSprite.scale)
-                    .setAngle(currentSelectedWorldSprite.rotation)
-                    .setFlipX(currentSelectedWorldSprite.flipX)
-                    .setOrigin(0.5)
-                    .setDepth(1.5);
-                  worldStampSprites.push(stampSprite);
-                  worldStampSpritesByTile.set(mapTileKey, stampSprite);
-                }
-              }
-            }
+            worldEditorInput.handlePointerMove(pointer);
           });
 
           this.input.on('pointerup', () => {
-            worldEditPointerActive = false;
-            lastWorldEditedTileKey = '';
+            worldEditorInput.handlePointerUp();
           });
 
           this.input.on('pointerupoutside', () => {
-            worldEditPointerActive = false;
-            lastWorldEditedTileKey = '';
+            worldEditorInput.handlePointerUp();
           });
 
           const syncPlayersFromRoom = () => {
@@ -4709,9 +4523,8 @@ export function GameCanvas({
             lastRaidTilesWidth = width;
             lastRaidTilesHeight = height;
             lastRaidVisibilityRenderKey = '';
-            lastRaidMinimapVisionKey = '';
+            minimapEmitter.resetRaidMinimapState();
             lastRaidObjectVisibilityUpdateAt = 0;
-            lastRaidMinimapUpdateAt = 0;
             pendingRaidInputs = [];
             lastProcessedRaidInput = 0;
             movementSimulationAccumulatorMs = 0;
@@ -4783,6 +4596,7 @@ export function GameCanvas({
               resolvedX,
               resolvedY,
             );
+            const strongDesyncDistance = tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES;
 
             if (reconciliationDistance > 18 * tileSize) {
               character.simPrevX = resolvedX;
@@ -4791,6 +4605,18 @@ export function GameCanvas({
               character.simY = resolvedY;
               character.simErrorX = 0;
               character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
+              return;
+            }
+
+            if (reconciliationDistance > strongDesyncDistance) {
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
+              character.simErrorX = 0;
+              character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
               return;
             }
 
@@ -4843,6 +4669,7 @@ export function GameCanvas({
               resolvedX,
               resolvedY,
             );
+            const strongDesyncDistance = tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES;
 
             if (reconciliationDistance > 18 * tileSize) {
               character.simPrevX = resolvedX;
@@ -4851,6 +4678,18 @@ export function GameCanvas({
               character.simY = resolvedY;
               character.simErrorX = 0;
               character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
+              return;
+            }
+
+            if (reconciliationDistance > strongDesyncDistance) {
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
+              character.simErrorX = 0;
+              character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
               return;
             }
 
@@ -4944,7 +4783,18 @@ export function GameCanvas({
 
             lastRaidVisibilityRenderKey = renderKey;
             lastRaidVisibilityUpdateAt = now;
-            emitRaidMinimapSnapshot(originTileX, originTileY, width, height, tiles, visionKey, now, force);
+            minimapEmitter.emitRaidMinimapSnapshot({
+              playerTileX: originTileX,
+              playerTileY: originTileY,
+              width,
+              height,
+              tiles,
+              exploredTiles: exploredRaidTiles,
+              visibleTiles: visibleRaidTiles,
+              visionKey,
+              now,
+              force,
+            });
             const isWithinCullBounds = (worldX: number, worldY: number) =>
               worldX >= cullLeft &&
               worldX <= cullRight &&
@@ -5672,6 +5522,14 @@ export function GameCanvas({
                 character.container.x,
                 character.container.y + 15,
               );
+              const characterDepth = getEntitySortDepth(
+                getCharacterFootY(character, tileSize),
+                mapHeight,
+              );
+              character.shadow.setDepth(characterDepth - ENTITY_SORT_SHADOW_OFFSET);
+              character.burnAura.setDepth(characterDepth - ENTITY_SORT_AURA_OFFSET);
+              character.container.setDepth(characterDepth);
+              character.deathEffect.setDepth(characterDepth + ENTITY_SORT_EFFECT_OFFSET);
               character.nameplate.setPosition(
                 character.container.x,
                 character.container.y - 24,
@@ -5700,12 +5558,12 @@ export function GameCanvas({
                 character.container.x - 12,
                 character.container.y + 30,
               );
-              character.healthSegments.forEach((segment, index) => {
-                segment.setPosition(
-                  character.container.x - 10.8 + index * 2.4,
-                  character.container.y + 22,
-                );
-              });
+              layoutHealthSegments(
+                character.healthSegments,
+                character.container.x,
+                character.container.y + 22,
+                character.currentHealthSegmentCount,
+              );
 
               if (character.isDead) {
                 setCharacterVisibility(character, character.isVisible ?? true, isLocalPlayer);
@@ -6000,15 +5858,24 @@ export function GameCanvas({
               }
               mob.sprite.setScale(mob.facingX * mob.renderScale, mob.renderScale);
               mob.shadow.setPosition(mob.sprite.x, mob.sprite.y + 15);
+              const mobDepth = getEntitySortDepth(getMobFootY(mob), mapHeight);
+              mob.shadow.setDepth(mobDepth - ENTITY_SORT_SHADOW_OFFSET);
+              mob.burnAura.setDepth(mobDepth - ENTITY_SORT_AURA_OFFSET);
+              mob.burnEffect.setDepth(mobDepth - ENTITY_SORT_EFFECT_OFFSET);
+              mob.sprite.setDepth(mobDepth);
+              mob.deathEffect.setDepth(mobDepth + ENTITY_SORT_EFFECT_OFFSET);
               mob.healthBarFrame.setPosition(mob.sprite.x, mob.sprite.y + 22 + bobOffset);
               mob.healthBarBack.setPosition(mob.sprite.x, mob.sprite.y + 22 + bobOffset);
               mob.healthBarFill.setPosition(mob.sprite.x - 12, mob.sprite.y + 22 + bobOffset);
               mob.castBarFrame.setPosition(mob.sprite.x, mob.sprite.y + 30 + bobOffset);
               mob.castBarBack.setPosition(mob.sprite.x, mob.sprite.y + 30 + bobOffset);
               mob.castBarFill.setPosition(mob.sprite.x - 12, mob.sprite.y + 30 + bobOffset);
-              mob.healthSegments.forEach((segment, index) => {
-                segment.setPosition(mob.sprite.x - 10.8 + index * 2.4, mob.sprite.y + 22 + bobOffset);
-              });
+              layoutHealthSegments(
+                mob.healthSegments,
+                mob.sprite.x,
+                mob.sprite.y + 22 + bobOffset,
+                mob.currentHealthSegmentCount,
+              );
               const isCasting =
                 mob.currentCastingSkillId.length > 0 &&
                 mob.currentCastEndsAt > serverNow &&
@@ -6137,7 +6004,7 @@ export function GameCanvas({
               }
 
               if (!isRaidScene) {
-                emitLobbyMinimapSnapshot(localCharacter.container.x, localCharacter.container.y);
+                minimapEmitter.emitLobbyMinimapSnapshot(localCharacter.container.x, localCharacter.container.y);
               }
 
               let closestChest:
@@ -6473,7 +6340,9 @@ export function GameCanvas({
 
             if (localCharacter && activeSkillTargetingRef.current) {
               castRangeIndicator.setPosition(localCharacter.container.x, localCharacter.container.y);
-              castRangeIndicator.setRadius(getCharacterCastRange(latestProfileRef.current.playerEquipment));
+              castRangeIndicator.setRadius(
+                getCharacterCastRange(latestProfileRef.current.playerEquipment, CAST_HELPERS_CONFIG),
+              );
               castRangeIndicator.setVisible(true);
             } else {
               castRangeIndicator.setVisible(false);
@@ -6612,6 +6481,7 @@ export function GameCanvas({
                   : undefined;
                 const traderBodyOverlayAnimation = getWorldTraderBodyOverlayAnimation(
                   resolvedBodyTexturePath,
+                  PLAYER_ANIMATIONS.idle,
                 );
                 const bodyTextureKey = resolvedBodyTexturePath
                   ? traderBodyOverlayAnimation
@@ -6707,7 +6577,14 @@ export function GameCanvas({
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
               const originX = localCharacter?.container.x ?? pointerWorld.x;
               const originY = localCharacter?.container.y ?? pointerWorld.y;
-              const resolvedTarget = clampTargetToCastRange(latestProfileRef.current.playerEquipment, originX, originY, pointerWorld.x, pointerWorld.y);
+              const resolvedTarget = clampTargetToCastRange(
+                latestProfileRef.current.playerEquipment,
+                originX,
+                originY,
+                pointerWorld.x,
+                pointerWorld.y,
+                CAST_HELPERS_CONFIG,
+              );
               targetingPreviewTiles.forEach((tile) => tile.setVisible(false));
               targetingCursor.setPosition(pointerWorld.x, pointerWorld.y);
               targetingCursor.setText('+');
@@ -6718,7 +6595,14 @@ export function GameCanvas({
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
               const originX = localCharacter?.container.x ?? pointerWorld.x;
               const originY = localCharacter?.container.y ?? pointerWorld.y;
-              const resolvedTarget = clampTargetToCastRange(latestProfileRef.current.playerEquipment, originX, originY, pointerWorld.x, pointerWorld.y);
+              const resolvedTarget = clampTargetToCastRange(
+                latestProfileRef.current.playerEquipment,
+                originX,
+                originY,
+                pointerWorld.x,
+                pointerWorld.y,
+                CAST_HELPERS_CONFIG,
+              );
               const tileX = Math.floor(resolvedTarget.x / meadowMap.tileSize);
               const tileY = Math.floor(resolvedTarget.y / meadowMap.tileSize);
               let previewIndex = 0;
@@ -6769,11 +6653,101 @@ export function GameCanvas({
             if (!isRaidScene) {
               worldMobVisuals.forEach((mobVisual) => {
                 const renderState = resolveMobRenderState(mobVisual.kind, this.time.now);
+                const mobDepth = getEntitySortDepth(getMobFootY({ sprite: mobVisual.sprite }), mapHeight);
                 mobVisual.sprite.setTexture(renderState.textureKey, renderState.frame);
                 mobVisual.sprite.setScale(renderState.renderScale);
                 mobVisual.sprite.setOrigin(0.5, renderState.anchorY);
                 mobVisual.shadow.setPosition(mobVisual.sprite.x, mobVisual.sprite.y + 15);
+                mobVisual.shadow.setDepth(mobDepth - ENTITY_SORT_SHADOW_OFFSET);
+                mobVisual.sprite.setDepth(mobDepth);
                 mobVisual.nameplate.setPosition(mobVisual.sprite.x, mobVisual.sprite.y - 24);
+                mobVisual.nameplate.setDepth(mobDepth + ENTITY_SORT_LABEL_OFFSET);
+              });
+            }
+
+            if (!isRaidScene) {
+              worldTraderVisuals.forEach((traderVisual) => {
+                const traderDepth = getEntitySortDepth(
+                  getWorldTraderFootY(traderVisual, tileSize),
+                  mapHeight,
+                );
+                traderVisual.shadow.setDepth(traderDepth - ENTITY_SORT_SHADOW_OFFSET);
+                traderVisual.container.setDepth(traderDepth);
+                traderVisual.nameplate.setDepth(traderDepth + ENTITY_SORT_LABEL_OFFSET);
+                traderVisual.questMarker.setDepth(traderDepth + ENTITY_SORT_LABEL_OFFSET + 0.02);
+              });
+            }
+
+            collisionDebugGraphics.clear();
+            if (debugCollisionEnabledRef.current) {
+              const tileBounds = {
+                minX: Math.max(0, Math.floor(camera.worldView.x / tileSize) - 1),
+                maxX: Math.min(
+                  (isRaidScene ? raidCollisionWidth : meadowMap.width) - 1,
+                  Math.ceil((camera.worldView.right ?? (camera.worldView.x + camera.worldView.width)) / tileSize) + 1,
+                ),
+                minY: Math.max(0, Math.floor(camera.worldView.y / tileSize) - 1),
+                maxY: Math.min(
+                  (isRaidScene ? raidCollisionHeight : meadowMap.height) - 1,
+                  Math.ceil((camera.worldView.bottom ?? (camera.worldView.y + camera.worldView.height)) / tileSize) + 1,
+                ),
+              };
+
+              for (let tileY = tileBounds.minY; tileY <= tileBounds.maxY; tileY += 1) {
+                for (let tileX = tileBounds.minX; tileX <= tileBounds.maxX; tileX += 1) {
+                  const tileLeft = tileX * tileSize;
+                  const tileTop = tileY * tileSize;
+                  if (isRaidScene) {
+                    const tileIndex = tileY * raidCollisionWidth + tileX;
+                    const isBlocked = raidBlockedTiles[tileIndex] === 1;
+                    const isChestBlocked = raidChestBlockedTiles[tileIndex] === 1;
+                    if (isBlocked || isChestBlocked) {
+                      const color = isChestBlocked ? DEBUG_COLLISION_CHEST_TILE_COLOR : DEBUG_COLLISION_TILE_COLOR;
+                      collisionDebugGraphics.fillStyle(color, isChestBlocked ? 0.22 : 0.16);
+                      collisionDebugGraphics.fillRect(tileLeft, tileTop, tileSize, tileSize);
+                      collisionDebugGraphics.lineStyle(1, color, 0.9);
+                      collisionDebugGraphics.strokeRect(tileLeft + 0.5, tileTop + 0.5, tileSize - 1, tileSize - 1);
+                    }
+                    continue;
+                  }
+
+                  if (isBlockedMeadowTile(meadowMap, meadowDecorations, tileX, tileY)) {
+                    collisionDebugGraphics.fillStyle(DEBUG_COLLISION_TILE_COLOR, 0.16);
+                    collisionDebugGraphics.fillRect(tileLeft, tileTop, tileSize, tileSize);
+                    collisionDebugGraphics.lineStyle(1, DEBUG_COLLISION_TILE_COLOR, 0.9);
+                    collisionDebugGraphics.strokeRect(tileLeft + 0.5, tileTop + 0.5, tileSize - 1, tileSize - 1);
+                  }
+                }
+              }
+
+              characters.forEach((character, sessionId) => {
+                if (character.isDead || character.isVisible === false) {
+                  return;
+                }
+
+                const color =
+                  sessionId === localSessionId
+                    ? DEBUG_COLLISION_PLAYER_COLOR
+                    : DEBUG_COLLISION_REMOTE_PLAYER_COLOR;
+                collisionDebugGraphics.lineStyle(2, color, 0.95);
+                collisionDebugGraphics.strokeCircle(
+                  character.container.x,
+                  character.container.y,
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionRadius,
+                );
+              });
+
+              mobs.forEach((mob) => {
+                if (mob.isDead || mob.isVisible === false) {
+                  return;
+                }
+
+                collisionDebugGraphics.lineStyle(2, DEBUG_COLLISION_MOB_COLOR, 0.95);
+                collisionDebugGraphics.strokeCircle(
+                  mob.sprite.x,
+                  mob.sprite.y,
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionRadius,
+                );
               });
             }
 
@@ -6852,9 +6826,11 @@ export function GameCanvas({
             worldEditSpawnPreview.destroy();
             worldEditTraderShadow.destroy();
             worldEditTraderContainer.destroy();
+            collisionDebugGraphics.destroy();
             room?.leave();
             roomRef.current = null;
             playerVisualRef.current = null;
+            beforePlayerRespawnRef.current = undefined;
             characters.forEach((_character, sessionId) => {
               destroyCharacter(sessionId);
             });
@@ -6891,6 +6867,7 @@ export function GameCanvas({
       roomRef.current?.leave();
       roomRef.current = null;
       playerVisualRef.current = null;
+      beforePlayerRespawnRef.current = undefined;
       estimatedOneWayLatencyMsRef.current = 0;
       game?.destroy(true);
     };

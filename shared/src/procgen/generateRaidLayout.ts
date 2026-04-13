@@ -41,15 +41,24 @@ function carveCorridor(
   to: { x: number; y: number },
 ) {
   const horizontalFirst = Math.abs(from.x - to.x) >= Math.abs(from.y - to.y);
+  const corridorThickness = 2;
+
+  const carveCorridorTile = (x: number, y: number, horizontal: boolean) => {
+    setTile(x, y, "corridorFloor");
+    for (let offset = 1; offset < corridorThickness; offset += 1) {
+      setTile(horizontal ? x : x + offset, horizontal ? y + offset : y, "corridorFloor");
+    }
+  };
 
   const carveLine = (startX: number, startY: number, endX: number, endY: number) => {
     const stepX = Math.sign(endX - startX);
     const stepY = Math.sign(endY - startY);
+    const horizontal = startY === endY;
     let x = startX;
     let y = startY;
 
     while (x !== endX || y !== endY) {
-      setTile(x, y, "corridorFloor");
+      carveCorridorTile(x, y, horizontal);
       if (x !== endX) {
         x += stepX;
       }
@@ -58,7 +67,7 @@ function carveCorridor(
       }
     }
 
-    setTile(endX, endY, "corridorFloor");
+    carveCorridorTile(endX, endY, horizontal);
   };
 
   if (horizontalFirst) {

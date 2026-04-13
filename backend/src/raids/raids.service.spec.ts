@@ -142,6 +142,7 @@ describe('StartRaidUseCase', () => {
     expect(result.joinedExisting).toBe(true);
     expect(result.playerCount).toBe(3);
     expect(result.template.code).toBe(template.code);
+    expect(result.generatedLayout).toBeNull();
     expect(result.realtimeRoom.options.raidRunId).toBe('recent-run');
     expect(result.realtimeRoom.options.seed).toBe(recentRun.seed);
     expect(raidRunsRepository.create).not.toHaveBeenCalled();
@@ -185,10 +186,12 @@ describe('StartRaidUseCase', () => {
     expect(result.joinedExisting).toBe(false);
     expect(result.playerCount).toBe(1);
     expect(result.template.code).toBe(template.code);
+    expect(result.generatedLayout).toBeNull();
     expect(result.realtimeRoom.options.raidRunId).toBe('new-run');
     expect(raidRunsRepository.create).toHaveBeenCalledTimes(1);
     expect(raidRunsRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
+        generatedLayout: null,
         templateCode: template.code,
         templateName: template.name,
         biome: template.biome,

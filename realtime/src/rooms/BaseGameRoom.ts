@@ -3,20 +3,16 @@ import {
   type CastSkillMessage,
   type SyncChestMessage,
 } from "@mmorpg/shared/realtime/contracts";
-import {
-  isMobKind,
-  MOB_KINDS,
-  type MobKind,
-} from "@mmorpg/shared/mobs/catalog";
+import { type MobKind } from "@mmorpg/shared/mobs/catalog";
 import {
   SKELETON_DASH_SKILL,
   SKELETON_DASH_SKILL_ID,
 } from "@mmorpg/shared/mobs/skills";
 import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
-import { type SkillBalanceConfig } from "./skillBalance.js";
 import {
   cloneSkillBalanceConfig,
+  type SkillBalanceConfig,
   DEFAULT_SKILL_BALANCE_CONFIG,
 } from "./skillBalance.js";
 import {
@@ -29,7 +25,6 @@ import { type ArmorGemCarrier } from "./armorGems.js";
 import {
   FIREBALL_SHARD_SKILL_ID,
   FIREBALL_SPLIT_SKILL_ID,
-  getFireballCastRange,
   getFireballCooldownMs,
 } from "./fireballGems.js";
 import { createSkillHandlers, type SkillCastContext, type SkillHandler } from "./skills/index.js";
@@ -47,11 +42,7 @@ import {
   resolveMobPathTarget,
   type MobPathCacheEntry,
 } from "./mobPathing.js";
-import {
-  applyItemBalanceUpdate,
-  createDefaultItemFireResistanceMap,
-  type ItemBalanceConfig,
-} from "./itemBalance.js";
+import { createDefaultItemFireResistanceMap } from "./itemBalance.js";
 import {
   applyGemConfigToProjectile,
   buildFireballCastPlan,
@@ -61,7 +52,6 @@ import {
 } from "./projectileSkills.js";
 import {
   awardExperience as awardSharedExperience,
-  buildGroundEffectTileArea,
   canProjectileHitOwner,
   startProjectileReturn as startSharedProjectileReturn,
   tryBounceProjectile as trySharedProjectileBounce,
@@ -111,6 +101,22 @@ import {
 import {
   sendRoomBalanceSnapshots,
 } from "./runtime/sessionRuntime.js";
+import {
+  createFireField as createFireFieldRuntime,
+  createFireTrail as createFireTrailRuntime,
+} from "./runtime/groundEffectsRuntime.js";
+import { clampTargetToCastRange as clampTargetToCastRangeRuntime } from "./runtime/castRuntime.js";
+import {
+  applyBackendItemBalance as applyBackendItemBalanceRuntime,
+  applyBackendMobBalance as applyBackendMobBalanceRuntime,
+  applyBackendSkillBalance as applyBackendSkillBalanceRuntime,
+  applyMobBalance as applyMobBalanceRuntime,
+  applyMobBalanceToLiveMobs as applyMobBalanceToLiveMobsRuntime,
+  getMobBalanceForMob as getMobBalanceForMobRuntime,
+  resolveMobKind as resolveMobKindRuntime,
+  serializeMobBalanceConfig as serializeMobBalanceConfigRuntime,
+  serializeSkillBalanceConfig as serializeSkillBalanceConfigRuntime,
+} from "./runtime/balanceRuntime.js";
 import type { BasePlayerState } from "./schema/BasePlayerState.js";
 import type { MobState } from "./schema/MobState.js";
 import type { ChestState } from "./schema/ChestState.js";
@@ -120,6 +126,15 @@ import { applyDamageToPlayer as applyDamageToPlayerService } from "./services/Co
 import { SkillCastSystem } from "./systems/SkillCastSystem.js";
 import { StatusEffectSystem } from "./systems/StatusEffectSystem.js";
 import { ProjectileSystem } from "./systems/ProjectileSystem.js";
+import { LagCompensationTracker } from "./systems/LagCompensationTracker.js";
+import { pushTargetByKnockback as pushTargetByKnockbackRuntime } from "./runtime/knockbackRuntime.js";
+import { broadcastDamageText as broadcastDamageTextRuntime } from "./runtime/messageRuntime.js";
+import {
+  getPlayerPositionAt as getPlayerPositionAtRuntime,
+  recordPlayerPositionHistory as recordPlayerPositionHistoryRuntime,
+  resolveLagCompensatedCastTiming as resolveLagCompensatedCastTimingRuntime,
+  type LagCompensatedCastTiming,
+} from "./runtime/lagRuntime.js";
 
 // Re-export types subclasses need
 export type { DamageType } from "./projectileSkills.js";
@@ -131,16 +146,6 @@ type WoodStaffStrikeTarget =
   | { kind: "player"; entity: BasePlayerState; distance: number }
   | { kind: "mob"; entity: MobState; distance: number };
 
-type PlayerPositionHistorySample = {
-  at: number;
-  x: number;
-  y: number;
-};
-
-type LagCompensatedCastTiming = {
-  at: number;
-  enabled: boolean;
-};
 
 /**
  * Abstract base class that contains the shared game engine used by
@@ -227,7 +232,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     awardExperience: (playerId, amount) => this.awardExperience(playerId, amount),
   });
   protected readonly skillCastSystem = new SkillCastSystem();
-  protected readonly playerPositionHistory = new Map<string, PlayerPositionHistorySample[]>();
+  protected readonly lagCompensationTracker = new LagCompensationTracker<BasePlayerState>();
   protected readonly projectileHitHistory = new Map<string, Set<string>>();
   protected readonly projectileServerData = new Map<string, ProjectileServerData>();
   protected readonly consumableCooldownEndsAt = new Map<string, number>();
@@ -270,7 +275,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.skillCastSystem.clearAll();
     this.playerSpatialGrid.clear();
     this.mobSpatialGrid.clear();
-    this.playerPositionHistory.clear();
+    this.lagCompensationTracker.clearAll();
     this.projectileServerData.clear();
     this.mobSkillHitTargets.clear();
   }
@@ -611,22 +616,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     const baseDamage = Math.max(1, this.profile.meleeStrikeDamage);
     const strengthBonus = Math.max(0, player.strength - 1) * 2;
     const damage = baseDamage + strengthBonus;
-    const knockbackDistance = this.profile.tileSize; // 1 tile
-    const tileSize = this.profile.tileSize;
-    const widthPx = this.getMapWidthPx();
-    const heightPx = this.getMapHeightPx();
 
     if (target.kind === "player") {
       const resolvedDamage = this.applyDamageToPlayer(target.entity, damage, "physical");
       this.onCombatLog(`${player.name} hits ${target.entity.name} for ${resolvedDamage}.`);
       if (resolvedDamage > 0) {
         this.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${resolvedDamage}`, "#ffd089");
-      }
-      if (resolvedDamage > 0) {
-        this.pushTargetByKnockback(player.x, player.y, target.entity, knockbackDistance, (nx, ny) => {
-          target.entity.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
-          target.entity.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
-        });
       }
 
       if (target.entity.health <= 0) {
@@ -640,10 +635,6 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.onCombatLog(`${player.name} hits ${target.entity.name} for ${damage}.`);
     if (damage > 0) {
       this.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${damage}`, "#ffd089");
-      this.pushTargetByKnockback(player.x, player.y, target.entity, knockbackDistance, (nx, ny) => {
-        target.entity.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
-        target.entity.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
-      });
     }
     if (target.entity.health <= 0) {
       this.handleMobDeath(target.entity);
@@ -1516,88 +1507,45 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     targetX: number,
     targetY: number,
   ) {
-    const deltaX = targetX - originX;
-    const deltaY = targetY - originY;
-    const distance = Math.hypot(deltaX, deltaY);
-    const castRange = getFireballCastRange(this.profile.staffCastRange, player);
-
-    if (distance <= castRange || distance <= 0.001) {
-      return { x: targetX, y: targetY };
-    }
-
-    const scale = castRange / distance;
-    return {
-      x: originX + deltaX * scale,
-      y: originY + deltaY * scale,
-    };
+    return clampTargetToCastRangeRuntime(
+      this.profile,
+      player,
+      originX,
+      originY,
+      targetX,
+      targetY,
+    );
   }
 
   // ── Fire field / trail ───────────────────────────────────────────
 
   protected createFireField(player: BasePlayerState, targetX: number, targetY: number, now: number) {
-    const tileSize = this.profile.tileSize;
-    const p = this.profile;
-    const centerTileX = Math.max(0, Math.min(this.getMapWidthTiles() - 1, Math.floor(targetX / tileSize)));
-    const centerTileY = Math.max(0, Math.min(this.getMapHeightTiles() - 1, Math.floor(targetY / tileSize)));
-
-    for (const { tileX, tileY } of buildGroundEffectTileArea({
-      centerTileX,
-      centerTileY,
-      radiusTiles: p.fireFieldRadiusTiles,
-      width: this.getMapWidthTiles(),
-      height: this.getMapHeightTiles(),
-      isBlocked: (tx, ty) => this.isBlockedTile(tx, ty),
-    })) {
-      const effectId = `fire-field-${player.id}-${tileX}-${tileY}`;
-      let effect = this.roomGroundEffects.get(effectId);
-      if (!effect) {
-        effect = new GroundEffectState();
-        effect.id = effectId;
-        effect.ownerId = player.id;
-        effect.skillId = "fireField";
-        effect.tileX = tileX;
-        effect.tileY = tileY;
-        effect.x = tileX * tileSize + tileSize / 2;
-        effect.y = tileY * tileSize + tileSize / 2;
-        this.roomGroundEffects.set(effectId, effect);
-      }
-
-      effect.ownerId = player.id;
-      effect.expiresAt = now + p.fireFieldDurationMs;
-      effect.nextTickAt = now + p.fireFieldTickMs;
-    }
+    createFireFieldRuntime({
+      profile: this.profile,
+      playerId: player.id,
+      targetX,
+      targetY,
+      now,
+      groundEffects: this.roomGroundEffects,
+      getMapWidthTiles: () => this.getMapWidthTiles(),
+      getMapHeightTiles: () => this.getMapHeightTiles(),
+      isBlockedTile: (tx, ty) => this.isBlockedTile(tx, ty),
+    });
   }
 
   protected createFireTrail(ownerId: string, tileX: number, tileY: number, now: number) {
-    const tileSize = this.profile.tileSize;
-    if (
-      tileX < 0 ||
-      tileY < 0 ||
-      tileX >= this.getMapWidthTiles() ||
-      tileY >= this.getMapHeightTiles() ||
-      this.isBlockedTile(tileX, tileY)
-    ) {
-      return;
-    }
-
-    const p = this.profile;
-    const effectId = `fire-trail-${ownerId}-${tileX}-${tileY}`;
-    let effect = this.roomGroundEffects.get(effectId);
-    if (!effect) {
-      effect = new GroundEffectState();
-      effect.id = effectId;
-      effect.ownerId = ownerId;
-      effect.skillId = "fireTrail";
-      effect.tileX = tileX;
-      effect.tileY = tileY;
-      effect.x = tileX * tileSize + tileSize / 2;
-      effect.y = tileY * tileSize + tileSize / 2;
-      this.roomGroundEffects.set(effectId, effect);
-    }
-
-    effect.ownerId = ownerId;
-    effect.expiresAt = now + Math.round(p.fireTrailDurationMs * this.getOwnerProjectileGemConfig(ownerId, "fireball").durationMultiplier);
-    effect.nextTickAt = now + p.fireTrailTickMs;
+    createFireTrailRuntime({
+      profile: this.profile,
+      ownerId,
+      tileX,
+      tileY,
+      now,
+      groundEffects: this.roomGroundEffects,
+      getMapWidthTiles: () => this.getMapWidthTiles(),
+      getMapHeightTiles: () => this.getMapHeightTiles(),
+      isBlockedTile: (tx, ty) => this.isBlockedTile(tx, ty),
+      durationMultiplier: this.getOwnerProjectileGemConfig(ownerId, "fireball").durationMultiplier,
+    });
   }
 
   // ── Burn helpers ─────────────────────────────────────────────────
@@ -1719,95 +1667,23 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   // ── Spatial grid ─────────────────────────────────────────────────
 
   protected resolveLagCompensatedCastTiming(message: CastSkillMessage, now: number): LagCompensatedCastTiming {
-    const maxRewindMs = Math.max(0, this.profile.lagCompensationMaxRewindMs);
-    const estimatedLatencyMs = Number.isFinite(message.clientEstimatedLatencyMs)
-      ? Math.floor(message.clientEstimatedLatencyMs!)
-      : NaN;
-    if (Number.isFinite(estimatedLatencyMs)) {
-      const rewindMs = Math.max(0, Math.min(maxRewindMs, estimatedLatencyMs));
-      return rewindMs > 0
-        ? { at: now - rewindMs, enabled: true }
-        : { at: now, enabled: false };
-    }
-
-    const clientSentAt = Number.isFinite(message.clientSentAt)
-      ? Math.floor(message.clientSentAt!)
-      : NaN;
-    if (!Number.isFinite(clientSentAt)) {
-      return { at: now, enabled: false };
-    }
-
-    const ageMs = now - clientSentAt;
-    if (ageMs < 0 || ageMs > maxRewindMs) {
-      return { at: now, enabled: false };
-    }
-
-    return { at: clientSentAt, enabled: true };
+    return resolveLagCompensatedCastTimingRuntime(this.profile, message, now);
   }
 
   protected recordPlayerPositionHistory(now: number) {
-    const keepAfter = now - this.profile.positionHistoryDurationMs;
-
-    for (const player of this.roomPlayers.values()) {
-      const history = this.playerPositionHistory.get(player.id) ?? [];
-      const last = history[history.length - 1];
-      if (!last || last.x !== player.x || last.y !== player.y || now - last.at >= this.simulationIntervalMs) {
-        history.push({
-          at: now,
-          x: player.x,
-          y: player.y,
-        });
-      }
-
-      while (history.length > 1 && history[1]!.at < keepAfter) {
-        history.shift();
-      }
-      this.playerPositionHistory.set(player.id, history);
-    }
-
-    for (const playerId of Array.from(this.playerPositionHistory.keys())) {
-      if (!this.roomPlayers.has(playerId)) {
-        this.playerPositionHistory.delete(playerId);
-      }
-    }
+    recordPlayerPositionHistoryRuntime(
+      this.lagCompensationTracker,
+      this.roomPlayers.values(),
+      now,
+      {
+        historyDurationMs: this.profile.positionHistoryDurationMs,
+        minSampleIntervalMs: this.simulationIntervalMs,
+      },
+    );
   }
 
   protected getPlayerPositionAt(playerId: string, at: number): { x: number; y: number } | null {
-    const history = this.playerPositionHistory.get(playerId);
-    if (!history || history.length === 0) {
-      return null;
-    }
-
-    if (at <= history[0]!.at) {
-      return {
-        x: history[0]!.x,
-        y: history[0]!.y,
-      };
-    }
-
-    for (let index = history.length - 1; index >= 0; index -= 1) {
-      const current = history[index]!;
-      if (current.at > at) {
-        continue;
-      }
-
-      const next = history[index + 1];
-      if (!next) {
-        return {
-          x: current.x,
-          y: current.y,
-        };
-      }
-
-      const span = Math.max(1, next.at - current.at);
-      const t = Math.max(0, Math.min(1, (at - current.at) / span));
-      return {
-        x: current.x + (next.x - current.x) * t,
-        y: current.y + (next.y - current.y) * t,
-      };
-    }
-
-    return null;
+    return getPlayerPositionAtRuntime(this.lagCompensationTracker, playerId, at);
   }
 
   protected rebuildMobSpatialGrid() {
@@ -1877,139 +1753,57 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     knockbackDistance: number,
     applyPosition: (x: number, y: number) => void,
   ) {
-    if (knockbackDistance <= 0) {
-      return;
-    }
-    const deltaX = target.x - fromX;
-    const deltaY = target.y - fromY;
-    const distance = Math.hypot(deltaX, deltaY);
-    if (distance <= 0.001) {
-      return;
-    }
-    const nextX = target.x + (deltaX / distance) * knockbackDistance;
-    const nextY = target.y + (deltaY / distance) * knockbackDistance;
-    applyPosition(nextX, nextY);
+    pushTargetByKnockbackRuntime(fromX, fromY, target, knockbackDistance, applyPosition);
   }
 
   // ── Damage text broadcast ────────────────────────────────────────
 
   protected broadcastDamageText(x: number, y: number, text: string, color = "#ff5959") {
-    this.broadcast("damageText", { x, y, text, color });
+    broadcastDamageTextRuntime(this, x, y, text, color);
   }
 
   // ── Balance config ───────────────────────────────────────────────
 
   protected serializeSkillBalanceConfig() {
-    return cloneSkillBalanceConfig(this.skillBalance);
+    return serializeSkillBalanceConfigRuntime(this.skillBalance);
   }
 
   protected serializeMobBalanceConfig() {
-    return cloneMobBalanceConfig(this.mobBalance);
+    return serializeMobBalanceConfigRuntime(this.mobBalance);
   }
 
   protected applyBackendSkillBalance(data: Record<string, unknown>) {
-    const sections = [
-      [this.skillBalance.fireball, data.fireball],
-      [this.skillBalance.fireNova, data.fireNova],
-      [this.skillBalance.fireField, data.fireField],
-    ] as const;
-
-    for (const [target, patch] of sections) {
-      if (!patch || typeof patch !== "object") {
-        continue;
-      }
-      const p = patch as Record<string, unknown>;
-      if (typeof p.damage === "number" && Number.isFinite(p.damage)) {
-        target.damage = Math.max(0, Math.floor(p.damage));
-      }
-      if (typeof p.burnDamage === "number" && Number.isFinite(p.burnDamage)) {
-        target.burnDamage = Math.max(0, Math.floor(p.burnDamage));
-      }
-      if (typeof p.burnTicks === "number" && Number.isFinite(p.burnTicks)) {
-        target.burnTicks = Math.max(0, Math.floor(p.burnTicks));
-      }
-    }
-
-    this.broadcast("skillBalanceConfig", this.serializeSkillBalanceConfig());
+    const nextConfig = applyBackendSkillBalanceRuntime(this.skillBalance, data);
+    this.broadcast("skillBalanceConfig", nextConfig);
   }
 
   protected applyBackendMobBalance(data: Record<string, unknown>) {
-    for (const kind of MOB_KINDS) {
-      const target = this.mobBalance[kind];
-      const patch = data[kind];
-      if (!patch || typeof patch !== "object") {
-        continue;
-      }
-      const p = patch as Record<string, unknown>;
-      if (typeof p.maxHealth === "number" && Number.isFinite(p.maxHealth)) {
-        target.maxHealth = Math.max(1, Math.floor(p.maxHealth));
-      }
-      if (typeof p.moveSpeed === "number" && Number.isFinite(p.moveSpeed)) {
-        target.moveSpeed = Math.max(0, Math.floor(p.moveSpeed));
-      }
-      if (typeof p.aggroRange === "number" && Number.isFinite(p.aggroRange)) {
-        target.aggroRange = Math.max(0, Math.floor(p.aggroRange));
-      }
-      if (typeof p.leashRange === "number" && Number.isFinite(p.leashRange)) {
-        target.leashRange = Math.max(0, Math.floor(p.leashRange));
-      }
-      if (typeof p.attackRange === "number" && Number.isFinite(p.attackRange)) {
-        target.attackRange = Math.max(0, Math.floor(p.attackRange));
-      }
-      if (typeof p.attackDamage === "number" && Number.isFinite(p.attackDamage)) {
-        target.attackDamage = Math.max(0, Math.floor(p.attackDamage));
-      }
-      if (typeof p.attackCooldownMs === "number" && Number.isFinite(p.attackCooldownMs)) {
-        target.attackCooldownMs = Math.max(0, Math.floor(p.attackCooldownMs));
-      }
-      if (typeof p.experienceReward === "number" && Number.isFinite(p.experienceReward)) {
-        target.experienceReward = Math.max(0, Math.floor(p.experienceReward));
-      }
-    }
-
-    this.applyMobBalanceToLiveMobs();
-    this.broadcast("mobBalanceConfig", this.serializeMobBalanceConfig());
+    const nextConfig = applyBackendMobBalanceRuntime(
+      this.mobBalance,
+      data,
+      this.roomMobs.values(),
+    );
+    this.broadcast("mobBalanceConfig", nextConfig);
   }
 
   protected applyMobBalanceToLiveMobs() {
-    for (const mob of this.roomMobs.values()) {
-      const balance = this.getMobBalanceForMob(mob);
-      const healthRatio = mob.maxHealth > 0 ? mob.health / mob.maxHealth : 1;
-      this.applyMobBalance(mob, balance);
-      mob.health = mob.dead ? 0 : Math.max(0, Math.min(mob.maxHealth, Math.round(mob.maxHealth * healthRatio)));
-    }
+    applyMobBalanceToLiveMobsRuntime(this.mobBalance, this.roomMobs.values());
   }
 
   protected applyMobBalance(mob: MobState, balance: MobBalanceSection) {
-    mob.moveSpeed = balance.moveSpeed;
-    mob.aggroRange = balance.aggroRange;
-    mob.leashRange = balance.leashRange;
-    mob.attackRange = balance.attackRange;
-    mob.attackDamage = balance.attackDamage;
-    mob.attackCooldownMs = balance.attackCooldownMs;
-    mob.maxHealth = balance.maxHealth;
-    mob.health = balance.maxHealth;
-    mob.experienceReward = balance.experienceReward;
+    applyMobBalanceRuntime(mob, balance);
   }
 
   protected resolveMobKind(mob: MobState): MobKind {
-    if (typeof mob.kind === "string" && isMobKind(mob.kind)) {
-      return mob.kind;
-    }
-
-    if (isMobKind(mob.texture)) {
-      return mob.texture;
-    }
-
-    return "rat";
+    return resolveMobKindRuntime(mob);
   }
 
   protected getMobBalanceForMob(mob: MobState): MobBalanceSection {
-    return this.mobBalance[this.resolveMobKind(mob)];
+    return getMobBalanceForMobRuntime(this.mobBalance, mob);
   }
 
   protected applyBackendItemBalance(data: Record<string, unknown>) {
-    applyItemBalanceUpdate(this.itemFireResistance, data as ItemBalanceConfig);
+    applyBackendItemBalanceRuntime(this.itemFireResistance, data);
   }
 
   // ── Convenience ──────────────────────────────────────────────────

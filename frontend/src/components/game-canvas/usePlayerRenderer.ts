@@ -3,6 +3,7 @@
 import { useCallback, type MutableRefObject } from 'react';
 import type { Room } from '@colyseus/sdk';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { EquipmentItemId } from '@mmorpg/shared/items/catalog';
 
 type RealtimeRoomState = {
   players?: Map<string, {
@@ -71,6 +72,7 @@ type CharacterVisual = {
   castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
+  currentHealthSegmentCount: number;
   targetX: number;
   targetY: number;
   currentName: string;
@@ -147,7 +149,7 @@ type UsePlayerRendererParams = {
   applyHealingToCharacterVisual: (character: CharacterVisual, ticks: number, endsAt: number) => void;
   applyCastingToCharacterVisual: (character: CharacterVisual, skillId: string, startedAt: number, endsAt: number) => void;
   applyEquipmentToVisual: (scene: Phaser.Scene, tileSize: number, character: CharacterVisual, equipment: EquipmentState) => void;
-  toEquipmentItemId: (value: string) => string | null;
+  toEquipmentItemId: (value: string) => EquipmentItemId | undefined;
   playerVisualRef: MutableRefObject<PlayerVisualRefs | null>;
   playerVitalsChangeRef: MutableRefObject<((payload: { health: number; maxHealth: number }) => void) | undefined>;
   playerProgressChangeRef: MutableRefObject<((payload: { level: number; experience: number }) => void) | undefined>;
@@ -204,7 +206,9 @@ export function usePlayerRenderer() {
       character.castBarBack.setVisible(false);
       character.castBarFill.setVisible(false);
       character.healthText.setVisible(false);
-      character.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
+      character.healthSegments.forEach((segment, index) =>
+        segment.setVisible(shouldShowAliveVisuals && index < character.currentHealthSegmentCount),
+      );
       character.burnAura.setVisible(
         shouldShowAliveVisuals &&
           character.currentBurnTicksRemaining > 0 &&

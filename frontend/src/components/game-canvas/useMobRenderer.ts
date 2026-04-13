@@ -47,6 +47,7 @@ type MobVisual = {
   castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
+  currentHealthSegmentCount: number;
   burnAura: Phaser.GameObjects.Ellipse;
   burnStatusIcon: StatusIconVisual;
   targetX: number;
@@ -108,7 +109,9 @@ export function useMobRenderer() {
     mob.castBarBack.setVisible(shouldShowCastBar);
     mob.castBarFill.setVisible(shouldShowCastBar);
     mob.healthText.setVisible(false);
-    mob.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
+    mob.healthSegments.forEach((segment, index) =>
+      segment.setVisible(shouldShowAliveVisuals && index < mob.currentHealthSegmentCount),
+    );
     mob.burnAura.setVisible(
       shouldShowAliveVisuals &&
         mob.currentBurnTicksRemaining > 0 &&

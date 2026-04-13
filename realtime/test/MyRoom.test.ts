@@ -448,6 +448,8 @@ describe("world room", () => {
     serverPlayer.x = serverRat.x - 24;
     serverPlayer.y = serverRat.y;
     const initialHealth = serverRat.health;
+    const initialRatX = serverRat.x;
+    const initialRatY = serverRat.y;
 
     attacker.send("castSkill", {
       skillId: "woodStaffStrike",
@@ -465,7 +467,9 @@ describe("world room", () => {
     assert.ok((updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0) > Date.now());
     const remainingHealth = updatedRat?.health ?? initialHealth;
     assert.ok(remainingHealth < initialHealth);
-    assert.strictEqual(initialHealth - remainingHealth, 2);
+    assert.strictEqual(initialHealth - remainingHealth, 5);
+    assert.strictEqual(updatedRat?.x, initialRatX);
+    assert.strictEqual(updatedRat?.y, initialRatY);
     assert.strictEqual(updatedRat?.aggroTargetId, attacker.sessionId);
   });
 
