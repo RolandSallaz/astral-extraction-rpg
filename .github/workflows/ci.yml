@@ -36,6 +36,9 @@ jobs:
       - name: Build shared
         run: npm --workspace @mmorpg/shared run build
 
+      - name: Verify item balance file
+        run: npm run verify:item-balance
+
       - name: Build backend
         run: npm --workspace backend run build
 

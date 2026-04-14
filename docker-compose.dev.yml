@@ -31,6 +31,7 @@ services:
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
       KAFKA_NUM_PARTITIONS: 1
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
@@ -41,7 +42,12 @@ services:
     ports:
       - "9092:9092"
     volumes:
-      - kafka-data:/bitnami/kafka
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   shared:
     image: node:22-bookworm
@@ -76,7 +82,7 @@ services:
       shared:
         condition: service_started
       kafka:
-        condition: service_started
+        condition: service_healthy
     environment:
       NODE_ENV: development
       PORT: 3000
@@ -117,7 +123,7 @@ services:
       backend:
         condition: service_started
       kafka:
-        condition: service_started
+        condition: service_healthy
     environment:
       NODE_ENV: development
       PORT: 2567

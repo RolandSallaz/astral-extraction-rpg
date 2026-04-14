@@ -4,7 +4,8 @@
   "scripts": {
     "build:shared": "npm --workspace @mmorpg/shared run build",
     "docker:dev": "docker compose -f docker-compose.dev.yml up",
-    "docker:dev:down": "docker compose -f docker-compose.dev.yml down"
+    "docker:dev:down": "docker compose -f docker-compose.dev.yml down",
+    "verify:item-balance": "node scripts/verify-item-balance.mjs"
   },
   "workspaces": [
     "shared",

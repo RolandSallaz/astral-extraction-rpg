@@ -6,6 +6,7 @@ import { GameChat } from '@/components/GameChat';
 import { GameHud, type ContainerView, type MouseSkillBindings, type SkillId } from '@/components/GameHud';
 import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
+import { WorkbenchWindow, type WorkbenchTab } from '@/components/WorkbenchWindow';
 import {
   ITEM_DEFINITIONS,
   parseInventoryItem,
@@ -55,7 +56,7 @@ import {
   type QuestStepDefinition,
 } from '@/lib/quests';
 import { loadStoredLocale, persistLocale, pickLocale, type Locale } from '@/lib/i18n';
-import { ensureWorldWorkbenchStamp, WORLD_WORKBENCH_TEXTURE_PATH, type MeadowMapAsset, type MeadowMobAsset, type MeadowOverlayAsset, type MeadowStampAsset, type MeadowTile, type MeadowTraderAsset } from '@/lib/maps/meadowMap';
+import { ensureWorldWorkbenchStamp, type MeadowMapAsset, type MeadowMobAsset, type MeadowOverlayAsset, type MeadowStampAsset, type MeadowTile, type MeadowTraderAsset } from '@/lib/maps/meadowMap';
 import { MOB_KINDS, getMobDefinition, type MobKind } from '@mmorpg/shared/mobs/catalog';
 import { DEFAULT_PLAYER_VISUALS } from '@mmorpg/shared/player/visuals';
 import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
@@ -303,6 +304,9 @@ function getPageText(locale: Locale) {
     noItemsSelected: pickLocale(locale, { ru: 'Предмет не выбран.', en: 'No items selected.' }),
     items: pickLocale(locale, { ru: 'предм.', en: 'items' }),
     instantDelivery: pickLocale(locale, { ru: 'мгновенная доставка', en: 'instant delivery' }),
+    storage: pickLocale(locale, { ru: 'Storage', en: 'Storage' }),
+    personalStorageTitle: pickLocale(locale, { ru: 'Personal Storage', en: 'Personal Storage' }),
+    personalStorageSubtitle: pickLocale(locale, { ru: 'Lobby', en: 'Lobby' }),
     defeated: pickLocale(locale, { ru: 'Поражение', en: 'Defeated' }),
     youDied: pickLocale(locale, { ru: 'Вы погибли', en: 'You Died' }),
     deathMessage: pickLocale(locale, {
@@ -339,6 +343,11 @@ const LOBBY_TOOLS_POSITION_STORAGE_KEY = 'mmorpg.lobby-tools.position.v1';
 const ADMIN_TOOLS_POSITION_STORAGE_KEY = 'mmorpg.admin-tools.position.v1';
 const ACTIVE_ROOM_TARGET_STORAGE_KEY = 'mmorpg.active-room-target.v1';
 const MINIMAP_ZOOM_STORAGE_KEY = 'mmorpg.minimap.zoom.v1';
+const PERSONAL_STORAGE_ID = 'personal-storage';
+const PERSONAL_STORAGE_COLUMNS = 6;
+const PERSONAL_STORAGE_ROWS = 5;
+const PERSONAL_STORAGE_SIZE = PERSONAL_STORAGE_COLUMNS * PERSONAL_STORAGE_ROWS;
+const PERSONAL_STORAGE_STORAGE_KEY = 'mmorpg.personal-storage.v1';
 const RAID_DEADLINE_MS = 15 * 60 * 1000;
 const ADMIN_ITEM_DEFINITIONS = Object.values(ITEM_DEFINITIONS);
 const TRADER_WINDOW_POSITION_STORAGE_KEY = 'mmorpg.ui.trader.position.v1';
@@ -389,6 +398,7 @@ function getTraderOffers(trader: WorldTraderInteraction): TraderOffer[] {
 
   if (normalizedName.includes('old mage')) {
     return [
+      { itemId: 'wood', quantity: 1 },
       { itemId: 'wood_staff' },
       { itemId: 'healing_potion', quantity: 1 },
       { itemId: 'fire_trail_gem' },
@@ -897,6 +907,102 @@ function hasInventoryItem(inventory: InventoryState, itemId: ItemId) {
   return inventory.some((entry) => parseInventoryItem(entry)?.itemId === itemId);
 }
 
+function getInventoryItemCount(inventory: InventoryState, itemId: ItemId) {
+  return inventory.reduce((total, entry) => {
+    const parsed = parseInventoryItem(entry);
+    if (!parsed || parsed.itemId !== itemId) {
+      return total;
+    }
+    return total + parsed.quantity;
+  }, 0);
+}
+
+function removeInventoryItems(
+  inventory: InventoryState,
+  itemId: ItemId,
+  count: number,
+): InventoryState | null {
+  const nextInventory = [...inventory];
+  let remaining = Math.max(0, Math.floor(count));
+
+  if (remaining === 0) {
+    return nextInventory;
+  }
+
+  for (let index = 0; index < nextInventory.length && remaining > 0; index += 1) {
+    const parsed = parseInventoryItem(nextInventory[index]);
+    if (!parsed || parsed.itemId !== itemId) {
+      continue;
+    }
+
+    if (parsed.quantity > remaining) {
+      nextInventory[index] = serializeInventoryItem(itemId, parsed.quantity - remaining);
+      remaining = 0;
+      break;
+    }
+
+    remaining -= parsed.quantity;
+    nextInventory[index] = null;
+  }
+
+  return remaining > 0 ? null : nextInventory;
+}
+
+function getCombinedItemCount(
+  inventory: InventoryState,
+  storage: InventoryState,
+  itemId: ItemId,
+) {
+  return getInventoryItemCount(inventory, itemId) + getInventoryItemCount(storage, itemId);
+}
+
+function removeItemsFromInventories(
+  inventory: InventoryState,
+  storage: InventoryState,
+  itemId: ItemId,
+  count: number,
+): { inventory: InventoryState; storage: InventoryState } | null {
+  let remaining = Math.max(0, Math.floor(count));
+  if (remaining === 0) {
+    return { inventory, storage };
+  }
+
+  const removeUpTo = (slots: InventoryState, amount: number) => {
+    const nextSlots = [...slots];
+    let remainingAmount = amount;
+
+    for (let index = 0; index < nextSlots.length && remainingAmount > 0; index += 1) {
+      const parsed = parseInventoryItem(nextSlots[index]);
+      if (!parsed || parsed.itemId !== itemId) {
+        continue;
+      }
+
+      if (parsed.quantity > remainingAmount) {
+        nextSlots[index] = serializeInventoryItem(itemId, parsed.quantity - remainingAmount);
+        remainingAmount = 0;
+        break;
+      }
+
+      remainingAmount -= parsed.quantity;
+      nextSlots[index] = null;
+    }
+
+    return { slots: nextSlots, removed: amount - remainingAmount };
+  };
+
+  const inventoryRemoval = removeUpTo(inventory, remaining);
+  remaining = Math.max(0, remaining - inventoryRemoval.removed);
+
+  const storageRemoval = remaining > 0 ? removeUpTo(storage, remaining) : { slots: storage, removed: 0 };
+  remaining = Math.max(0, remaining - storageRemoval.removed);
+
+  if (remaining > 0) {
+    return null;
+  }
+
+  return { inventory: inventoryRemoval.slots, storage: storageRemoval.slots };
+}
+
 function removeOneInventoryItem(inventory: InventoryState, itemId: ItemId): InventoryState | null {
   const nextInventory = [...inventory];
   const index = nextInventory.findIndex((entry) => parseInventoryItem(entry)?.itemId === itemId);
@@ -913,6 +1019,50 @@ function removeOneInventoryItem(inventory: InventoryState, itemId: ItemId): Inve
     ? serializeInventoryItem(itemId, parsed.quantity - 1)
     : null;
   return nextInventory;
+}
+
+function createPersonalStorageSlots(): InventoryState {
+  return Array.from({ length: PERSONAL_STORAGE_SIZE }, () => null);
+}
+
+function sanitizePersonalStorageSlots(values: unknown): InventoryState {
+  const raw = Array.isArray(values) ? values : [];
+  return Array.from({ length: PERSONAL_STORAGE_SIZE }, (_, index) => {
+    const entry = raw[index];
+    if (typeof entry !== 'string') {
+      return null;
+    }
+    return parseInventoryItem(entry) ? entry : null;
+  });
+}
+
+function loadPersonalStorageSlots(nickname: string): InventoryState {
+  if (typeof window === 'undefined') {
+    return createPersonalStorageSlots();
+  }
+
+  try {
+    const raw = window.localStorage.getItem(`${PERSONAL_STORAGE_STORAGE_KEY}.${nickname}`);
+    if (!raw) {
+      return createPersonalStorageSlots();
+    }
+
+    return sanitizePersonalStorageSlots(JSON.parse(raw));
+  } catch {
+    return createPersonalStorageSlots();
+  }
+}
+
+function persistPersonalStorageSlots(nickname: string, slots: InventoryState) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(`${PERSONAL_STORAGE_STORAGE_KEY}.${nickname}`, JSON.stringify(slots));
+  } catch {
+    // ignore storage failures
+  }
 }
 
 function loadAdminToolsVisible() {
@@ -1347,6 +1497,19 @@ export default function Home() {
   const [activeTrader, setActiveTrader] = useState<WorldTraderInteraction | null>(null);
   const [nearbyWorkbenchId, setNearbyWorkbenchId] = useState<string | null>(null);
   const [activeWorkbench, setActiveWorkbench] = useState<WorldWorkbenchInteraction | null>(null);
+  const [workbenchCrafting, setWorkbenchCrafting] = useState<{
+    recipeId: 'wood_staff';
+    startedAt: number;
+    endsAt: number;
+  } | null>(null);
+  const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('craft');
+  const [workbenchPendingPickup, setWorkbenchPendingPickup] = useState<{
+    recipeId: 'wood_staff';
+    itemId: ItemId;
+    quantity: number;
+  } | null>(null);
+  const [workbenchStatus, setWorkbenchStatus] = useState('');
+  const [workbenchNow, setWorkbenchNow] = useState(0);
   const [activeTraderTab, setActiveTraderTab] = useState<TraderTabId>('shop');
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [collapsedQuestLogIds, setCollapsedQuestLogIds] = useState<string[]>([]);
@@ -1383,6 +1546,7 @@ export default function Home() {
   const [lobbyActionMessage, setLobbyActionMessage] = useState('');
   const [lobbyBusy, setLobbyBusy] = useState(false);
   const [lobbyToolsVisible, setLobbyToolsVisible] = useState(true);
+  const [personalStorageSlots, setPersonalStorageSlots] = useState<InventoryState>(() => createPersonalStorageSlots());
   const [adminImageOptions, setAdminImageOptions] = useState<string[]>([]);
   const [adminImageSearch, setAdminImageSearch] = useState('');
   const [activeAdminTab, setActiveAdminTab] = useState<AdminTabId>('skills');
@@ -1594,7 +1758,27 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!username) {
+      return;
+    }
+
+    setPersonalStorageSlots(loadPersonalStorageSlots(username));
+  }, [username]);
+
+  useEffect(() => {
+    if (!username) {
+      return;
+    }
+
+    persistPersonalStorageSlots(username, personalStorageSlots);
+  }, [username, personalStorageSlots]);
+
+  useEffect(() => {
     if (!activeContainerId) {
+      return;
+    }
+
+    if (activeContainerId === PERSONAL_STORAGE_ID) {
       return;
     }
 
@@ -1605,6 +1789,10 @@ export default function Home() {
 
   useEffect(() => {
     if (!activeContainerId) {
+      return;
+    }
+
+    if (activeContainerId === PERSONAL_STORAGE_ID) {
       return;
     }
 
@@ -1637,6 +1825,43 @@ export default function Home() {
       setActiveWorkbench(null);
     }
   }, [activeWorkbench, nearbyWorkbenchId]);
+
+  useEffect(() => {
+    if (activeRoomTarget.name === 'world') {
+      return;
+    }
+
+    if (activeContainerId === PERSONAL_STORAGE_ID) {
+      setActiveContainerId(null);
+    }
+  }, [activeContainerId, activeRoomTarget.name]);
+
+  useEffect(() => {
+    if (!workbenchCrafting) {
+      return;
+    }
+
+    setWorkbenchNow(Date.now());
+    const interval = window.setInterval(() => {
+      setWorkbenchNow(Date.now());
+    }, 250);
+
+    const remainingMs = Math.max(0, workbenchCrafting.endsAt - Date.now());
+    const timeout = window.setTimeout(() => {
+      setWorkbenchPendingPickup({
+        recipeId: workbenchCrafting.recipeId,
+        itemId: 'wood_staff',
+        quantity: 1,
+      });
+      setWorkbenchCrafting(null);
+      setWorkbenchStatus('Craft complete. Collect the result.');
+    }, remainingMs);
+
+    return () => {
+      window.clearTimeout(timeout);
+      window.clearInterval(interval);
+    };
+  }, [workbenchCrafting]);
 
   useEffect(() => {
     if (!activeTrader) {
@@ -2493,7 +2718,86 @@ export default function Home() {
     setSelectedTraderPanel('buy');
     setTraderStatus('');
     setActiveSkillTargeting(null);
+    setWorkbenchStatus('');
+    setWorkbenchPendingPickup(null);
+    setWorkbenchTab('craft');
     setActiveWorkbench(workbench);
+  };
+
+  const handleOpenPersonalStorage = () => {
+    setActiveContainerId((current) => (current === PERSONAL_STORAGE_ID ? null : PERSONAL_STORAGE_ID));
+    setActiveTrader(null);
+    setSelectedTraderOfferId(null);
+    setSelectedTraderSellIndex(null);
+    setSelectedTraderPanel('buy');
+    setTraderStatus('');
+    setActiveWorkbench(null);
+    setActiveSkillTargeting(null);
+  };
+
+  const handleWorkbenchCraftWoodStaff = () => {
+    if (!character || workbenchCrafting || workbenchPendingPickup) {
+      return;
+    }
+
+    const woodNeeded = 5;
+    const woodCount = getCombinedItemCount(character.inventory, personalStorageSlots, 'wood');
+    if (woodCount < woodNeeded) {
+      setWorkbenchStatus('Not enough wood. Need 5.');
+      return;
+    }
+
+    const afterRemoval = removeItemsFromInventories(character.inventory, personalStorageSlots, 'wood', woodNeeded);
+    if (!afterRemoval) {
+      setWorkbenchStatus('Not enough wood. Need 5.');
+      return;
+    }
+
+    const afterCraftCheck = addItemToInventory(afterRemoval.inventory, 'wood_staff', 1);
+    if (!afterCraftCheck) {
+      setWorkbenchStatus('Inventory is full. Free a slot for the staff.');
+      return;
+    }
+
+    setCharacter((current) =>
+      current
+        ? {
+            ...current,
+            inventory: afterRemoval.inventory,
+          }
+        : current,
+    );
+    setPersonalStorageSlots(afterRemoval.storage);
+    setWorkbenchStatus('Crafting Wood Staff...');
+    const startedAt = Date.now();
+    setWorkbenchCrafting({
+      recipeId: 'wood_staff',
+      startedAt,
+      endsAt: startedAt + 10_000,
+    });
+  };
+
+  const handleWorkbenchCollect = () => {
+    if (!character || !workbenchPendingPickup) {
+      return;
+    }
+
+    const nextInventory = addItemToInventory(character.inventory, workbenchPendingPickup.itemId, workbenchPendingPickup.quantity);
+    if (!nextInventory) {
+      setWorkbenchStatus('Inventory is full. Free a slot to collect.');
+      return;
+    }
+
+    setCharacter((current) =>
+      current
+        ? {
+            ...current,
+            inventory: nextInventory,
+          }
+        : current,
+    );
+    setWorkbenchPendingPickup(null);
+    setWorkbenchStatus('Craft collected.');
   };
 
   const handleAcceptIntroductionQuest = () => {
@@ -3390,8 +3694,20 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeAdminTab, playerRole, worldEditorMode]);
 
+  const personalStorageContainer: ContainerView = {
+    id: PERSONAL_STORAGE_ID,
+    title: text.personalStorageTitle,
+    subtitle: text.personalStorageSubtitle,
+    columns: PERSONAL_STORAGE_COLUMNS,
+    rows: PERSONAL_STORAGE_ROWS,
+    slots: personalStorageSlots,
+  };
   const activeContainer: ContainerView | null =
-    activeContainerId ? containers[activeContainerId] ?? null : null;
+    activeContainerId === PERSONAL_STORAGE_ID
+      ? personalStorageContainer
+      : activeContainerId
+        ? containers[activeContainerId] ?? null
+        : null;
   const currentPartyMember = party?.members.find((member) => member.nickname === username) ?? null;
   const isPartyLeader = currentPartyMember?.isLeader ?? false;
   const selectedRaidTemplate =
@@ -3446,6 +3762,30 @@ export default function Home() {
     : getQuestObjectiveTarget(activeRoomTarget, introductionQuest);
   const showSocketingHint =
     introductionQuest.status === 'active' && introductionQuest.currentStepId === 'socket_gem';
+  const workbenchWoodCount = character
+    ? getCombinedItemCount(character.inventory, personalStorageSlots, 'wood')
+    : 0;
+  const workbenchRemoval = character
+    ? removeItemsFromInventories(character.inventory, personalStorageSlots, 'wood', 5)
+    : null;
+  const workbenchCanCraft = Boolean(
+    character &&
+    !workbenchCrafting &&
+    !workbenchPendingPickup &&
+    workbenchWoodCount >= 5 &&
+    workbenchRemoval &&
+    addItemToInventory(workbenchRemoval.inventory, 'wood_staff', 1),
+  );
+  const workbenchProgress = workbenchCrafting
+    ? Math.min(
+        1,
+        Math.max(
+          0,
+          (workbenchNow - workbenchCrafting.startedAt)
+            / (workbenchCrafting.endsAt - workbenchCrafting.startedAt),
+        ),
+      )
+    : 0;
 
   useEffect(() => {
     if (!shouldGuideIntroductionTraderUi) {
@@ -4459,6 +4799,11 @@ export default function Home() {
             return;
           }
 
+          if (activeContainerId === PERSONAL_STORAGE_ID) {
+            setPersonalStorageSlots(slots);
+            return;
+          }
+
           setContainers((current) => ({
             ...current,
             [activeContainerId]: {
@@ -4995,43 +5340,22 @@ export default function Home() {
         </HudWindow>
       ) : null}
 
-      {activeWorkbench ? (
-        <HudWindow
-          title="Workbench"
-          subtitle="Crafting"
-          storageKey="mmorpg.ui.workbench.position.v1"
-          defaultPosition={{ left: 420, top: 180 }}
-          onClose={() => {
-            setActiveWorkbench(null);
-          }}
-          className="z-30 w-[420px] max-w-[92vw] border-[#d9efbd]/35 bg-[#17320d]/82"
-        >
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-4">
-              <div className="flex items-start gap-4">
-                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#d9efbd]/20 bg-[#102108]/60 p-2">
-                  <img
-                    src={WORLD_WORKBENCH_TEXTURE_PATH}
-                    alt="Workbench"
-                    className="pixelated h-full w-full object-contain"
-                  />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Station</div>
-                  <div className="mt-2 text-xl font-semibold text-[#f4ffe8]">Workbench</div>
-                  <div className="mt-2 text-sm leading-6 text-[#d8ebc7]">
-                    Верстак добавлен в мир, но рецепты и кнопки крафта пока ещё не подключены.
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="rounded-xl border border-[#d9efbd]/16 bg-[#203b11]/45 px-4 py-4 text-sm leading-6 text-[#d8ebc7]">
-              Это заготовка под будущую систему крафта. Следующим шагом сюда можно завести список рецептов, требования и результат.
-            </div>
-          </div>
-        </HudWindow>
-      ) : null}
-
+      <WorkbenchWindow
+        isOpen={Boolean(activeWorkbench)}
+        tab={workbenchTab}
+        onTabChange={setWorkbenchTab}
+        woodCount={workbenchWoodCount}
+        canCraft={workbenchCanCraft}
+        isCrafting={Boolean(workbenchCrafting)}
+        hasPendingPickup={Boolean(workbenchPendingPickup)}
+        progress={workbenchProgress}
+        status={workbenchStatus}
+        onCraft={handleWorkbenchCraftWoodStaff}
+        onCollect={handleWorkbenchCollect}
+        onClose={() => {
+          setActiveWorkbench(null);
+        }}
+      />
       <div
         ref={objectiveArrowRef}
         className="pointer-events-none fixed left-0 top-0 z-20"
@@ -5084,6 +5408,20 @@ export default function Home() {
       />
 
       <div className="pointer-events-auto absolute bottom-5 right-5 z-30 flex flex-col gap-2">
+        <button
+          type="button"
+          onClick={handleOpenPersonalStorage}
+          disabled={activeRoomTarget.name !== 'world'}
+          className={`rounded-2xl border px-4 py-3 text-xs font-semibold uppercase tracking-[0.2em] shadow-[0_14px_34px_rgba(0,0,0,0.28)] backdrop-blur-sm transition ${
+            activeRoomTarget.name !== 'world'
+              ? 'cursor-not-allowed border-[#d9efbd]/14 bg-[#203b11]/45 text-[#88a26e]'
+              : activeContainerId === PERSONAL_STORAGE_ID
+                ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d] hover:bg-[#e7f8cf]'
+                : 'border-[#d9efbd]/30 bg-[#17320d]/78 text-[#f4ffe8] hover:bg-[#244713]/78'
+          }`}
+        >
+          {text.storage}
+        </button>
         <button
           type="button"
           ref={lobbyToolsToggleButtonRef}

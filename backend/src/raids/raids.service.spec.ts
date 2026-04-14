@@ -13,6 +13,8 @@ type MockRepository<T> = {
   createQueryBuilder: jest.Mock;
 };
 
+const NON_TUTORIAL_RAID_SIZE_SCALE = 2;
+
 function createMockRepository<T>(): MockRepository<T> {
   return {
     findOne: jest.fn(),
@@ -37,19 +39,32 @@ function createTemplate(overrides: Partial<RaidTemplateDefinition> = {}): RaidTe
   };
 }
 
+function scaleTemplate(template: RaidTemplateDefinition): RaidTemplateDefinition {
+  if (template.code === 'crypt_small') {
+    return template;
+  }
+
+  return {
+    ...template,
+    width: template.width * NON_TUTORIAL_RAID_SIZE_SCALE,
+    height: template.height * NON_TUTORIAL_RAID_SIZE_SCALE,
+  };
+}
+
 function createRun(
   template: RaidTemplateDefinition,
   overrides: Partial<RaidRunEntity> = {},
 ): RaidRunEntity {
   const now = new Date();
+  const scaledTemplate = scaleTemplate(template);
   return {
     id: 'run-1',
     seed: 'shared-seed',
     status: 'ready',
     playerCount: 2,
     generatedLayout: {
-      width: template.width,
-      height: template.height,
+      width: scaledTemplate.width,
+      height: scaledTemplate.height,
       rooms: [],
       spawnPoints: [],
       chests: [],
@@ -57,13 +72,13 @@ function createRun(
     },
     startedAt: now,
     finishedAt: null,
-    templateCode: template.code,
-    templateName: template.name,
-    biome: template.biome,
-    minPlayers: template.minPlayers,
-    maxPlayers: template.maxPlayers,
-    width: template.width,
-    height: template.height,
+    templateCode: scaledTemplate.code,
+    templateName: scaledTemplate.name,
+    biome: scaledTemplate.biome,
+    minPlayers: scaledTemplate.minPlayers,
+    maxPlayers: scaledTemplate.maxPlayers,
+    width: scaledTemplate.width,
+    height: scaledTemplate.height,
     party: null,
     createdAt: now,
     updatedAt: now,
@@ -155,6 +170,7 @@ describe('StartRaidUseCase', () => {
       seed: 'new-seed',
       startedAt: new Date(),
     });
+    const scaledTemplate = scaleTemplate(template);
     const queryBuilder = {
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -192,13 +208,13 @@ describe('StartRaidUseCase', () => {
     expect(raidRunsRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
         generatedLayout: null,
-        templateCode: template.code,
-        templateName: template.name,
-        biome: template.biome,
-        minPlayers: template.minPlayers,
-        maxPlayers: template.maxPlayers,
-        width: template.width,
-        height: template.height,
+        templateCode: scaledTemplate.code,
+        templateName: scaledTemplate.name,
+        biome: scaledTemplate.biome,
+        minPlayers: scaledTemplate.minPlayers,
+        maxPlayers: scaledTemplate.maxPlayers,
+        width: scaledTemplate.width,
+        height: scaledTemplate.height,
       }),
     );
   });

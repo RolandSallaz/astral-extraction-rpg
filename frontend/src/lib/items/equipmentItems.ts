@@ -485,7 +485,7 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     id: 'wood',
     type: 'misc',
     name: 'Wood',
-    value: 4,
+    value: 2,
     tooltipStats: ['Common loot item', 'Can be found in chests', 'Stacks to 99'],
     textureKey: 'item-wood-resource',
     texturePath: '/items/resources/wood_1.png',
