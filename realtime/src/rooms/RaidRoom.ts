@@ -20,7 +20,7 @@ import {
   RAID_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
 } from "./sharedGameplay.js";
-import { INVENTORY_SIZE } from "@mmorpg/shared";
+import { INVENTORY_SIZE, isGemItemId } from "@mmorpg/shared";
 import {
   getMobDefinition,
   type MobKind,
@@ -64,12 +64,15 @@ import type { RaidTemplateContentDefinition } from "@mmorpg/shared/raids/content
 const TILE_SIZE = RAID_GAMEPLAY_PROFILE.tileSize;
 const RAID_PLAYER_SPEED = RAID_GAMEPLAY_PROFILE.playerMoveSpeed;
 const PLAYER_COLLISION_FOOT_OFFSET_Y = 12;
-const PLAYER_MOB_COLLISION_RADIUS = 22;
+const PLAYER_MOB_COLLISION_HALF_WIDTH = RAID_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth;
+const PLAYER_MOB_COLLISION_HALF_HEIGHT = RAID_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight;
+const PLAYER_MOB_COLLISION_OFFSET_Y = RAID_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
 const OFFLINE_PLAYER_GRACE_MS = 60_000;
 const RAID_DURATION_MS = 15 * 60_000;
 const RAT_PACK_JOIN_DISTANCE = TILE_SIZE * 3.5;
 const RAT_PACK_ROAM_INTERVAL_MS = 5000;
 const RAT_PACK_TARGET_REACHED_DISTANCE = TILE_SIZE * 0.75;
+const RAID_CHEST_GEM_ROLL_CHANCE = 0.16;
 
 export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   maxClients = 8;
@@ -520,16 +523,27 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       return false;
     }
 
-    const nearbyMobs = this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS);
+    const nearbyMobs = this.mobSpatialGrid.queryRadius(
+      clampedX,
+      clampedY,
+      Math.max(PLAYER_MOB_COLLISION_HALF_WIDTH, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+    );
     if (nearbyMobs.length > 0) {
       for (const mob of nearbyMobs) {
         if (!player) {
           return false;
         }
 
-        const currentDistance = Math.hypot(player.x - mob.x, player.y - mob.y);
-        const nextDistance = Math.hypot(clampedX - mob.x, clampedY - mob.y);
-        const isAlreadyOverlapping = currentDistance < PLAYER_MOB_COLLISION_RADIUS;
+        const collisionCenterY = mob.y + PLAYER_MOB_COLLISION_OFFSET_Y;
+        const currentDistance = Math.hypot(
+          (player.x - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
+          (player.y - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+        );
+        const nextDistance = Math.hypot(
+          (clampedX - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
+          (clampedY - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+        );
+        const isAlreadyOverlapping = currentDistance < 1;
         const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
 
         if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
@@ -903,6 +917,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     const slots = new Array<string>(chest.columns * chest.rows).fill("");
     const itemPool = (lootBand?.pools ?? []).flatMap((poolId) => chestContent.lootPools[poolId] ?? []);
     const usedItems = new Set<string>();
+    const nonGemItemPool = itemPool.filter((itemId) => !isGemItemId(itemId));
 
     for (let itemIndex = 0; itemIndex < itemCount; itemIndex += 1) {
       if (itemPool.length === 0) {
@@ -917,6 +932,13 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       while (usedItems.has(itemId) && guard < itemPool.length * 2) {
         itemId = itemPool[Math.floor(random() * itemPool.length)];
         guard += 1;
+      }
+      if (
+        isGemItemId(itemId) &&
+        nonGemItemPool.length > 0 &&
+        random() > RAID_CHEST_GEM_ROLL_CHANCE
+      ) {
+        itemId = nonGemItemPool[Math.floor(random() * nonGemItemPool.length)] ?? itemId;
       }
       usedItems.add(itemId);
       slots[slotIndex] = itemId;

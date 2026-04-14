@@ -646,10 +646,6 @@ function getAvailableSkills(equipment: EquipmentState): SkillId[] {
 function getDefaultActionBarBindings(equipment: EquipmentState): Partial<Record<ActionSlotKey, ActionBarBinding | null>> {
   const nextBindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {};
 
-  if (equipment.weapon === 'wood_staff') {
-    nextBindings.LMB = { kind: 'skill', skillId: 'woodStaffStrike' };
-  }
-
   return nextBindings;
 }
 
@@ -799,6 +795,7 @@ export function GameHud({
   const [cooldownNow, setCooldownNow] = useState(() => Date.now());
   const [dragState, setDragState] = useState<DragState | null>(null);
   const actionBarDragHandledRef = useRef(false);
+  const autoAssignedSkillsRef = useRef<Set<SkillId>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<HoveredItemState | null>(null);
   const [hoveredSkill, setHoveredSkill] = useState<HoveredSkillState | null>(null);
   const [itemContextMenu, setItemContextMenu] = useState<ItemContextMenuState | null>(null);
@@ -895,6 +892,60 @@ export function GameHud({
     const resolvedBindings = getResolvedActionBarBindings(actionBarBindings, equipment);
     onMouseSkillBindingsChange?.(getMouseSkillBindingsFromActionBar(resolvedBindings));
   }, [actionBarBindings, equipment, onMouseSkillBindingsChange]);
+
+  useEffect(() => {
+    setActionBarBindings((current) => {
+      const resolved = getResolvedActionBarBindings(current, equipment);
+      const next: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = { ...resolved };
+      let changed = false;
+      const boundSkills = new Set<SkillId>();
+
+      ACTION_BAR_SLOTS.forEach(({ key }) => {
+        const binding = resolved[key];
+        if (binding?.kind === 'skill') {
+          boundSkills.add(binding.skillId);
+        }
+      });
+
+      autoAssignedSkillsRef.current.forEach((skillId) => {
+        if (!availableSkills.includes(skillId)) {
+          autoAssignedSkillsRef.current.delete(skillId);
+        }
+      });
+
+      const findEmptySlot = () => {
+        for (const { key } of MOUSE_ACTION_SLOTS) {
+          if (!next[key]) {
+            return key;
+          }
+        }
+        for (const { key } of KEYBOARD_ACTION_SLOTS) {
+          if (!next[key]) {
+            return key;
+          }
+        }
+        return null;
+      };
+
+      availableSkills.forEach((skillId) => {
+        if (boundSkills.has(skillId) || autoAssignedSkillsRef.current.has(skillId)) {
+          return;
+        }
+
+        const emptySlot = findEmptySlot();
+        if (!emptySlot) {
+          return;
+        }
+
+        next[emptySlot] = { kind: 'skill', skillId };
+        boundSkills.add(skillId);
+        autoAssignedSkillsRef.current.add(skillId);
+        changed = true;
+      });
+
+      return changed ? next : current;
+    });
+  }, [availableSkills, equipment]);
 
   const updateActionBarBindings = (
     updater: (
@@ -1482,7 +1533,7 @@ export function GameHud({
       event.preventDefault();
       event.stopPropagation();
 
-      if (event.ctrlKey) {
+      if (event.altKey) {
         handleEquipFromSource(source, itemValue);
         return;
       }
@@ -1534,6 +1585,11 @@ export function GameHud({
       } else if (source.type === 'container' && container) {
         onInventoryUse({ type: 'container', containerId: container.id, slotIndex: source.index });
       }
+      setItemContextMenu(null);
+      return;
+    }
+
+    if (itemDefinition.type !== 'equipment' && itemDefinition.type !== 'gem') {
       setItemContextMenu(null);
       return;
     }
@@ -1677,6 +1733,11 @@ export function GameHud({
         event.preventDefault();
         return;
       }
+      if (event.altKey) {
+        event.preventDefault();
+        handleEquipFromSource({ type: 'inventory', index }, itemId);
+        return;
+      }
 
       event.preventDefault();
       setDragState({
@@ -1714,6 +1775,11 @@ export function GameHud({
 
       if (event.ctrlKey && quickTransferItem({ type: 'container', index })) {
         event.preventDefault();
+        return;
+      }
+      if (event.altKey) {
+        event.preventDefault();
+        handleEquipFromSource({ type: 'container', index }, itemId);
         return;
       }
 
@@ -2708,7 +2774,20 @@ export function GameHud({
           >
             {(() => {
               const itemId = getInventoryItemId(visibleItemContextMenu.itemValue);
-              return itemId && EQUIPMENT_ITEMS[itemId].type === 'consumable' ? 'Use' : 'Equip';
+              if (!itemId) {
+                return 'Equip';
+              }
+
+              const itemType = EQUIPMENT_ITEMS[itemId].type;
+              if (itemType === 'consumable') {
+                return 'Use';
+              }
+
+              if (itemType === 'equipment' || itemType === 'gem') {
+                return 'Equip';
+              }
+
+              return 'Store';
             })()}
           </button>
           <button

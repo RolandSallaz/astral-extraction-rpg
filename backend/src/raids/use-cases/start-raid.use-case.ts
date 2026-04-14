@@ -13,6 +13,7 @@ import { RaidRunEntity } from '../entities/raid-run.entity';
 import { RaidTemplateFiles } from '../raid-template-files';
 
 const RECENT_RAID_REUSE_WINDOW_MS = 60_000;
+const NON_TUTORIAL_RAID_SIZE_SCALE = 2;
 
 @Injectable()
 export class StartRaidUseCase {
@@ -25,6 +26,7 @@ export class StartRaidUseCase {
 
   async execute(player: PlayerEntity, input: StartRaidDto) {
     const template = await this.requireActiveTemplate(input.templateCode);
+    const scaledTemplate = this.scaleTemplateBounds(template);
 
     if (template.code === 'crypt_small') {
       const introductionQuest = getIntroductionQuestProgress(player.quests);
@@ -44,7 +46,7 @@ export class StartRaidUseCase {
       throw new BadRequestException('Party size does not match raid template.');
     }
 
-    const reusedRun = await this.findRecentJoinableRun(template, playerCount);
+    const reusedRun = await this.findRecentJoinableRun(scaledTemplate, playerCount);
     if (reusedRun) {
       reusedRun.playerCount += playerCount;
       const savedRun = await this.raidRunsRepository.save(reusedRun);
@@ -63,13 +65,13 @@ export class StartRaidUseCase {
       generatedLayout: null,
       startedAt: new Date(),
       finishedAt: null,
-      templateCode: template.code,
-      templateName: template.name,
-      biome: template.biome,
-      minPlayers: template.minPlayers,
-      maxPlayers: template.maxPlayers,
-      width: template.width,
-      height: template.height,
+      templateCode: scaledTemplate.code,
+      templateName: scaledTemplate.name,
+      biome: scaledTemplate.biome,
+      minPlayers: scaledTemplate.minPlayers,
+      maxPlayers: scaledTemplate.maxPlayers,
+      width: scaledTemplate.width,
+      height: scaledTemplate.height,
       party: party ?? null,
     });
 
@@ -116,6 +118,18 @@ export class StartRaidUseCase {
       width: template.width,
       height: template.height,
       isActive: template.isActive,
+    };
+  }
+
+  private scaleTemplateBounds(template: RaidTemplateDefinition): RaidTemplateDefinition {
+    if (template.code === 'crypt_small') {
+      return template;
+    }
+
+    return {
+      ...template,
+      width: template.width * NON_TUTORIAL_RAID_SIZE_SCALE,
+      height: template.height * NON_TUTORIAL_RAID_SIZE_SCALE,
     };
   }
 

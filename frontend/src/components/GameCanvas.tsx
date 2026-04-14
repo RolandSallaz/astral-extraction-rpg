@@ -40,12 +40,14 @@ import {
   createMeadowMobsFromAsset,
   createMeadowStampsFromAsset,
   createMeadowTradersFromAsset,
+  ensureWorldWorkbenchStamp,
   isBlockedMeadowTile,
   type MeadowMapAsset,
   type MeadowMobAsset,
   type MeadowOverlayAsset,
   type MeadowTile,
   type MeadowTraderAsset,
+  WORLD_WORKBENCH_TEXTURE_PATH,
   resolveGroundOverlaysFromAsset,
   resolveMeadowTexture,
 } from '@/lib/maps/meadowMap';
@@ -202,7 +204,8 @@ const SHARED_DEATH_ANIMATION: SheetAnimation = {
 type MovementBlocker = {
   x: number;
   y: number;
-  radius: number;
+  halfWidth: number;
+  halfHeight: number;
 };
 
 const ENTITY_SORT_BASE_DEPTH = 1;
@@ -231,6 +234,11 @@ export type { RealtimeChatMessage };
 export type { MinimapSnapshot };
 
 export type WorldTraderInteraction = MeadowTraderAsset;
+export type WorldWorkbenchInteraction = {
+  id: string;
+  x: number;
+  y: number;
+};
 export type TraderQuestMarker = {
   symbol: '!' | '?';
   color: string;
@@ -1020,8 +1028,23 @@ function getCharacterFootY(character: Pick<CharacterVisual, 'container'>, tileSi
   return character.container.y + tileSize * 0.42;
 }
 
+function getMobFootY(mob: Pick<MobVisual, 'sprite'>) {
+  return mob.sprite.y + mob.sprite.displayHeight * (1 - mob.sprite.originY);
+}
+
 function getWorldTraderFootY(trader: Pick<WorldTraderVisual, 'container'>, tileSize: number) {
   return trader.container.y + tileSize * 0.42;
+}
+
+function getPlayerMobCollisionCenterY(y: number) {
+  return y + WORLD_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
+}
+
+function getBlockerCollisionDistance(x: number, y: number, blocker: MovementBlocker) {
+  return Math.hypot(
+    (x - blocker.x) / Math.max(0.001, blocker.halfWidth),
+    (y - blocker.y) / Math.max(0.001, blocker.halfHeight),
+  );
 }
 
 function createSkillAnimation(skillId: SkillEffectId, config: SkillEffectConfig): SheetAnimation {
@@ -1062,16 +1085,16 @@ function canMoveToWorldPosition(
   }
 
   for (const blocker of mobBlockers) {
-    const nextDistance = Phaser.Math.Distance.Between(clampedX, clampedY, blocker.x, blocker.y);
-    if (nextDistance >= blocker.radius) {
+    const nextDistance = getBlockerCollisionDistance(clampedX, clampedY, blocker);
+    if (nextDistance >= 1) {
       continue;
     }
 
     const currentDistance =
       typeof currentX === 'number' && typeof currentY === 'number'
-        ? Phaser.Math.Distance.Between(currentX, currentY, blocker.x, blocker.y)
+        ? getBlockerCollisionDistance(currentX, currentY, blocker)
         : Number.POSITIVE_INFINITY;
-    const isAlreadyOverlapping = currentDistance < blocker.radius;
+    const isAlreadyOverlapping = currentDistance < 1;
     const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
     if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
       return false;
@@ -1111,16 +1134,16 @@ function canMoveToRaidWorldPosition(
   }
 
   for (const blocker of mobBlockers) {
-    const nextDistance = Phaser.Math.Distance.Between(clampedX, y, blocker.x, blocker.y);
-    if (nextDistance >= blocker.radius) {
+    const nextDistance = getBlockerCollisionDistance(clampedX, y, blocker);
+    if (nextDistance >= 1) {
       continue;
     }
 
     const currentDistance =
       typeof currentX === 'number' && typeof currentY === 'number'
-        ? Phaser.Math.Distance.Between(currentX, currentY, blocker.x, blocker.y)
+        ? getBlockerCollisionDistance(currentX, currentY, blocker)
         : Number.POSITIVE_INFINITY;
-    const isAlreadyOverlapping = currentDistance < blocker.radius;
+    const isAlreadyOverlapping = currentDistance < 1;
     const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
     if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
       return false;
@@ -1834,9 +1857,9 @@ async function loadWorldMapAsset(): Promise<MeadowMapAsset> {
       throw new Error('Failed to load world map asset');
     }
 
-    return await response.json() as MeadowMapAsset;
+    return ensureWorldWorkbenchStamp(await response.json() as MeadowMapAsset);
   } catch {
-    return createDefaultMeadowMapAsset();
+    return ensureWorldWorkbenchStamp(createDefaultMeadowMapAsset());
   }
 }
 
@@ -1861,6 +1884,8 @@ export function GameCanvas({
   onNearbyChestChange,
   onTraderInteract,
   onNearbyTraderChange,
+  onWorkbenchInteract,
+  onNearbyWorkbenchChange,
   getTraderQuestMarker,
   objectiveTarget = null,
   onObjectiveArrowChange,
@@ -1906,6 +1931,7 @@ export function GameCanvas({
   onWorldEditPaint,
   onWorldEditHoverChange,
   onWorldEditDebugChange,
+  debugCollisionEnabled = false,
   locale = 'ru',
 }: {
   playerEquipment: PlayerEquipment;
@@ -1926,6 +1952,8 @@ export function GameCanvas({
   onNearbyChestChange?: (chestId: string | null) => void;
   onTraderInteract?: (trader: WorldTraderInteraction) => void;
   onNearbyTraderChange?: (traderId: string | null) => void;
+  onWorkbenchInteract?: (workbench: WorldWorkbenchInteraction) => void;
+  onNearbyWorkbenchChange?: (workbenchId: string | null) => void;
   getTraderQuestMarker?: (trader: WorldTraderInteraction) => TraderQuestMarker;
   objectiveTarget?: ObjectiveTarget;
   onObjectiveArrowChange?: (state: ObjectiveArrowState) => void;
@@ -2019,6 +2047,8 @@ export function GameCanvas({
   const nearbyChestChangeRef = useRef(onNearbyChestChange);
   const traderInteractRef = useRef(onTraderInteract);
   const nearbyTraderChangeRef = useRef(onNearbyTraderChange);
+  const workbenchInteractRef = useRef(onWorkbenchInteract);
+  const nearbyWorkbenchChangeRef = useRef(onNearbyWorkbenchChange);
   const traderQuestMarkerRef = useRef(getTraderQuestMarker);
   const objectiveTargetRef = useRef(objectiveTarget);
   const objectiveArrowChangeRef = useRef(onObjectiveArrowChange);
@@ -2064,6 +2094,7 @@ export function GameCanvas({
   const worldMapAssetOverrideSerializedRef = useRef(JSON.stringify(worldMapAssetOverride));
   const lastNotifiedNearbyChestIdRef = useRef<string | null>(null);
   const lastNotifiedNearbyTraderIdRef = useRef<string | null>(null);
+  const lastNotifiedNearbyWorkbenchIdRef = useRef<string | null>(null);
   const lastNotifiedPlayerPositionRef = useRef<{ x: number; y: number } | null>(null);
   const lastWorldHoverTileRef = useRef<string | null>(null);
   const lastWorldEditDebugRef = useRef<string>('{"textureKey":"","textureLoaded":false}');
@@ -2107,6 +2138,14 @@ export function GameCanvas({
   useEffect(() => {
     nearbyTraderChangeRef.current = onNearbyTraderChange;
   }, [onNearbyTraderChange]);
+
+  useEffect(() => {
+    workbenchInteractRef.current = onWorkbenchInteract;
+  }, [onWorkbenchInteract]);
+
+  useEffect(() => {
+    nearbyWorkbenchChangeRef.current = onNearbyWorkbenchChange;
+  }, [onNearbyWorkbenchChange]);
 
   useEffect(() => {
     traderQuestMarkerRef.current = getTraderQuestMarker;
@@ -2531,8 +2570,9 @@ export function GameCanvas({
                 ? []
                 : [{
                   x: mob.sprite.x,
-                  y: mob.sprite.y,
-                  radius: 22,
+                  y: getPlayerMobCollisionCenterY(mob.sprite.y),
+                  halfWidth: WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth,
+                  halfHeight: WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight,
                 }],
             );
           const completedDeadPlayerIds = new Set<string>();
@@ -2682,6 +2722,8 @@ export function GameCanvas({
           let interactableChestId: string | null = null;
           let canInteractWithTrader = false;
           let interactableTraderId: string | null = null;
+          let canInteractWithWorkbench = false;
+          let interactableWorkbenchId: string | null = null;
           let canUseRaidExit = false;
           let interactableRaidExitId: string | null = null;
           const statusText = this.add
@@ -4003,8 +4045,24 @@ export function GameCanvas({
             let swingOffsetX = 0;
             let swingOffsetY = 0;
             let swingAngleDeg = 0;
+            let handAimAngleDeg = 0;
+            let swingAimAngleRad = character.facingX < 0 ? Math.PI : 0;
             let isSwinging = false;
             let swingProgress = 0;
+            let swingTrailStart = 0;
+            let swingTrailEnd = 1;
+            if (swingTarget) {
+              const dx = swingTarget.x - character.container.x;
+              const dy = swingTarget.y - character.container.y;
+              const length = Math.hypot(dx, dy);
+              if (length > 0.001) {
+                handAimAngleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
+                swingAimAngleRad = Math.atan2(dy, dx);
+                if (character.facingX < 0) {
+                  handAimAngleDeg = 180 - handAimAngleDeg;
+                }
+              }
+            }
             if (
               character.currentCastingSkillId === 'woodStaffStrike' &&
               character.currentWeaponItem === WOOD_STAFF_ITEM_ID &&
@@ -4017,14 +4075,23 @@ export function GameCanvas({
                 0,
                 1,
               );
-              const windupCutoff = 0.3;
-              const strikeCutoff = 0.7;
-              const windupDist = 18;
-              const strikeDist = 34;
-              const windupLift = 32;
-              const strikeDrop = 2;
-              const windupAngleOffset = -90;
-              const strikeAngleOffset = 50;
+              const windupCutoff = 0.25;
+              const strikeCutoff = 0.6;
+              swingTrailStart = windupCutoff;
+              swingTrailEnd = strikeCutoff;
+              const windupDist = 12;
+              const strikeDist = 32;
+              const windupLift = 26;
+              const strikeDrop = 1;
+              const strikeDistUpY = 40;
+              const strikeDistDownY = 22;
+              const windupAngleOffset = -70;
+              const coneHalfAngle = 45;
+              const strikeImpactAngleBoost = 24;
+              const staffTiltDeg = -8;
+              const handConeHalfAngle = 22;
+              const handImpactAngleBoost = 6;
+              const handWindupAngleOffset = -35;
               let dirX = 1;
               let dirY = 0;
               if (swingTarget) {
@@ -4036,34 +4103,65 @@ export function GameCanvas({
                   dirY = dy / length;
                 }
               }
-              const aimAngle = Math.atan2(dirY, dirX) * (180 / Math.PI);
+              const aimAngleRad = Math.atan2(dirY, dirX);
+              const aimAngleDeg = aimAngleRad * (180 / Math.PI);
+              const strikeDistY =
+                dirY < -0.1
+                  ? strikeDistUpY
+                  : dirY > 0.1
+                    ? strikeDistDownY
+                    : strikeDist;
 
               if (swingProgress < windupCutoff) {
                 const t = Math.sin((swingProgress / windupCutoff) * Math.PI * 0.5);
-                swingOffsetX = -dirX * windupDist * t;
-                swingOffsetY = -dirY * windupDist * t - windupLift * t;
-                swingAngleDeg = aimAngle + windupAngleOffset * t;
+                const handAngleRad =
+                  aimAngleRad + (handWindupAngleOffset * (Math.PI / 180)) * t;
+                const handRadius = Phaser.Math.Linear(0, windupDist, t);
+                swingOffsetX = Math.cos(handAngleRad) * handRadius;
+                swingOffsetY = Math.sin(handAngleRad) * handRadius - windupLift * t;
+                swingAngleDeg = aimAngleDeg + windupAngleOffset * t + staffTiltDeg;
               } else if (swingProgress < strikeCutoff) {
                 const t = Math.sin(((swingProgress - windupCutoff) / (strikeCutoff - windupCutoff)) * Math.PI * 0.5);
-                swingOffsetX = Phaser.Math.Linear(-dirX * windupDist, dirX * strikeDist, t);
-                swingOffsetY = Phaser.Math.Linear(-dirY * windupDist - windupLift, dirY * strikeDist + strikeDrop, t);
-                swingAngleDeg = Phaser.Math.Linear(aimAngle + windupAngleOffset, aimAngle + strikeAngleOffset, t);
+                const forwardBlend = 1 - Math.min(1, Math.abs(dirY) / 0.35);
+                const coneSpan = Phaser.Math.Linear(coneHalfAngle * 0.5, coneHalfAngle, 1 - forwardBlend);
+                const handConeSpan = Phaser.Math.Linear(handConeHalfAngle * 0.5, handConeHalfAngle, 1 - forwardBlend);
+                const handAngleRad = aimAngleRad + Phaser.Math.Linear(-handConeSpan, handConeSpan, t) * (Math.PI / 180);
+                const handRadius = Phaser.Math.Linear(windupDist, strikeDistY, t);
+                swingOffsetX = Math.cos(handAngleRad) * handRadius;
+                swingOffsetY = Math.sin(handAngleRad) * handRadius + strikeDrop;
+                swingAngleDeg = Phaser.Math.Linear(
+                  aimAngleDeg + windupAngleOffset,
+                  aimAngleDeg + coneHalfAngle + strikeImpactAngleBoost,
+                  t,
+                ) + staffTiltDeg;
               } else {
                 const t = Math.sin(((swingProgress - strikeCutoff) / (1 - strikeCutoff)) * Math.PI * 0.5);
-                swingOffsetX = Phaser.Math.Linear(dirX * strikeDist, 0, t);
-                swingOffsetY = Phaser.Math.Linear(dirY * strikeDist + strikeDrop, 0, t);
-                swingAngleDeg = Phaser.Math.Linear(aimAngle + strikeAngleOffset, 0, t);
+                const handAngleRad =
+                  aimAngleRad +
+                  Phaser.Math.Linear(handConeHalfAngle + handImpactAngleBoost, 0, t) * (Math.PI / 180);
+                const handRadius = Phaser.Math.Linear(strikeDistY, 0, t);
+                swingOffsetX = Math.cos(handAngleRad) * handRadius;
+                swingOffsetY = Math.sin(handAngleRad) * handRadius + Phaser.Math.Linear(strikeDrop, 0, t);
+                swingAngleDeg = Phaser.Math.Linear(
+                  aimAngleDeg + coneHalfAngle + strikeImpactAngleBoost,
+                  aimAngleDeg,
+                  t,
+                ) + staffTiltDeg;
               }
             }
 
             if (holdingHand === 'left') {
               character.leftHand.x = leftHandPosition.x + swingOffsetX;
               character.leftHand.y = leftHandPosition.y + swingOffsetY;
+              character.leftHand.setAngle(handAimAngleDeg);
+              character.rightHand.setAngle(0);
               character.rightHand.x = rightHandPosition.x;
               character.rightHand.y = rightHandPosition.y;
             } else {
               character.rightHand.x = rightHandPosition.x + swingOffsetX;
               character.rightHand.y = rightHandPosition.y + swingOffsetY;
+              character.rightHand.setAngle(handAimAngleDeg);
+              character.leftHand.setAngle(0);
               character.leftHand.x = leftHandPosition.x;
               character.leftHand.y = leftHandPosition.y;
             }
@@ -4119,59 +4217,48 @@ export function GameCanvas({
 
             const trailPoints = character.swingTrailPoints;
             const swingTrail = character.swingTrail;
-            const trailDurationMs = 220;
-            const maxTrailPoints = 14;
             if (!showWeapon) {
               trailPoints.length = 0;
               swingTrail.clear();
               swingTrail.setVisible(false);
             } else {
-              if (isSwinging) {
-                const weaponTipLength = Math.max(6, character.weaponItem.displayHeight * 0.46);
-                const weaponRotation = character.weaponItem.rotation;
-                const tipX = character.weaponItem.x + Math.sin(weaponRotation) * weaponTipLength;
-                const tipY = character.weaponItem.y - Math.cos(weaponRotation) * weaponTipLength;
-                const lastPoint = trailPoints[trailPoints.length - 1];
-                const distance = lastPoint ? Math.hypot(tipX - lastPoint.x, tipY - lastPoint.y) : 999;
-                if (!lastPoint || distance > 1.4 || castNow - lastPoint.time > 40) {
-                  trailPoints.push({ x: tipX, y: tipY, time: castNow });
-                  if (trailPoints.length > maxTrailPoints) {
-                    trailPoints.shift();
-                  }
-                }
-              }
+              if (isSwinging && swingProgress >= swingTrailStart && swingProgress <= swingTrailEnd) {
+                const profile = isRaidScene ? RAID_GAMEPLAY_PROFILE : WORLD_GAMEPLAY_PROFILE;
+                const originX = 0;
+                const originY = -profile.playerHitRadius + profile.meleeStrikeOriginOffsetY;
+                const trailAimAngle =
+                  character.facingX < 0 ? Math.PI - swingAimAngleRad : swingAimAngleRad;
+                const startAngle = trailAimAngle - profile.meleeStrikeArcHalfAngleRad;
+                const endAngle = trailAimAngle + profile.meleeStrikeArcHalfAngleRad;
+                const phaseT = Phaser.Math.Clamp(
+                  (swingProgress - swingTrailStart) / Math.max(0.001, swingTrailEnd - swingTrailStart),
+                  0,
+                  1,
+                );
+                const fade = Math.sin(phaseT * Math.PI);
+                const sweepAngle = Phaser.Math.Linear(startAngle, endAngle, phaseT);
+                const sweepHalfWidth = Math.max(0.06, profile.meleeStrikeArcHalfAngleRad * 0.2);
 
-              while (trailPoints.length > 0 && castNow - trailPoints[0].time > trailDurationMs) {
-                trailPoints.shift();
-              }
-
-              if (trailPoints.length < 2) {
-                swingTrail.clear();
-                swingTrail.setVisible(false);
-              } else {
+                trailPoints.length = 0;
                 swingTrail.clear();
                 swingTrail.setVisible(true);
-                const trailBoost = Phaser.Math.Clamp((swingProgress - 0.1) / 0.9, 0.35, 1);
-                for (let index = 1; index < trailPoints.length; index += 1) {
-                  const from = trailPoints[index - 1];
-                  const to = trailPoints[index];
-                  const age = Phaser.Math.Clamp((castNow - from.time) / trailDurationMs, 0, 1);
-                  const fade = (1 - age) * trailBoost;
-                  const outerWidth = Phaser.Math.Linear(9, 2, age);
-                  const innerWidth = Math.max(1.6, outerWidth * 0.55);
-                  const outerAlpha = 0.2 * fade;
-                  const innerAlpha = 0.55 * fade;
-                  swingTrail.lineStyle(outerWidth, 0xf0c27b, outerAlpha);
-                  swingTrail.beginPath();
-                  swingTrail.moveTo(from.x, from.y);
-                  swingTrail.lineTo(to.x, to.y);
-                  swingTrail.strokePath();
-                  swingTrail.lineStyle(innerWidth, 0xffe6b5, innerAlpha);
-                  swingTrail.beginPath();
-                  swingTrail.moveTo(from.x, from.y);
-                  swingTrail.lineTo(to.x, to.y);
-                  swingTrail.strokePath();
-                }
+                const radius = Math.max(8, profile.meleeStrikeRange);
+                const tipX = originX + Math.cos(sweepAngle) * radius;
+                const tipY = originY + Math.sin(sweepAngle) * radius;
+                swingTrail.lineStyle(18, 0xffe6b5, 0.55 * fade);
+                swingTrail.beginPath();
+                swingTrail.moveTo(originX, originY);
+                swingTrail.lineTo(tipX, tipY);
+                swingTrail.strokePath();
+                swingTrail.lineStyle(8, 0xffd089, 0.7 * fade);
+                swingTrail.beginPath();
+                swingTrail.moveTo(originX, originY);
+                swingTrail.lineTo(tipX, tipY);
+                swingTrail.strokePath();
+              } else {
+                trailPoints.length = 0;
+                swingTrail.clear();
+                swingTrail.setVisible(false);
               }
             }
             character.castItem.x = 10 + character.currentWeaponOffsetX;
@@ -4423,11 +4510,6 @@ export function GameCanvas({
             }
 
             if (!activeSkillTargetingRef.current) {
-              if (mouseSlotKey === 'LMB') {
-                pointer.event?.preventDefault();
-                const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-                castWoodStaffStrike(worldPoint.x, worldPoint.y);
-              }
               return;
             }
 
@@ -6267,6 +6349,88 @@ export function GameCanvas({
                 }
               }
 
+              if (!isRaidScene) {
+                let closestWorkbench:
+                  | {
+                    id: string;
+                    x: number;
+                    y: number;
+                    distance: number;
+                  }
+                  | null = null;
+
+                currentWorldAsset.stamps
+                  .filter((stamp) => stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH)
+                  .forEach((stamp) => {
+                    const workbenchX = stamp.x * tileSize + tileSize / 2;
+                    const workbenchY = stamp.y * tileSize + tileSize / 2;
+                    const dx = workbenchX - localCharacter.container.x;
+                    const dy = workbenchY - localCharacter.container.y;
+                    const distance = Math.hypot(dx, dy);
+
+                    if (!closestWorkbench || distance < closestWorkbench.distance) {
+                      closestWorkbench = {
+                        id: `workbench:${stamp.x}:${stamp.y}`,
+                        x: workbenchX,
+                        y: workbenchY,
+                        distance,
+                      };
+                    }
+                  });
+
+                const resolvedWorkbench = closestWorkbench as
+                  | {
+                    id: string;
+                    x: number;
+                    y: number;
+                    distance: number;
+                  }
+                  | null;
+
+                if (resolvedWorkbench) {
+                  const dx = resolvedWorkbench.x - localCharacter.container.x;
+                  const dy = resolvedWorkbench.y - localCharacter.container.y;
+                  const directionLength = Math.hypot(dx, dy) || 1;
+                  const lookDot =
+                    (lastLookX * (dx / directionLength)) +
+                    (lastLookY * (dy / directionLength));
+
+                  canInteractWithWorkbench =
+                    resolvedWorkbench.distance <= meadowMap.tileSize * 1.6 &&
+                    (lookDot >= 0.15 ||
+                      Math.abs(dx) <= meadowMap.tileSize * 0.75 ||
+                      Math.abs(dy) <= meadowMap.tileSize * 0.75);
+                  interactableWorkbenchId = canInteractWithWorkbench ? resolvedWorkbench.id : null;
+                  if (lastNotifiedNearbyWorkbenchIdRef.current !== interactableWorkbenchId) {
+                    lastNotifiedNearbyWorkbenchIdRef.current = interactableWorkbenchId;
+                    nearbyWorkbenchChangeRef.current?.(interactableWorkbenchId);
+                  }
+
+                  if (!canOpenChest && !canInteractWithTrader && canInteractWithWorkbench) {
+                    chestPrompt.setText('F CRAFT');
+                    chestPrompt.setPosition(
+                      localCharacter.container.x,
+                      localCharacter.container.y - 42,
+                    );
+                    chestPrompt.setVisible(true);
+                  }
+                } else {
+                  interactableWorkbenchId = null;
+                  canInteractWithWorkbench = false;
+                  if (lastNotifiedNearbyWorkbenchIdRef.current !== null) {
+                    lastNotifiedNearbyWorkbenchIdRef.current = null;
+                    nearbyWorkbenchChangeRef.current?.(null);
+                  }
+                }
+              } else {
+                interactableWorkbenchId = null;
+                canInteractWithWorkbench = false;
+                if (lastNotifiedNearbyWorkbenchIdRef.current !== null) {
+                  lastNotifiedNearbyWorkbenchIdRef.current = null;
+                  nearbyWorkbenchChangeRef.current?.(null);
+                }
+              }
+
               if (isRaidScene) {
                 let closestExit:
                   | {
@@ -6323,6 +6487,8 @@ export function GameCanvas({
               canOpenChest = false;
               interactableTraderId = null;
               canInteractWithTrader = false;
+              interactableWorkbenchId = null;
+              canInteractWithWorkbench = false;
               canUseRaidExit = false;
               interactableRaidExitId = null;
               if (lastNotifiedNearbyChestIdRef.current !== null) {
@@ -6332,6 +6498,10 @@ export function GameCanvas({
               if (lastNotifiedNearbyTraderIdRef.current !== null) {
                 lastNotifiedNearbyTraderIdRef.current = null;
                 nearbyTraderChangeRef.current?.(null);
+              }
+              if (lastNotifiedNearbyWorkbenchIdRef.current !== null) {
+                lastNotifiedNearbyWorkbenchIdRef.current = null;
+                nearbyWorkbenchChangeRef.current?.(null);
               }
               chestPrompt.setVisible(false);
               objectiveArrowChangeRef.current?.(null);
@@ -6730,10 +6900,11 @@ export function GameCanvas({
                     ? DEBUG_COLLISION_PLAYER_COLOR
                     : DEBUG_COLLISION_REMOTE_PLAYER_COLOR;
                 collisionDebugGraphics.lineStyle(2, color, 0.95);
-                collisionDebugGraphics.strokeCircle(
+                collisionDebugGraphics.strokeEllipse(
                   character.container.x,
-                  character.container.y,
-                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionRadius,
+                  getPlayerMobCollisionCenterY(character.container.y),
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth * 2,
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight * 2,
                 );
               });
 
@@ -6743,10 +6914,11 @@ export function GameCanvas({
                 }
 
                 collisionDebugGraphics.lineStyle(2, DEBUG_COLLISION_MOB_COLOR, 0.95);
-                collisionDebugGraphics.strokeCircle(
+                collisionDebugGraphics.strokeEllipse(
                   mob.sprite.x,
-                  mob.sprite.y,
-                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionRadius,
+                  getPlayerMobCollisionCenterY(mob.sprite.y),
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth * 2,
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight * 2,
                 );
               });
             }
@@ -6769,6 +6941,13 @@ export function GameCanvas({
                 if (trader) {
                   traderInteractRef.current?.(trader);
                 }
+              } else if (!isRaidScene && canInteractWithWorkbench && interactableWorkbenchId) {
+                const [, tileX, tileY] = interactableWorkbenchId.split(':');
+                workbenchInteractRef.current?.({
+                  id: interactableWorkbenchId,
+                  x: Number(tileX) * tileSize + tileSize / 2,
+                  y: Number(tileY) * tileSize + tileSize / 2,
+                });
               }
             }
           });

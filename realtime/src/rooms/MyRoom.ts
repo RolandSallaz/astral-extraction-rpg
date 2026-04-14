@@ -58,7 +58,9 @@ const TILE_SIZE = WORLD_GAMEPLAY_PROFILE.tileSize;
 const PLAYER_SPEED = WORLD_GAMEPLAY_PROFILE.playerMoveSpeed;
 const CHAT_HISTORY_LIMIT = 40;
 const PLAYER_OFFLINE_GRACE_MS = 60000;
-const PLAYER_MOB_COLLISION_RADIUS = WORLD_GAMEPLAY_PROFILE.playerMobCollisionRadius;
+const PLAYER_MOB_COLLISION_HALF_WIDTH = WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth;
+const PLAYER_MOB_COLLISION_HALF_HEIGHT = WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight;
+const PLAYER_MOB_COLLISION_OFFSET_Y = WORLD_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
 
 export class MyRoom extends BaseGameRoom<PlayerState> {
   maxClients = 100;
@@ -559,16 +561,27 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       return false;
     }
 
-    const nearbyMobs = this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS);
+    const nearbyMobs = this.mobSpatialGrid.queryRadius(
+      clampedX,
+      clampedY,
+      Math.max(PLAYER_MOB_COLLISION_HALF_WIDTH, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+    );
     if (nearbyMobs.length > 0) {
       for (const mob of nearbyMobs) {
         if (!player) {
           return false;
         }
 
-        const currentDistance = Math.hypot(player.x - mob.x, player.y - mob.y);
-        const nextDistance = Math.hypot(clampedX - mob.x, clampedY - mob.y);
-        const isAlreadyOverlapping = currentDistance < PLAYER_MOB_COLLISION_RADIUS;
+        const collisionCenterY = mob.y + PLAYER_MOB_COLLISION_OFFSET_Y;
+        const currentDistance = Math.hypot(
+          (player.x - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
+          (player.y - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+        );
+        const nextDistance = Math.hypot(
+          (clampedX - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
+          (clampedY - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+        );
+        const isAlreadyOverlapping = currentDistance < 1;
         const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
 
         if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {

@@ -5,6 +5,8 @@ import { RaidRunEntity } from './entities/raid-run.entity';
 import type { RaidTemplateDefinition } from '@mmorpg/shared/raids/templates';
 import { RaidTemplateFiles } from './raid-template-files';
 
+const NON_TUTORIAL_RAID_SIZE_SCALE = 2;
+
 @Injectable()
 export class RaidsService {
   constructor(
@@ -33,17 +35,26 @@ export class RaidsService {
   }
 
   private serializeTemplate(template: RaidTemplateDefinition) {
+    const scaledTemplate =
+      template.code === 'crypt_small'
+        ? template
+        : {
+            ...template,
+            width: template.width * NON_TUTORIAL_RAID_SIZE_SCALE,
+            height: template.height * NON_TUTORIAL_RAID_SIZE_SCALE,
+          };
+
     return {
-      id: template.code,
-      code: template.code,
-      name: template.name,
-      description: template.description,
-      biome: template.biome,
-      minPlayers: template.minPlayers,
-      maxPlayers: template.maxPlayers,
-      width: template.width,
-      height: template.height,
-      isActive: template.isActive,
+      id: scaledTemplate.code,
+      code: scaledTemplate.code,
+      name: scaledTemplate.name,
+      description: scaledTemplate.description,
+      biome: scaledTemplate.biome,
+      minPlayers: scaledTemplate.minPlayers,
+      maxPlayers: scaledTemplate.maxPlayers,
+      width: scaledTemplate.width,
+      height: scaledTemplate.height,
+      isActive: scaledTemplate.isActive,
     };
   }
 

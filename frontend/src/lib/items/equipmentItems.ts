@@ -14,6 +14,7 @@ import {
   type GemType,
   type ItemId,
   type ItemTier,
+  type MiscItemId,
   type QuestItemId,
   type SharedItemDefinition,
 } from '@mmorpg/shared';
@@ -29,6 +30,7 @@ export type {
   GemType,
   ItemId,
   ItemTier,
+  MiscItemId,
   QuestItemId,
 };
 
@@ -478,6 +480,21 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     maxStack: 1,
     iconScale: 0.9,
     compactIconScale: 0.9,
+  },
+  wood: {
+    id: 'wood',
+    type: 'misc',
+    name: 'Wood',
+    value: 4,
+    tooltipStats: ['Common loot item', 'Can be found in chests', 'Stacks to 99'],
+    textureKey: 'item-wood-resource',
+    texturePath: '/items/resources/wood_1.png',
+    stackable: true,
+    maxStack: 99,
+    iconTint: '#9b6a3a',
+    iconRotationDeg: 90,
+    iconScale: 0.78,
+    compactIconScale: 0.72,
   },
   sealed_relic: {
     id: 'sealed_relic',

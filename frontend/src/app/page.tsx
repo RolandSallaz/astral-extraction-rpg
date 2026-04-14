@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type MouseEvent } from 'react';
-import { GameCanvas, type MinimapSnapshot, type ObjectiveArrowState, type RealtimeChatMessage, type TraderQuestMarker, type WorldTraderInteraction } from '@/components/GameCanvas';
+import { GameCanvas, type MinimapSnapshot, type ObjectiveArrowState, type RealtimeChatMessage, type TraderQuestMarker, type WorldTraderInteraction, type WorldWorkbenchInteraction } from '@/components/GameCanvas';
 import { GameChat } from '@/components/GameChat';
 import { GameHud, type ContainerView, type MouseSkillBindings, type SkillId } from '@/components/GameHud';
 import { ItemIcon } from '@/components/ItemIcon';
@@ -55,7 +55,7 @@ import {
   type QuestStepDefinition,
 } from '@/lib/quests';
 import { loadStoredLocale, persistLocale, pickLocale, type Locale } from '@/lib/i18n';
-import type { MeadowMapAsset, MeadowMobAsset, MeadowOverlayAsset, MeadowStampAsset, MeadowTile, MeadowTraderAsset } from '@/lib/maps/meadowMap';
+import { ensureWorldWorkbenchStamp, WORLD_WORKBENCH_TEXTURE_PATH, type MeadowMapAsset, type MeadowMobAsset, type MeadowOverlayAsset, type MeadowStampAsset, type MeadowTile, type MeadowTraderAsset } from '@/lib/maps/meadowMap';
 import { MOB_KINDS, getMobDefinition, type MobKind } from '@mmorpg/shared/mobs/catalog';
 import { DEFAULT_PLAYER_VISUALS } from '@mmorpg/shared/player/visuals';
 import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
@@ -1346,6 +1346,8 @@ export default function Home() {
   const [nearbyChestId, setNearbyChestId] = useState<string | null>(null);
   const [nearbyTraderId, setNearbyTraderId] = useState<string | null>(null);
   const [activeTrader, setActiveTrader] = useState<WorldTraderInteraction | null>(null);
+  const [nearbyWorkbenchId, setNearbyWorkbenchId] = useState<string | null>(null);
+  const [activeWorkbench, setActiveWorkbench] = useState<WorldWorkbenchInteraction | null>(null);
   const [activeTraderTab, setActiveTraderTab] = useState<TraderTabId>('shop');
   const [questLogOpen, setQuestLogOpen] = useState(false);
   const [collapsedQuestLogIds, setCollapsedQuestLogIds] = useState<string[]>([]);
@@ -1629,6 +1631,16 @@ export default function Home() {
   }, [activeTrader, nearbyTraderId]);
 
   useEffect(() => {
+    if (!activeWorkbench) {
+      return;
+    }
+
+    if (nearbyWorkbenchId !== activeWorkbench.id) {
+      setActiveWorkbench(null);
+    }
+  }, [activeWorkbench, nearbyWorkbenchId]);
+
+  useEffect(() => {
     if (!activeTrader) {
       setSelectedTraderOfferId(null);
       return;
@@ -1729,7 +1741,7 @@ export default function Home() {
         return response.json() as Promise<MeadowMapAsset>;
       })
       .then((asset) => {
-        setWorldMapDraft(asset);
+        setWorldMapDraft(ensureWorldWorkbenchStamp(asset));
       })
       .catch((error) => {
         console.error('Failed to load world map asset', error);
@@ -2476,6 +2488,7 @@ export default function Home() {
 
   const handleChestInteract = (chestId: string) => {
     setActiveTrader(null);
+    setActiveWorkbench(null);
     setSelectedTraderSellIndex(null);
     setSelectedTraderPanel('buy');
     setTraderStatus('');
@@ -2487,6 +2500,7 @@ export default function Home() {
   const handleTraderInteract = (trader: WorldTraderInteraction) => {
     const firstSellIndex = character?.inventory.findIndex((entry) => entry !== null) ?? -1;
     setActiveContainerId(null);
+    setActiveWorkbench(null);
     setActiveSkillTargeting(null);
     setActiveTraderTab('shop');
     setSelectedTraderOfferId(getTraderOffers(trader)[0]?.itemId ?? null);
@@ -2494,6 +2508,17 @@ export default function Home() {
     setSelectedTraderPanel('buy');
     setTraderStatus('');
     setActiveTrader(trader);
+  };
+
+  const handleWorkbenchInteract = (workbench: WorldWorkbenchInteraction) => {
+    setActiveContainerId(null);
+    setActiveTrader(null);
+    setSelectedTraderOfferId(null);
+    setSelectedTraderSellIndex(null);
+    setSelectedTraderPanel('buy');
+    setTraderStatus('');
+    setActiveSkillTargeting(null);
+    setActiveWorkbench(workbench);
   };
 
   const handleAcceptIntroductionQuest = () => {
@@ -3325,7 +3350,7 @@ export default function Home() {
       throw new Error(await readResponseErrorMessage(response, 'Failed to reload world map.'));
     }
 
-    const asset = await response.json() as MeadowMapAsset;
+    const asset = ensureWorldWorkbenchStamp(await response.json() as MeadowMapAsset);
     setWorldMapDraft(asset);
     setWorldMapStatus('World map reloaded.');
   };
@@ -3347,7 +3372,7 @@ export default function Home() {
       throw new Error(await readResponseErrorMessage(response, 'Failed to save world map.'));
     }
 
-    const savedAsset = await response.json() as MeadowMapAsset;
+    const savedAsset = ensureWorldWorkbenchStamp(await response.json() as MeadowMapAsset);
     setWorldMapDraft(savedAsset);
     setWorldMapStatus('World map saved. Refresh the scene to see changes.');
   };
@@ -4269,6 +4294,8 @@ export default function Home() {
           onNearbyChestChange={setNearbyChestId}
           onTraderInteract={handleTraderInteract}
           onNearbyTraderChange={setNearbyTraderId}
+          onWorkbenchInteract={handleWorkbenchInteract}
+          onNearbyWorkbenchChange={setNearbyWorkbenchId}
           onRoomConnected={handleRoomConnected}
           getTraderQuestMarker={(trader) => getTraderQuestMarker(trader, character, locale)}
           objectiveTarget={questObjectiveTarget}
@@ -4988,6 +5015,43 @@ export default function Home() {
               </>
             );
           })()}
+        </HudWindow>
+      ) : null}
+
+      {activeWorkbench ? (
+        <HudWindow
+          title="Workbench"
+          subtitle="Crafting"
+          storageKey="mmorpg.ui.workbench.position.v1"
+          defaultPosition={{ left: 420, top: 180 }}
+          onClose={() => {
+            setActiveWorkbench(null);
+          }}
+          className="z-30 w-[420px] max-w-[92vw] border-[#d9efbd]/35 bg-[#17320d]/82"
+        >
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-4">
+              <div className="flex items-start gap-4">
+                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#d9efbd]/20 bg-[#102108]/60 p-2">
+                  <img
+                    src={WORLD_WORKBENCH_TEXTURE_PATH}
+                    alt="Workbench"
+                    className="pixelated h-full w-full object-contain"
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Station</div>
+                  <div className="mt-2 text-xl font-semibold text-[#f4ffe8]">Workbench</div>
+                  <div className="mt-2 text-sm leading-6 text-[#d8ebc7]">
+                    Верстак добавлен в мир, но рецепты и кнопки крафта пока ещё не подключены.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-[#d9efbd]/16 bg-[#203b11]/45 px-4 py-4 text-sm leading-6 text-[#d8ebc7]">
+              Это заготовка под будущую систему крафта. Следующим шагом сюда можно завести список рецептов, требования и результат.
+            </div>
+          </div>
         </HudWindow>
       ) : null}
 

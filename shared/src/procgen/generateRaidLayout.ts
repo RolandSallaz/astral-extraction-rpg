@@ -93,14 +93,14 @@ export function generateRaidLayout(seed: string, width = 128, height = 128): Gen
     tiles[y * width + x] = tile;
   };
 
-  const roomCount = Math.max(12, Math.floor((width * height) / 180) + Math.floor(random() * 4));
+  const roomCount = Math.max(8, Math.floor((width * height) / 720) + 6 + Math.floor(random() * 3));
   let attempts = 0;
 
   while (rooms.length < roomCount && attempts < roomCount * 10) {
     attempts += 1;
     const isHall = rooms.length < 2 || random() < 0.28;
-    const roomWidth = isHall ? 10 + Math.floor(random() * 6) : 5 + Math.floor(random() * 5);
-    const roomHeight = isHall ? 8 + Math.floor(random() * 5) : 5 + Math.floor(random() * 4);
+    const roomWidth = Math.min(width - 2, isHall ? 20 + Math.floor(random() * 12) : 10 + Math.floor(random() * 10));
+    const roomHeight = Math.min(height - 2, isHall ? 16 + Math.floor(random() * 8) : 10 + Math.floor(random() * 8));
     const roomX = 1 + Math.floor(random() * Math.max(1, width - roomWidth - 2));
     const roomY = 1 + Math.floor(random() * Math.max(1, height - roomHeight - 2));
 

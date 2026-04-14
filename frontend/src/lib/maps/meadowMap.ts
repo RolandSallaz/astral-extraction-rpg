@@ -107,6 +107,28 @@ export type MeadowMobAsset = {
   };
 };
 
+export const WORLD_WORKBENCH_TEXTURE_PATH = '/pack/potion and poison asset pack/Portable Alchemy Crate of Potions.png';
+export const WORLD_WORKBENCH_DEFAULT_STAMP: MeadowStampAsset = {
+  x: 19,
+  y: 18,
+  texturePath: WORLD_WORKBENCH_TEXTURE_PATH,
+  rotation: 0,
+  flipX: false,
+  scale: 1.25,
+};
+
+export function ensureWorldWorkbenchStamp(asset: MeadowMapAsset): MeadowMapAsset {
+  const hasWorkbench = (asset.stamps ?? []).some((stamp) => stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH);
+  if (hasWorkbench) {
+    return asset;
+  }
+
+  return {
+    ...asset,
+    stamps: [...(asset.stamps ?? []), { ...WORLD_WORKBENCH_DEFAULT_STAMP }],
+  };
+}
+
 export function isBlockedMeadowTile(
   map: MeadowMap,
   decorations: MeadowDecoration[],

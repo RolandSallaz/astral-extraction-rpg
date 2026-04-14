@@ -341,9 +341,30 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     if (handler.needsTarget) {
       const requestedTargetX = Number.isFinite(message.targetX) ? message.targetX! : player.x;
       const requestedTargetY = Number.isFinite(message.targetY) ? message.targetY! : player.y;
-      const clamped = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
-      targetX = clamped.x;
-      targetY = clamped.y;
+      if (skillId === "woodStaffStrike") {
+        const originX = player.x;
+        const originY = player.y - this.profile.playerHitRadius;
+        const deltaX = requestedTargetX - originX;
+        const deltaY = requestedTargetY - originY;
+        const distance = Math.hypot(deltaX, deltaY);
+        const upRangeBonus = 24;
+        const downRangePenalty = 16;
+        const maxRange =
+          this.profile.meleeStrikeRange +
+          (deltaY < 0 ? upRangeBonus : deltaY > 0 ? -downRangePenalty : 0);
+        if (distance > 0.001 && distance > maxRange) {
+          const scale = maxRange / distance;
+          targetX = originX + deltaX * scale;
+          targetY = originY + deltaY * scale;
+        } else {
+          targetX = requestedTargetX;
+          targetY = requestedTargetY;
+        }
+      } else {
+        const clamped = this.clampTargetToCastRange(player, player.x, player.y, requestedTargetX, requestedTargetY);
+        targetX = clamped.x;
+        targetY = clamped.y;
+      }
     }
 
     if (handler.canPerform && !handler.canPerform(ctx, targetX, targetY)) {
@@ -651,15 +672,31 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   ): WoodStaffStrikeTarget | null {
     const maxRange = this.profile.meleeStrikeRange;
     const hitSlack = 4;
-    const playerPosition = lagCompensationEnabled
+    const playerCenterOffsetY = -this.profile.playerHitRadius + this.profile.meleeStrikeOriginOffsetY;
+    const rawPlayerPosition = lagCompensationEnabled
       ? this.getPlayerPositionAt(player.id, lagCompensatedAt) ?? player
       : player;
+    const playerPosition = {
+      x: rawPlayerPosition.x,
+      y: rawPlayerPosition.y + playerCenterOffsetY,
+    };
     const directionX = targetX - playerPosition.x;
     const directionY = targetY - playerPosition.y;
     const directionLength = Math.hypot(directionX, directionY);
     const hasAimDirection = directionLength > 0.001;
     const normalizedX = hasAimDirection ? directionX / directionLength : 0;
     const normalizedY = hasAimDirection ? directionY / directionLength : 0;
+    const upRangeBonus = 24;
+    const downRangePenalty = 16;
+    const effectiveRange =
+      maxRange +
+      (hasAimDirection
+        ? normalizedY < -0.25
+          ? upRangeBonus
+          : normalizedY > 0.25
+            ? -downRangePenalty
+            : 0
+        : 0);
     const minimumDot = Math.cos(this.profile.meleeStrikeArcHalfAngleRad);
     const isTargetWithinArc = (deltaX: number, deltaY: number, distance: number, hitRadius: number) => {
       if (!hasAimDirection || distance <= hitRadius + hitSlack) {
@@ -674,16 +711,17 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return dot >= minimumDot;
     };
 
+    const mobCenterOffsetY = -this.profile.mobHitRadius + this.profile.meleeStrikeMobCenterOffsetY;
     let nearestMob: WoodStaffStrikeTarget | null = null;
-    for (const mob of this.queryNearbyMobs(playerPosition.x, playerPosition.y, maxRange + this.profile.mobHitRadius)) {
+    for (const mob of this.queryNearbyMobs(playerPosition.x, playerPosition.y, effectiveRange + this.profile.mobHitRadius)) {
       if (mob.dead) {
         continue;
       }
 
       const deltaX = mob.x - playerPosition.x;
-      const deltaY = mob.y - playerPosition.y;
+      const deltaY = mob.y + mobCenterOffsetY - playerPosition.y;
       const distance = Math.hypot(deltaX, deltaY);
-      if (distance > maxRange + this.profile.mobHitRadius || !isTargetWithinArc(deltaX, deltaY, distance, this.profile.mobHitRadius)) {
+      if (distance > effectiveRange + this.profile.mobHitRadius || !isTargetWithinArc(deltaX, deltaY, distance, this.profile.mobHitRadius)) {
         continue;
       }
 
@@ -706,9 +744,10 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         ? this.getPlayerPositionAt(candidate.id, lagCompensatedAt) ?? candidate
         : candidate;
       const deltaX = candidatePosition.x - playerPosition.x;
-      const deltaY = candidatePosition.y - playerPosition.y;
+      const deltaY =
+        candidatePosition.y + playerCenterOffsetY - playerPosition.y;
       const distance = Math.hypot(deltaX, deltaY);
-      if (distance > maxRange + this.profile.playerHitRadius || !isTargetWithinArc(deltaX, deltaY, distance, this.profile.playerHitRadius)) {
+      if (distance > effectiveRange + this.profile.playerHitRadius || !isTargetWithinArc(deltaX, deltaY, distance, this.profile.playerHitRadius)) {
         continue;
       }
 
@@ -846,19 +885,45 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     return null;
   }
 
+  protected getSegmentEllipseCollisionT(
+    startX: number,
+    startY: number,
+    endX: number,
+    endY: number,
+    centerX: number,
+    centerY: number,
+    halfWidth: number,
+    halfHeight: number,
+  ) {
+    return this.getSegmentCircleCollisionT(
+      (startX - centerX) / Math.max(0.001, halfWidth),
+      (startY - centerY) / Math.max(0.001, halfHeight),
+      (endX - centerX) / Math.max(0.001, halfWidth),
+      (endY - centerY) / Math.max(0.001, halfHeight),
+      0,
+      0,
+      1,
+    );
+  }
+
   protected resolvePlayerMobOverlap(player: BasePlayerState, mob: MobState) {
-    const minDistance = this.profile.playerMobCollisionRadius + 2;
-    const deltaX = player.x - mob.x;
-    const deltaY = player.y - mob.y;
-    const distance = Math.hypot(deltaX, deltaY);
-    if (distance >= minDistance) {
+    const collisionCenterX = mob.x;
+    const collisionCenterY = mob.y + this.profile.playerMobCollisionOffsetY;
+    const halfWidth = this.profile.playerMobCollisionHalfWidth + 2;
+    const halfHeight = this.profile.playerMobCollisionHalfHeight + 2;
+    const deltaX = player.x - collisionCenterX;
+    const deltaY = player.y - collisionCenterY;
+    const distance = Math.hypot(
+      deltaX / Math.max(0.001, halfWidth),
+      deltaY / Math.max(0.001, halfHeight),
+    );
+    if (distance >= 1) {
       return;
     }
 
-    const directionX = distance > 0.001 ? deltaX / distance : 1;
-    const directionY = distance > 0.001 ? deltaY / distance : 0;
-    const targetX = mob.x + directionX * minDistance;
-    const targetY = mob.y + directionY * minDistance;
+    const scale = distance > 0.001 ? 1 / distance : 1;
+    const targetX = collisionCenterX + (distance > 0.001 ? deltaX * scale : halfWidth);
+    const targetY = collisionCenterY + (distance > 0.001 ? deltaY * scale : 0);
     if (this.canTeleportTo(targetX, targetY, player.id)) {
       player.x = targetX;
       player.y = targetY;
@@ -874,7 +939,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     toY: number,
   ) {
     const hitTargets = this.mobSkillHitTargets.get(mob.id) ?? new Set<string>();
-    const collisionRadius = this.profile.playerMobCollisionRadius;
+    const collisionHalfWidth = this.profile.playerMobCollisionHalfWidth;
+    const collisionHalfHeight = this.profile.playerMobCollisionHalfHeight;
     let firstCollision:
       | {
         player: BasePlayerState;
@@ -887,14 +953,15 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         continue;
       }
 
-      const collisionT = this.getSegmentCircleCollisionT(
+      const collisionT = this.getSegmentEllipseCollisionT(
         fromX,
         fromY,
         toX,
         toY,
         player.x,
-        player.y,
-        collisionRadius,
+        player.y + this.profile.playerMobCollisionOffsetY,
+        collisionHalfWidth,
+        collisionHalfHeight,
       );
       if (collisionT === null) {
         continue;
