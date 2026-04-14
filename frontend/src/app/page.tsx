@@ -75,7 +75,6 @@ import {
   loginPlayer,
   logoutPlayer,
   registerPlayer,
-  saveCharacter,
   saveItemBalanceConfig,
   saveSkillBalanceConfig,
   saveMobBalanceConfig,
@@ -1458,7 +1457,6 @@ export default function Home() {
   const [selectedAdminItemId, setSelectedAdminItemId] = useState<ItemId>(
     ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'wood_staff',
   );
-  const skipFirstSaveRef = useRef(true);
   const skillBalanceLoadedRef = useRef(false);
   const skillBalancePersistedRef = useRef(JSON.stringify(DEFAULT_SKILL_BALANCE_CONFIG));
   const mobBalanceLoadedRef = useRef(false);
@@ -2079,21 +2077,6 @@ export default function Home() {
     });
   }, [authStatus, playerRole, itemBalanceConfig]);
 
-  useEffect(() => {
-    if (authStatus !== 'ready' || !character) {
-      return;
-    }
-
-    if (skipFirstSaveRef.current) {
-      skipFirstSaveRef.current = false;
-      return;
-    }
-
-    void saveCharacter(character).catch((error) => {
-        console.error('Failed to save character', error);
-      });
-  }, [authStatus, character]);
-
   const preventContextMenu = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault();
   };
@@ -2148,7 +2131,6 @@ export default function Home() {
       setAuthError('');
       setAuthStatus('ready');
       setAuthForm(INITIAL_FORM);
-      skipFirstSaveRef.current = true;
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Auth failed.');
     }
@@ -2169,12 +2151,6 @@ export default function Home() {
   };
 
   const handleLogout = () => {
-    if (character) {
-      void saveCharacter(character).catch((error) => {
-        console.error('Failed to save character before logout', error);
-      });
-    }
-
     logoutPlayer();
     setUsername('');
     setPlayerRole('user');
@@ -2194,7 +2170,6 @@ export default function Home() {
     setIsDead(false);
     setFireNovaCastNonce(0);
     chatSenderRef.current = null;
-    skipFirstSaveRef.current = true;
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(ACTIVE_ROOM_TARGET_STORAGE_KEY);
     }
@@ -4287,6 +4262,8 @@ export default function Home() {
           playerStrength={character.strength}
           playerAgility={character.agility}
           playerIntellect={character.intellect}
+          playerGold={character.gold}
+          playerQuests={character.quests}
           playerRole={playerRole}
           activeSkillTargeting={activeSkillTargeting}
           mouseSkillBindings={mouseSkillBindings}

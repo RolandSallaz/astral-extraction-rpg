@@ -267,28 +267,54 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
           verifiedPlayers: this.verifiedPlayers,
           player,
         });
-        return;
+      } else {
+        applyRoomProfilePatch(player, message, {
+          roleTransform: (value) => value.toUpperCase(),
+        });
+
+        this.syncPlayerInventory(player, message?.inventory);
+
+        if (
+          applyRoomZeroHealthState(player, {
+            resetMovement: () => {
+              player.moveX = 0;
+              player.moveY = 0;
+            },
+            clearCastState: () => {
+              this.clearPlayerCastState(player);
+            },
+          })
+        ) {
+          this.statusEffects.deletePlayerEffects(player.id);
+        }
       }
 
-      applyRoomProfilePatch(player, message, {
-        roleTransform: (value) => value.toUpperCase(),
+      const equipment = createEquipmentStateSnapshot({
+        bodyItem: message?.bodyItem,
+        headItem: message?.headItem,
+        weaponItem: message?.weaponItem,
+        headGemItem1: message?.headGemItem1,
+        headGemItem2: message?.headGemItem2,
+        headGemItem3: message?.headGemItem3,
+        bodyGemItem1: message?.bodyGemItem1,
+        bodyGemItem2: message?.bodyGemItem2,
+        bodyGemItem3: message?.bodyGemItem3,
+        weaponGemItem1: message?.weaponGemItem1,
+        weaponGemItem2: message?.weaponGemItem2,
+        weaponGemItem3: message?.weaponGemItem3,
       });
+      const inventory = Array.isArray(message?.inventory)
+        ? normalizeRoomInventorySlots(message.inventory, INVENTORY_SIZE)
+        : Array.from(player.inventory);
 
-      this.syncPlayerInventory(player, message?.inventory);
-
-      if (
-        applyRoomZeroHealthState(player, {
-          resetMovement: () => {
-            player.moveX = 0;
-            player.moveY = 0;
-          },
-          clearCastState: () => {
-            this.clearPlayerCastState(player);
-          },
-        })
-      ) {
-        this.statusEffects.deletePlayerEffects(player.id);
-      }
+      this.publishPlayerProfileSnapshot({
+        sessionId: client.sessionId,
+        equipment,
+        inventory,
+        gold: typeof message?.gold === "number" ? message.gold : undefined,
+        quests: message?.quests,
+        source: "world",
+      });
     });
 
     this.onMessage("chat", (client, message: ChatInputMessage) => {

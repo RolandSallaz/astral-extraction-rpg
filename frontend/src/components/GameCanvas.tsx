@@ -9,6 +9,7 @@ import {
   WORLD_GAMEPLAY_PROFILE,
 } from '@mmorpg/shared/gameplay/profiles';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { QuestLog } from '@mmorpg/shared/quests/core';
 import {
   DEFAULT_PLAYER_VISUALS,
   type PlayerAnimationState,
@@ -438,6 +439,8 @@ type ProfileSnapshot = {
   playerStrength: number;
   playerAgility: number;
   playerIntellect: number;
+  playerGold: number;
+  playerQuests: QuestLog;
   playerInventory: Array<string | null>;
   playerEquipment: PlayerEquipment;
 };
@@ -470,6 +473,8 @@ function createBaseProfileMessage(profile: ProfileSnapshot): BaseProfileMessage 
     strength: profile.playerStrength,
     agility: profile.playerAgility,
     intellect: profile.playerIntellect,
+    gold: profile.playerGold,
+    quests: profile.playerQuests,
     inventory: profile.playerInventory.map((itemId) => itemId ?? ''),
     ...createEquipmentSyncFields(profile.playerEquipment),
   };
@@ -1877,6 +1882,8 @@ export function GameCanvas({
   playerStrength,
   playerAgility,
   playerIntellect,
+  playerGold,
+  playerQuests,
   playerRole,
   activeSkillTargeting,
   mouseSkillBindings = { LMB: null, RMB: null },
@@ -1945,6 +1952,8 @@ export function GameCanvas({
   playerStrength: number;
   playerAgility: number;
   playerIntellect: number;
+  playerGold: number;
+  playerQuests: QuestLog;
   playerRole: string;
   activeSkillTargeting: 'fireball' | 'fireField' | null;
   mouseSkillBindings?: MouseSkillBindings;
@@ -2314,6 +2323,8 @@ export function GameCanvas({
       playerStrength,
       playerAgility,
       playerIntellect,
+      playerGold,
+      playerQuests,
       playerRole,
       playerInventory,
     };
@@ -2330,6 +2341,8 @@ export function GameCanvas({
     playerPosition,
     playerRole,
     playerStrength,
+    playerGold,
+    playerQuests,
   ]);
 
   const { attachRoomInboundHandlers } = useRoomInboundSync({
@@ -2375,6 +2388,8 @@ export function GameCanvas({
       playerStrength,
       playerAgility,
       playerIntellect,
+      playerGold,
+      playerQuests,
       playerInventory,
       playerEquipment,
     },

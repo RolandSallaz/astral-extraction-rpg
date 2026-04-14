@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { dbConfig, TDbConfig } from './config/db.config';
 import { GameConfigsModule } from './game-configs/game-configs.module';
 import { ItemsModule } from './items/items.module';
+import { KafkaModule } from './kafka/kafka.module';
 import { PartiesModule } from './parties/parties.module';
 import { PlayersModule } from './players/players.module';
 import { RaidsModule } from './raids/raids.module';
@@ -22,6 +23,7 @@ import { RaidsModule } from './raids/raids.module';
     }),
     GameConfigsModule,
     ItemsModule,
+    KafkaModule,
     PartiesModule,
     PlayersModule,
     RaidsModule,

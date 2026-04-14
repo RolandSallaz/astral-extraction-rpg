@@ -14,3 +14,13 @@
 </table>
 
 Development is in progress.
+
+<h2>Stack</h2>
+<ul>
+  <li>Frontend: Next.js (React, TypeScript).</li>
+  <li>Realtime: Colyseus (Node.js + WebSocket).</li>
+  <li>Backend: NestJS + TypeORM.</li>
+  <li>Database: PostgreSQL.</li>
+  <li>Messaging: Kafka (KRaft).</li>
+  <li>Local infra: Docker Compose.</li>
+</ul>

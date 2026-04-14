@@ -283,20 +283,46 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           verifiedPlayers: this.verifiedPlayers,
           player,
         });
-        return;
+      } else {
+        this.applyProfileToPlayer(player, message);
+        if (
+          applyRoomZeroHealthState(player, {
+            clearCastState: () => {
+              this.pendingMovement.delete(client.sessionId);
+              this.clearPlayerCastState(player);
+            },
+          })
+        ) {
+          this.statusEffects.deletePlayerEffects(player.id);
+        }
       }
 
-      this.applyProfileToPlayer(player, message);
-      if (
-        applyRoomZeroHealthState(player, {
-          clearCastState: () => {
-            this.pendingMovement.delete(client.sessionId);
-            this.clearPlayerCastState(player);
-          },
-        })
-      ) {
-        this.statusEffects.deletePlayerEffects(player.id);
-      }
+      const equipment = createEquipmentStateSnapshot({
+        bodyItem: message?.bodyItem,
+        headItem: message?.headItem,
+        weaponItem: message?.weaponItem,
+        headGemItem1: message?.headGemItem1,
+        headGemItem2: message?.headGemItem2,
+        headGemItem3: message?.headGemItem3,
+        bodyGemItem1: message?.bodyGemItem1,
+        bodyGemItem2: message?.bodyGemItem2,
+        bodyGemItem3: message?.bodyGemItem3,
+        weaponGemItem1: message?.weaponGemItem1,
+        weaponGemItem2: message?.weaponGemItem2,
+        weaponGemItem3: message?.weaponGemItem3,
+      });
+      const inventory = Array.isArray(message?.inventory)
+        ? normalizeRoomInventorySlots(message.inventory, INVENTORY_SIZE)
+        : Array.from(player.inventory);
+
+      this.publishPlayerProfileSnapshot({
+        sessionId: client.sessionId,
+        equipment,
+        inventory,
+        gold: typeof message?.gold === "number" ? message.gold : undefined,
+        quests: message?.quests,
+        source: "raid",
+      });
     });
 
     this.onMessage("useExit", (client, message: UseExitMessage) => {
@@ -323,6 +349,13 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       }
 
       const payload = this.handleSuccessfulRaidExit(player);
+      this.publishPlayerProfileSnapshot({
+        sessionId: client.sessionId,
+        equipment: payload.equipment ?? createEquipmentStateSnapshot({}),
+        inventory: payload.inventory ?? [],
+        source: "raid",
+        force: true,
+      });
       this.send(client, "raidExited", {
         raidRunId: this.state.raidRunId,
         exitId: message.exitId,

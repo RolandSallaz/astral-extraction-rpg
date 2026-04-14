@@ -3,6 +3,7 @@ import type { SkillBalanceConfig } from "../balance/skillBalance";
 import { canonicalizeItemId } from "../items/catalog";
 import type { MobKind } from "../mobs/catalog";
 import type { EquipmentState, InventoryState } from "../player/contracts";
+import type { QuestLog } from "../quests/core";
 
 export type MoveMessage = {
   x: number;
@@ -75,6 +76,8 @@ export type BaseProfileMessage = EquipmentSyncFields & {
   agility?: number;
   intellect?: number;
   inventory?: string[];
+  gold?: number;
+  quests?: QuestLog;
 };
 
 export type WorldProfileMessage = BaseProfileMessage & {

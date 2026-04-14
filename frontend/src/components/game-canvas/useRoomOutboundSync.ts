@@ -3,6 +3,7 @@
 import { useEffect, type MutableRefObject } from 'react';
 import type { Room } from '@colyseus/sdk';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { QuestLog } from '@mmorpg/shared/quests/core';
 import type {
   AdminUpdateMobBalanceMessage,
   AdminUpdateSkillBalanceMessage,
@@ -27,6 +28,8 @@ type PlayerProfileSnapshot = {
   playerStrength: number;
   playerAgility: number;
   playerIntellect: number;
+  playerGold: number;
+  playerQuests: QuestLog;
   playerInventory: Array<string | null>;
   playerEquipment: EquipmentState;
 };

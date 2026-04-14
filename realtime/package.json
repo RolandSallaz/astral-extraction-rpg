@@ -38,6 +38,7 @@
     "@colyseus/tools": "^0.17.0",
     "@mmorpg/shared": "file:../shared",
     "colyseus": "^0.17.6",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "kafkajs": "^2.2.4"
   }
 }

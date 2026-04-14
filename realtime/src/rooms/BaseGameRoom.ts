@@ -135,6 +135,9 @@ import {
   resolveLagCompensatedCastTiming as resolveLagCompensatedCastTimingRuntime,
   type LagCompensatedCastTiming,
 } from "./runtime/lagRuntime.js";
+import { publishKafkaEvent } from "../services/KafkaPublisher.js";
+import type { EquipmentState, InventoryState } from "@mmorpg/shared/player/contracts";
+import type { QuestLog } from "@mmorpg/shared/quests/core";
 
 // Re-export types subclasses need
 export type { DamageType } from "./projectileSkills.js";
@@ -253,6 +256,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   });
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
   protected readonly skillHandlers = createSkillHandlers();
+  private readonly lastPersistedProfileSnapshots = new Map<string, string>();
 
   // ── Auth (identical in both rooms) ───────────────────────────────
   protected async verifyAuth(options?: Record<string, unknown>) {
@@ -487,6 +491,42 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
     syncRoomChestSlots(chest, message.slots);
+  }
+
+  protected publishPlayerProfileSnapshot(options: {
+    sessionId: string;
+    equipment: EquipmentState;
+    inventory: InventoryState;
+    gold?: number;
+    quests?: QuestLog;
+    source: "world" | "raid";
+    force?: boolean;
+  }) {
+    const verified = this.verifiedPlayers.get(options.sessionId);
+    if (!verified) {
+      return;
+    }
+
+    const snapshotKey = JSON.stringify({
+      equipment: options.equipment,
+      inventory: options.inventory,
+      gold: options.gold,
+      quests: options.quests,
+    });
+    if (!options.force && this.lastPersistedProfileSnapshots.get(verified.id) === snapshotKey) {
+      return;
+    }
+
+    this.lastPersistedProfileSnapshots.set(verified.id, snapshotKey);
+    void publishKafkaEvent("player.profile.updated", {
+      playerId: verified.id,
+      equipment: options.equipment,
+      inventory: options.inventory,
+      gold: options.gold,
+      quests: options.quests,
+      source: options.source,
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   // ── Pending cast resolution ──────────────────────────────────────
