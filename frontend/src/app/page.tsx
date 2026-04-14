@@ -7,9 +7,12 @@ import { GameHud, type ContainerView, type MouseSkillBindings, type SkillId } fr
 import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
 import { WorkbenchWindow, type WorkbenchTab } from '@/components/WorkbenchWindow';
+import { isSameEquipmentItemFamily } from '@mmorpg/shared';
 import {
   ITEM_DEFINITIONS,
+  identifyAllRaidUnidentifiedInventoryEntries,
   parseInventoryItem,
+  revealMatchedRaidUnidentifiedInventoryEntries,
   serializeInventoryItem,
   type ItemId,
 } from '@/lib/items/equipmentItems';
@@ -76,6 +79,7 @@ import {
   loginPlayer,
   logoutPlayer,
   registerPlayer,
+  saveCharacter,
   saveItemBalanceConfig,
   saveSkillBalanceConfig,
   saveMobBalanceConfig,
@@ -179,6 +183,7 @@ type QuestObjectiveTarget = {
 
 const OLD_MAGE_TRADER_ID = 'old-mage';
 const OLD_MAGE_TRADER_NAME = 'Old mage';
+const HEALTH_PER_HUD_SEGMENT = 10;
 
 function findOldMageTrader(asset: MeadowMapAsset | null) {
   if (!asset) {
@@ -223,6 +228,11 @@ async function readResponseErrorMessage(response: Response, fallback: string) {
   }
 
   return fallback;
+}
+
+function getHudHealthSegmentCount(maxHealth: number) {
+  const safeMaxHealth = Math.max(1, Math.floor(maxHealth));
+  return Math.max(1, Math.ceil(safeMaxHealth / HEALTH_PER_HUD_SEGMENT));
 }
 
 function getPageText(locale: Locale) {
@@ -335,7 +345,10 @@ const INITIAL_FORM: AuthFormState = {
 };
 
 const INITIAL_CHAT_MESSAGES: RealtimeChatMessage[] = [];
-type ActiveSkillTargeting = 'fireball' | 'fireField' | null;
+type ActiveSkillTargeting =
+  | { type: 'skill'; skillId: 'fireball' | 'fireField' }
+  | { type: 'consumable'; itemId: 'healing_potion' }
+  | null;
 const ADMIN_EFFECTS_STORAGE_KEY = 'mmorpg.admin.skill-effects.v1';
 const ADMIN_TOOLS_VISIBLE_STORAGE_KEY = 'mmorpg.admin-tools.visible.v1';
 const LOBBY_TOOLS_VISIBLE_STORAGE_KEY = 'mmorpg.lobby-tools.visible.v1';
@@ -1530,6 +1543,9 @@ export default function Home() {
     source: 'inventory' | 'container';
     slotIndex: number;
     containerId?: string;
+    mode?: 'self' | 'throw';
+    targetX?: number;
+    targetY?: number;
     nonce: number;
   } | null>(null);
   const [chatMessages, setChatMessages] = useState<RealtimeChatMessage[]>(INITIAL_CHAT_MESSAGES);
@@ -1579,6 +1595,7 @@ export default function Home() {
     kind: MOB_KINDS[0] ?? 'rat',
   });
   const [selectedWorldSpriteFolder, setSelectedWorldSpriteFolder] = useState('');
+  const lastSavedCharacterSerializedRef = useRef<string | null>(null);
   const [worldMapStatus, setWorldMapStatus] = useState('');
   const [worldHoverTile, setWorldHoverTile] = useState<{ x: number; y: number } | null>(null);
   const [worldEditorDebug, setWorldEditorDebug] = useState<WorldEditorDebugState>({
@@ -1745,6 +1762,7 @@ export default function Home() {
       const nextCharacter = normalizeCharacterProfile(session.character);
       setUsername(session.username);
       setPlayerRole(normalizePlayerRole(session.role));
+      lastSavedCharacterSerializedRef.current = JSON.stringify(nextCharacter);
       setCharacter(nextCharacter);
       setIsDead(isCharacterDead(nextCharacter));
       setAuthStatus('ready');
@@ -1756,6 +1774,38 @@ export default function Home() {
     setAdminToolsVisible(loadAdminToolsVisible());
     setLobbyToolsVisible(loadLobbyToolsVisible());
   }, []);
+
+  useEffect(() => {
+    if (authStatus !== 'ready' || !character) {
+      return;
+    }
+
+    const serializedCharacter = JSON.stringify(character);
+    if (serializedCharacter === lastSavedCharacterSerializedRef.current) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      void saveCharacter(character)
+        .then((savedCharacter) => {
+          const normalizedCharacter = normalizeCharacterProfile(savedCharacter);
+          const normalizedSerialized = JSON.stringify(normalizedCharacter);
+          lastSavedCharacterSerializedRef.current = normalizedSerialized;
+          setCharacter((current) => {
+            if (!current || JSON.stringify(current) === normalizedSerialized) {
+              return current;
+            }
+
+            return normalizedCharacter;
+          });
+        })
+        .catch((error) => {
+          console.error('Failed to save character', error);
+        });
+    }, 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [authStatus, character]);
 
   useEffect(() => {
     if (!username) {
@@ -2351,6 +2401,7 @@ export default function Home() {
       const nextCharacter = normalizeCharacterProfile(result.character);
       setUsername(result.username);
       setPlayerRole(normalizePlayerRole(result.role));
+      lastSavedCharacterSerializedRef.current = JSON.stringify(nextCharacter);
       setCharacter(nextCharacter);
       setIsDead(isCharacterDead(nextCharacter));
       setAuthError('');
@@ -2667,23 +2718,87 @@ export default function Home() {
   };
 
   const handleInventoryChange = (inventory: InventoryState) => {
+    const normalizedInventory =
+      activeRoomTarget.name === 'raid'
+        ? revealMatchedRaidUnidentifiedInventoryEntries(inventory)
+        : identifyAllRaidUnidentifiedInventoryEntries(inventory);
     setCharacter((current) =>
       current
         ? {
             ...current,
-            inventory,
+            inventory: normalizedInventory,
           }
         : null,
     );
   };
 
   const handleInventoryUse = (request: { type: 'inventory'; slotIndex: number } | { type: 'container'; containerId: string; slotIndex: number }) => {
+    const itemValue =
+      request.type === 'inventory'
+        ? (character?.inventory[request.slotIndex] ?? null)
+        : request.containerId === activeContainerId
+          ? (activeContainer?.slots[request.slotIndex] ?? null)
+          : (containers[request.containerId]?.slots[request.slotIndex] ?? null);
+    const parsed = parseInventoryItem(itemValue);
+    if (parsed?.raidUnidentified) {
+      setTraderStatus('Неопознанное зелье нельзя использовать в рейде. Вынеси его из рейда или найди ещё одно такое же.');
+      return;
+    }
+
     setUseConsumableRequest((current) => ({
       source: request.type,
       slotIndex: request.slotIndex,
       containerId: request.type === 'container' ? request.containerId : undefined,
+      mode: 'self',
       nonce: (current?.nonce ?? 0) + 1,
     }));
+  };
+
+  const handleActionBarConsumableTrigger = (itemId: 'healing_potion') => {
+    const hasItem = character.inventory.some((entry) => parseInventoryItem(entry)?.itemId === itemId);
+    if (!hasItem) {
+      return;
+    }
+
+    setActiveSkillTargeting((current) =>
+      current?.type === 'consumable' && current.itemId === itemId
+        ? null
+        : { type: 'consumable', itemId },
+    );
+  };
+
+  const handleHeldConsumableUseSelf = (itemId: 'healing_potion') => {
+    const slotIndex = character.inventory.findIndex((entry) => parseInventoryItem(entry)?.itemId === itemId);
+    if (slotIndex === -1) {
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    setUseConsumableRequest((current) => ({
+      source: 'inventory',
+      slotIndex,
+      mode: 'self',
+      nonce: (current?.nonce ?? 0) + 1,
+    }));
+    setActiveSkillTargeting(null);
+  };
+
+  const handleHeldConsumableThrow = (itemId: 'healing_potion', x: number, y: number) => {
+    const slotIndex = character.inventory.findIndex((entry) => parseInventoryItem(entry)?.itemId === itemId);
+    if (slotIndex === -1) {
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    setUseConsumableRequest((current) => ({
+      source: 'inventory',
+      slotIndex,
+      mode: 'throw',
+      targetX: x,
+      targetY: y,
+      nonce: (current?.nonce ?? 0) + 1,
+    }));
+    setActiveSkillTargeting(null);
   };
 
   const handleChestInteract = (chestId: string) => {
@@ -3042,7 +3157,11 @@ export default function Home() {
       return;
     }
 
-    setActiveSkillTargeting((current) => (current === skillId ? null : skillId));
+    setActiveSkillTargeting((current) =>
+      current?.type === 'skill' && current.skillId === skillId
+        ? null
+        : { type: 'skill', skillId },
+    );
   };
 
   const handleSkillEffectChange = (
@@ -3740,7 +3859,9 @@ export default function Home() {
     introductionQuest.currentStepId === 'loot_chest' &&
     isCryptSmallRaidActive &&
     activeContainer?.id === CRYPT_SMALL_TUTORIAL_CHEST_ID &&
-    activeContainer.slots.some((itemValue) => parseInventoryItem(itemValue)?.itemId === 'wood_staff');
+    activeContainer.slots.some((itemValue) =>
+      isSameEquipmentItemFamily(parseInventoryItem(itemValue)?.itemId, 'wood_staff'),
+    );
   const isPartyLocked = !hasFinishedIntroductionQuest;
   const isCryptSmallRaidLocked =
     selectedRaidTemplateCode === CRYPT_SMALL_TEMPLATE_CODE && introductionQuest.status !== 'active';
@@ -4016,7 +4137,7 @@ export default function Home() {
 
         if (
           quest.currentStepId === 'socket_gem' &&
-          current.equipment.weapon === 'wood_staff' &&
+          isSameEquipmentItemFamily(current.equipment.weapon, 'wood_staff') &&
           hasSocketedWeaponGem(current.equipment)
         ) {
           return {
@@ -4271,11 +4392,17 @@ export default function Home() {
             STR {character.strength} · AGI {character.agility} · INT {character.intellect}
           </div>
           <div className="mt-3 w-40">
-            <div className="h-3 w-full overflow-hidden rounded-full border border-[#d9efbd]/35 bg-[#0b1606]">
+            <div className="relative h-3 w-full overflow-hidden rounded-full border border-[#d9efbd]/35 bg-[#0b1606]">
               <div
                 className="h-full bg-[linear-gradient(90deg,#d84f4f_0%,#ef7a5f_100%)] transition-[width] duration-200"
                 style={{
                   width: `${Math.max(0, Math.min(100, (character.health / Math.max(1, character.maxHealth)) * 100))}%`,
+                }}
+              />
+              <div
+                className="pointer-events-none absolute inset-0"
+                style={{
+                  backgroundImage: `repeating-linear-gradient(90deg, transparent 0, transparent calc((100% / ${getHudHealthSegmentCount(character.maxHealth)}) - 1px), rgba(11, 22, 6, 0.95) calc((100% / ${getHudHealthSegmentCount(character.maxHealth)}) - 1px), rgba(11, 22, 6, 0.95) calc(100% / ${getHudHealthSegmentCount(character.maxHealth)}))`,
                 }}
               />
             </div>
@@ -4623,6 +4750,12 @@ export default function Home() {
             void x;
             void y;
           }}
+          onHeldConsumableUseSelf={({ itemId }) => {
+            handleHeldConsumableUseSelf(itemId);
+          }}
+          onHeldConsumableThrow={({ itemId, x, y }) => {
+            handleHeldConsumableThrow(itemId, x, y);
+          }}
           onSkillCooldownsChange={(nextCooldowns) => {
             setSkillCooldowns(nextCooldowns);
           }}
@@ -4790,6 +4923,7 @@ export default function Home() {
         skillCooldowns={skillCooldowns}
         consumableCooldowns={consumableCooldowns}
         onSkillTrigger={handleSkillTrigger}
+        onActionBarConsumableTrigger={handleActionBarConsumableTrigger}
         onMouseSkillBindingsChange={setMouseSkillBindings}
         onEquipmentChange={handleEquipmentChange}
         onInventoryChange={handleInventoryChange}
@@ -6207,8 +6341,8 @@ export default function Home() {
                               >
                                 <div className="flex items-center gap-2">
                                   {itemTexturePath ? (
-                                    <img
-                                      src={itemTexturePath}
+                                    <ItemIcon
+                                      item={item}
                                       alt={item.name}
                                       className="pixelated h-10 w-10 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 object-contain"
                                     />
@@ -6311,8 +6445,8 @@ export default function Home() {
                               >
                                 <div className="flex items-center gap-2">
                                   {itemTexturePath ? (
-                                    <img
-                                      src={itemTexturePath}
+                                    <ItemIcon
+                                      item={item}
                                       alt={item.name}
                                       className="pixelated h-10 w-10 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/70 object-contain"
                                     />

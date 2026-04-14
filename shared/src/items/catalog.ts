@@ -32,8 +32,17 @@ export const BASE_EQUIPMENT_SLOTS = [
 
 export type BaseEquipmentSlot = typeof BASE_EQUIPMENT_SLOTS[number];
 
-export const EQUIPMENT_ITEM_IDS = ["wood_staff", "fire_robe"] as const;
+export const EQUIPMENT_ITEM_IDS = [
+  "wood_staff",
+  "wood_staff_t2",
+  "wood_staff_t3",
+  "fire_robe",
+  "fire_robe_t2",
+  "fire_robe_t3",
+] as const;
 export type EquipmentItemId = typeof EQUIPMENT_ITEM_IDS[number];
+export const EQUIPMENT_ITEM_BASE_IDS = ["wood_staff", "fire_robe"] as const;
+export type EquipmentItemBaseId = typeof EQUIPMENT_ITEM_BASE_IDS[number];
 
 export const GEM_ITEM_IDS = [
   "fire_trail_gem",
@@ -67,7 +76,15 @@ export type GemItemId = typeof GEM_ITEM_IDS[number];
 export const CONSUMABLE_ITEM_IDS = ["healing_potion", "teleport_scroll"] as const;
 export type ConsumableItemId = typeof CONSUMABLE_ITEM_IDS[number];
 
-export const MISC_ITEM_IDS = ["wood"] as const;
+export const MISC_ITEM_IDS = [
+  "wood",
+  "stone",
+  "fire_essence",
+  "lightning_essence",
+  "ice_essence",
+  "darkness_essence",
+  "void_essence",
+] as const;
 export type MiscItemId = typeof MISC_ITEM_IDS[number];
 
 export const QUEST_ITEM_IDS = ["sealed_relic"] as const;
@@ -101,6 +118,28 @@ const LEGACY_ITEM_ID_ALIASES: Partial<Record<string, ItemId>> = {
   default_staff: "wood_staff",
 };
 
+const EQUIPMENT_ITEM_FAMILY_BY_ID: Record<EquipmentItemId, EquipmentItemBaseId> = {
+  wood_staff: "wood_staff",
+  wood_staff_t2: "wood_staff",
+  wood_staff_t3: "wood_staff",
+  fire_robe: "fire_robe",
+  fire_robe_t2: "fire_robe",
+  fire_robe_t3: "fire_robe",
+};
+
+const EQUIPMENT_ITEM_VARIANTS_BY_TIER: Record<EquipmentItemBaseId, Record<ItemTier, EquipmentItemId>> = {
+  wood_staff: {
+    1: "wood_staff",
+    2: "wood_staff_t2",
+    3: "wood_staff_t3",
+  },
+  fire_robe: {
+    1: "fire_robe",
+    2: "fire_robe_t2",
+    3: "fire_robe_t3",
+  },
+};
+
 export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
   wood_staff: {
     id: "wood_staff",
@@ -109,10 +148,36 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     value: 10,
     iconPath: "/items/equipment/wood_staff.png",
     slot: "weapon",
+    tier: 1,
+    socketType: "weapon",
+    socketCount: 1,
+    tooltipStats: ["Melee weapon", "Astral catalyst", "1 gem socket"],
+    fireResistancePercent: 0,
+  },
+  wood_staff_t2: {
+    id: "wood_staff_t2",
+    type: "equipment",
+    name: "Wood Staff (Rare)",
+    value: 10,
+    iconPath: "/items/equipment/wood_staff.png",
+    slot: "weapon",
+    tier: 2,
+    socketType: "weapon",
+    socketCount: 2,
+    tooltipStats: ["Melee weapon", "Astral catalyst", "2 gem sockets", "Rare chest drop"],
+    fireResistancePercent: 0,
+  },
+  wood_staff_t3: {
+    id: "wood_staff_t3",
+    type: "equipment",
+    name: "Wood Staff (Very Rare)",
+    value: 10,
+    iconPath: "/items/equipment/wood_staff.png",
+    slot: "weapon",
     tier: 3,
     socketType: "weapon",
     socketCount: 3,
-    tooltipStats: ["Melee weapon", "Astral catalyst", "3 gem sockets"],
+    tooltipStats: ["Melee weapon", "Astral catalyst", "3 gem sockets", "Very rare chest drop"],
     fireResistancePercent: 0,
   },
   fire_robe: {
@@ -122,10 +187,36 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     value: 120,
     iconPath: "/character/equipment/fire_robe/fire_robe_idle.png",
     slot: "body",
+    tier: 1,
+    socketType: "armor",
+    socketCount: 1,
+    tooltipStats: ["Body armor", "1 gem socket"],
+    fireResistancePercent: 15,
+  },
+  fire_robe_t2: {
+    id: "fire_robe_t2",
+    type: "equipment",
+    name: "Fire Robe (Rare)",
+    value: 120,
+    iconPath: "/character/equipment/fire_robe/fire_robe_idle.png",
+    slot: "body",
     tier: 2,
     socketType: "armor",
+    socketCount: 2,
+    tooltipStats: ["Body armor", "2 gem sockets", "Rare chest drop"],
+    fireResistancePercent: 15,
+  },
+  fire_robe_t3: {
+    id: "fire_robe_t3",
+    type: "equipment",
+    name: "Fire Robe (Very Rare)",
+    value: 120,
+    iconPath: "/character/equipment/fire_robe/fire_robe_idle.png",
+    slot: "body",
+    tier: 3,
+    socketType: "armor",
     socketCount: 3,
-    tooltipStats: ["Body armor", "3 gem sockets"],
+    tooltipStats: ["Body armor", "3 gem sockets", "Very rare chest drop"],
     fireResistancePercent: 15,
   },
   fire_trail_gem: {
@@ -461,6 +552,72 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     maxStack: 99,
     fireResistancePercent: 0,
   },
+  stone: {
+    id: "stone",
+    type: "misc",
+    name: "Stone",
+    value: 2,
+    iconPath: "/items/resources/stone-16x16.png",
+    tooltipStats: ["Common loot item", "Solid crafting material", "Stacks to 99"],
+    stackable: true,
+    maxStack: 99,
+    fireResistancePercent: 0,
+  },
+  fire_essence: {
+    id: "fire_essence",
+    type: "misc",
+    name: "Fire Essence",
+    value: 6,
+    iconPath: "/items/resources/fire-essence-16x16.png",
+    tooltipStats: ["Elemental crafting reagent", "Warm to the touch", "Stacks to 99"],
+    stackable: true,
+    maxStack: 99,
+    fireResistancePercent: 0,
+  },
+  lightning_essence: {
+    id: "lightning_essence",
+    type: "misc",
+    name: "Lightning Essence",
+    value: 6,
+    iconPath: "/items/resources/lightning-essence-16x16.png",
+    tooltipStats: ["Elemental crafting reagent", "Crackles with static", "Stacks to 99"],
+    stackable: true,
+    maxStack: 99,
+    fireResistancePercent: 0,
+  },
+  ice_essence: {
+    id: "ice_essence",
+    type: "misc",
+    name: "Ice Essence",
+    value: 6,
+    iconPath: "/items/resources/ice-essence-16x16.png",
+    tooltipStats: ["Elemental crafting reagent", "Cold and pristine", "Stacks to 99"],
+    stackable: true,
+    maxStack: 99,
+    fireResistancePercent: 0,
+  },
+  darkness_essence: {
+    id: "darkness_essence",
+    type: "misc",
+    name: "Darkness Essence",
+    value: 6,
+    iconPath: "/items/resources/darkness-essence-16x16.png",
+    tooltipStats: ["Elemental crafting reagent", "Swallows nearby light", "Stacks to 99"],
+    stackable: true,
+    maxStack: 99,
+    fireResistancePercent: 0,
+  },
+  void_essence: {
+    id: "void_essence",
+    type: "misc",
+    name: "Void Essence",
+    value: 6,
+    iconPath: "/items/resources/void-essence-16x16.png",
+    tooltipStats: ["Elemental crafting reagent", "Hums with empty space", "Stacks to 99"],
+    stackable: true,
+    maxStack: 99,
+    fireResistancePercent: 0,
+  },
   sealed_relic: {
     id: "sealed_relic",
     type: "quest",
@@ -494,6 +651,39 @@ export function canonicalizeItemId(value: string | null | undefined): ItemId | n
 
 export function isGemItemId(value: string): value is GemItemId {
   return GEM_ITEM_IDS.includes(value as GemItemId);
+}
+
+export function isEquipmentItemId(value: string): value is EquipmentItemId {
+  return EQUIPMENT_ITEM_IDS.includes(value as EquipmentItemId);
+}
+
+export function getEquipmentItemBaseId(itemId: string | null | undefined): EquipmentItemBaseId | null {
+  if (!itemId || !isEquipmentItemId(itemId)) {
+    return null;
+  }
+
+  return EQUIPMENT_ITEM_FAMILY_BY_ID[itemId];
+}
+
+export function isSameEquipmentItemFamily(
+  leftItemId: string | null | undefined,
+  rightItemId: string | null | undefined,
+) {
+  const leftBaseId = getEquipmentItemBaseId(leftItemId);
+  const rightBaseId = getEquipmentItemBaseId(rightItemId);
+  return leftBaseId !== null && leftBaseId === rightBaseId;
+}
+
+export function resolveEquipmentItemTierVariant(
+  itemId: string | null | undefined,
+  tier: ItemTier,
+): EquipmentItemId | null {
+  const baseId = getEquipmentItemBaseId(itemId);
+  if (!baseId) {
+    return null;
+  }
+
+  return EQUIPMENT_ITEM_VARIANTS_BY_TIER[baseId][tier] ?? null;
 }
 
 export function getItemDefinition(itemId: ItemId) {

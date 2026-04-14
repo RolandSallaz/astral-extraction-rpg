@@ -42,13 +42,13 @@ import {
   createMeadowStampsFromAsset,
   createMeadowTradersFromAsset,
   ensureWorldWorkbenchStamp,
+  isBlockingMeadowStamp,
   isBlockedMeadowTile,
   type MeadowMapAsset,
   type MeadowMobAsset,
   type MeadowOverlayAsset,
   type MeadowTile,
   type MeadowTraderAsset,
-  WORLD_WORKBENCH_TEXTURE_PATH,
   resolveGroundOverlaysFromAsset,
   resolveMeadowTexture,
 } from '@/lib/maps/meadowMap';
@@ -59,7 +59,12 @@ import {
   type EquipmentItemId,
   type ItemDefinition,
 } from '@/lib/items/equipmentItems';
-import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
+import {
+  BODY_EQUIPMENT_IDS,
+  getEquipmentBodyTexturePath,
+  getEquipmentVisual,
+  type EquipmentAnimationClip,
+} from '@mmorpg/shared/visuals/equipmentVisuals';
 import {
   DEFAULT_SKILL_EFFECT_OVERRIDES,
   type SkillEffectConfig,
@@ -70,6 +75,11 @@ import {
   DEFAULT_SKILL_BALANCE_CONFIG,
   type SkillBalanceConfig,
 } from '@/lib/skillBalance';
+
+type ActiveTargetingState =
+  | { type: 'skill'; skillId: 'fireball' | 'fireField' }
+  | { type: 'consumable'; itemId: 'healing_potion' }
+  | null;
 import {
   DEFAULT_MOB_BALANCE_CONFIG,
   type MobBalanceConfig,
@@ -175,6 +185,7 @@ const PLAYER_ANIMATIONS: Partial<Record<PlayerAnimationState, PlayerSheetAnimati
     ]),
   ) as Partial<Record<PlayerAnimationState, PlayerSheetAnimation>>;
 const PLAYER_EYE_COLOR = Number.parseInt(DEFAULT_PLAYER_VISUALS.eyes.color.replace('#', ''), 16);
+const PLAYER_FIRE_EYE_COLOR = 0xff9a36;
 const PLAYER_HAND_ANIMATION_OFFSETS: Partial<Record<PlayerAnimationState, HandAnimationOffsets>> = {
   idle: {
     leftX: [0, 0, -1, 0],
@@ -260,6 +271,97 @@ type CharacterEquipment = {
   'weapon-gem-2'?: EquippableItemId;
   'weapon-gem-3'?: EquippableItemId;
 };
+
+const ELEMENTAL_EQUIPMENT_KEYS = [
+  'head',
+  'body',
+  'weapon',
+  'head-gem-1',
+  'head-gem-2',
+  'head-gem-3',
+  'body-gem-1',
+  'body-gem-2',
+  'body-gem-3',
+  'weapon-gem-1',
+  'weapon-gem-2',
+  'weapon-gem-3',
+] as const satisfies ReadonlyArray<keyof CharacterEquipment>;
+
+function getEquipmentElement(itemId: EquippableItemId | undefined) {
+  if (typeof itemId !== 'string') {
+    return null;
+  }
+
+  if (itemId.startsWith('fire_')) {
+    return 'fire';
+  }
+  if (itemId.startsWith('ice_')) {
+    return 'ice';
+  }
+  if (itemId.startsWith('lightning_')) {
+    return 'lightning';
+  }
+  if (itemId.startsWith('darkness_')) {
+    return 'darkness';
+  }
+  if (itemId.startsWith('void_')) {
+    return 'void';
+  }
+
+  return null;
+}
+
+function hasDominantFireEquipment(equipment: CharacterEquipment) {
+  let elementalCount = 0;
+  let fireCount = 0;
+
+  for (const key of ELEMENTAL_EQUIPMENT_KEYS) {
+    const element = getEquipmentElement(equipment[key]);
+    if (!element) {
+      continue;
+    }
+
+    elementalCount += 1;
+    if (element === 'fire') {
+      fireCount += 1;
+    }
+  }
+
+  return elementalCount > 0 && fireCount * 2 > elementalCount;
+}
+
+function toPlayerAnimationFromEquipmentClip(clip: EquipmentAnimationClip): PlayerSheetAnimation {
+  return {
+    textureKey: clip.textureKey,
+    texturePath: clip.texturePath,
+    frameWidth: clip.frameWidth,
+    frameHeight: clip.frameHeight,
+    startFrame: clip.startFrame,
+    startRowFrames: 0,
+    frameCount: clip.frameCount,
+    fps: 1000 / clip.frameMs,
+    columns: 1,
+    loop: clip.loop,
+    headOffsetYFrames: clip.headOffsetYFrames,
+  };
+}
+
+function getBodyAnimationForEquipment(
+  bodyItemId: EquipmentItemId | undefined,
+  state: PlayerAnimationState,
+): PlayerSheetAnimation | undefined {
+  if (!bodyItemId) {
+    return undefined;
+  }
+
+  const visual = getEquipmentVisual(bodyItemId);
+  if (!visual || visual.slot !== 'body') {
+    return undefined;
+  }
+
+  const clip = visual.animations[state] ?? visual.animations.idle;
+  return clip ? toPlayerAnimationFromEquipmentClip(clip) : undefined;
+}
 
 type NetworkPlayerState = {
   id: string;
@@ -602,6 +704,7 @@ type CharacterVisual = {
   currentWeaponOffsetY: number;
   currentBodyTextureKey?: string;
   currentBodyFrame?: number;
+  currentBodyItem?: EquipmentItemId;
   currentWeaponItem?: EquipmentItemId;
   currentCastItemId?: ConsumableItemId;
   isFollowTarget: boolean;
@@ -1076,16 +1179,17 @@ function canMoveToWorldPosition(
   mapHeight: number,
   meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
+  meadowStamps: ReturnType<typeof createMeadowStampsFromAsset>,
   mobBlockers: MovementBlocker[] = [],
   currentX?: number,
   currentY?: number,
 ) {
   const clampedX = Math.max(tileSize / 2, Math.min(mapWidth - tileSize / 2, x));
-  const clampedY = Math.max(tileSize / 2, Math.min(mapHeight - tileSize / 2, y));
+  const clampedY = Math.max(tileSize / 2, Math.min(mapHeight - tileSize / 2, y + tileSize * 0.375));
   const tileX = Math.floor(clampedX / tileSize);
   const tileY = Math.floor(clampedY / tileSize);
 
-  if (isBlockedMeadowTile(meadowMap, meadowDecorations, tileX, tileY)) {
+  if (isBlockedMeadowTile(meadowMap, meadowDecorations, meadowStamps, tileX, tileY)) {
     return false;
   }
 
@@ -1169,6 +1273,7 @@ function applyWorldPredictedMovement(
   mapHeight: number,
   meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
+  meadowStamps: ReturnType<typeof createMeadowStampsFromAsset>,
   speed: number,
   mobBlockers: MovementBlocker[] = [],
 ) {
@@ -1193,6 +1298,7 @@ function applyWorldPredictedMovement(
       mapHeight,
       meadowMap,
       meadowDecorations,
+      meadowStamps,
       mobBlockers,
       currentX,
       currentY,
@@ -1454,6 +1560,11 @@ function applyEquipmentToVisual(
 
   const weaponItemId = equipment.weapon;
   const weaponItem = weaponItemId ? EQUIPMENT_ITEMS[weaponItemId] : undefined;
+  visual.currentBodyItem = equipment.body;
+  const eyeColor = hasDominantFireEquipment(equipment) ? PLAYER_FIRE_EYE_COLOR : PLAYER_EYE_COLOR;
+
+  visual.leftEye.setFillStyle(eyeColor, 1);
+  visual.rightEye.setFillStyle(eyeColor, 1);
 
   if (weaponItemId !== visual.currentWeaponItem) {
     visual.weaponEffects.forEach(({ image, aura }) => {
@@ -1779,6 +1890,16 @@ function getHeldCastConsumableItemId(
   return toConsumableItemId(visual.currentCastingSkillId);
 }
 
+function getHeldTargetingConsumableItemId(
+  activeTargeting: ActiveTargetingState,
+): ConsumableItemId | undefined {
+  if (activeTargeting?.type !== 'consumable') {
+    return undefined;
+  }
+
+  return activeTargeting.itemId;
+}
+
 function applyBurningToMobVisual(
   visual: Pick<MobVisual, 'burnEffect' | 'burnAura' | 'currentBurnTicksRemaining' | 'currentBurnEndsAt' | 'currentBurnStartedAt' | 'currentBurnDurationMs' | 'sprite'>,
   burnTicksRemaining: number,
@@ -1899,6 +2020,8 @@ export function GameCanvas({
   onMinimapChange,
   onSkillTargetCancel,
   onFireballCast,
+  onHeldConsumableUseSelf,
+  onHeldConsumableThrow,
   onSkillCooldownsChange,
   onPlayerVitalsChange,
   onPlayerProgressChange,
@@ -1955,7 +2078,7 @@ export function GameCanvas({
   playerGold: number;
   playerQuests: QuestLog;
   playerRole: string;
-  activeSkillTargeting: 'fireball' | 'fireField' | null;
+  activeSkillTargeting: ActiveTargetingState;
   mouseSkillBindings?: MouseSkillBindings;
   onChestInteract?: (chestId: string) => void;
   onNearbyChestChange?: (chestId: string | null) => void;
@@ -1969,6 +2092,8 @@ export function GameCanvas({
   onMinimapChange?: (snapshot: MinimapSnapshot | null) => void;
   onSkillTargetCancel?: () => void;
   onFireballCast?: (payload: { x: number; y: number }) => void;
+  onHeldConsumableUseSelf?: (payload: { itemId: 'healing_potion' }) => void;
+  onHeldConsumableThrow?: (payload: { itemId: 'healing_potion'; x: number; y: number }) => void;
   onSkillCooldownsChange?: (payload: {
     woodStaffStrike: number;
     fireball: number;
@@ -1994,6 +2119,9 @@ export function GameCanvas({
     source: 'inventory' | 'container';
     slotIndex: number;
     containerId?: string;
+    mode?: 'self' | 'throw';
+    targetX?: number;
+    targetY?: number;
     nonce: number;
   } | null;
   containerStates?: Record<string, Array<string | null>>;
@@ -2066,6 +2194,8 @@ export function GameCanvas({
   const mouseSkillBindingsRef = useRef(mouseSkillBindings);
   const skillTargetCancelRef = useRef(onSkillTargetCancel);
   const fireballCastRef = useRef(onFireballCast);
+  const heldConsumableUseSelfRef = useRef(onHeldConsumableUseSelf);
+  const heldConsumableThrowRef = useRef(onHeldConsumableThrow);
   const skillCooldownsChangeRef = useRef(onSkillCooldownsChange);
   const playerVitalsChangeRef = useRef(onPlayerVitalsChange);
   const playerProgressChangeRef = useRef(onPlayerProgressChange);
@@ -2187,6 +2317,14 @@ export function GameCanvas({
   useEffect(() => {
     fireballCastRef.current = onFireballCast;
   }, [onFireballCast]);
+
+  useEffect(() => {
+    heldConsumableUseSelfRef.current = onHeldConsumableUseSelf;
+  }, [onHeldConsumableUseSelf]);
+
+  useEffect(() => {
+    heldConsumableThrowRef.current = onHeldConsumableThrow;
+  }, [onHeldConsumableThrow]);
 
   useEffect(() => {
     skillCooldownsChangeRef.current = onSkillCooldownsChange;
@@ -2460,6 +2598,7 @@ export function GameCanvas({
             : await loadWorldMapAsset();
       const meadowMap = createMeadowMapFromAsset(meadowAsset);
       const meadowDecorations = createMeadowDecorationsFromAsset(meadowAsset);
+      const meadowStamps = createMeadowStampsFromAsset(meadowAsset);
       const equipmentItems = Object.values(EQUIPMENT_ITEMS);
       const tileSize = meadowMap.tileSize;
       const raidWidth = Math.max(12, Number(activeRoomOptions?.width) || 30);
@@ -2510,6 +2649,18 @@ export function GameCanvas({
           this.load.image(TRADER_BODY_TEXTURE_KEY, '/sprites/characters/body-torso-8x8.png');
           Object.values(PLAYER_ANIMATIONS).forEach((animation) => {
             loadSpriteSheetAnimation(this, animation);
+          });
+          const loadedEquipmentAnimationKeys = new Set<string>();
+          BODY_EQUIPMENT_IDS.forEach((itemId) => {
+            const visual = getEquipmentVisual(itemId);
+            Object.values(visual?.animations ?? {}).forEach((clip) => {
+              if (!clip || loadedEquipmentAnimationKeys.has(clip.textureKey)) {
+                return;
+              }
+
+              loadedEquipmentAnimationKeys.add(clip.textureKey);
+              loadSpriteSheetAnimation(this, toPlayerAnimationFromEquipmentClip(clip));
+            });
           });
           loadSpriteSheetAnimation(this, SHARED_DEATH_ANIMATION);
           this.load.spritesheet('skeleton', '/npc/skeleton/skeleton.png', {
@@ -2897,7 +3048,7 @@ export function GameCanvas({
           const mapHeight = (isRaidScene ? raidHeight : meadowMap.height) * tileSize;
           const meadowMinimapTiles = meadowMap.tiles.flatMap((row, y) =>
             row.map((tile, x) => {
-              if (isBlockedMeadowTile(meadowMap, meadowDecorations, x, y)) {
+              if (isBlockedMeadowTile(meadowMap, meadowDecorations, meadowStamps, x, y)) {
                 return 'blocked';
               }
 
@@ -3998,6 +4149,7 @@ export function GameCanvas({
           };
 
           const updateCharacterPose = (
+            sessionId: string,
             character: CharacterVisual,
             isMoving: boolean,
             deltaSeconds: number,
@@ -4013,7 +4165,9 @@ export function GameCanvas({
             syncAnimationState(character, nextAnimationState, now);
 
             const bodyAnimation =
-              PLAYER_ANIMATIONS[character.currentAnimationState] ?? PLAYER_ANIMATIONS.idle;
+              getBodyAnimationForEquipment(character.currentBodyItem, character.currentAnimationState) ??
+              PLAYER_ANIMATIONS[character.currentAnimationState] ??
+              PLAYER_ANIMATIONS.idle;
             if (bodyAnimation) {
               const bodyFrame = getAnimationFrameAtState(bodyAnimation, character, now);
               if (
@@ -4198,7 +4352,10 @@ export function GameCanvas({
               { x: character.leftHand.x, y: character.leftHand.y },
               { x: character.rightHand.x, y: character.rightHand.y },
             );
-            const heldCastItemId = getHeldCastConsumableItemId(character);
+            const heldCastItemId =
+              sessionId === localSessionId
+                ? getHeldTargetingConsumableItemId(activeSkillTargetingRef.current) ?? getHeldCastConsumableItemId(character)
+                : getHeldCastConsumableItemId(character);
             const heldCastItem = heldCastItemId ? EQUIPMENT_ITEMS[heldCastItemId] : undefined;
             const showHeldCastItem = Boolean(heldCastItem);
             const showWeapon = Boolean(character.currentWeaponItem) && !showHeldCastItem;
@@ -4509,9 +4666,45 @@ export function GameCanvas({
           this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             const { isLeftButton, isRightButton } = resolvePointerButtons(pointer);
             const mouseSlotKey = resolveMouseActionSlotKey(isLeftButton, isRightButton);
+            const currentTargeting = activeSkillTargetingRef.current;
 
             if (worldEditorInput.handlePointerDown(pointer, mouseSlotKey)) {
               return;
+            }
+
+            if (currentTargeting) {
+              const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
+
+              if (currentTargeting.type === 'consumable') {
+                pointer.event?.preventDefault();
+                if (mouseSlotKey === 'LMB') {
+                  heldConsumableUseSelfRef.current?.({ itemId: currentTargeting.itemId });
+                } else if (mouseSlotKey === 'RMB') {
+                  heldConsumableThrowRef.current?.({
+                    itemId: currentTargeting.itemId,
+                    x: worldPoint.x,
+                    y: worldPoint.y,
+                  });
+                }
+                return;
+              }
+
+              if (mouseSlotKey === 'RMB') {
+                pointer.event?.preventDefault();
+                skillTargetCancelRef.current?.();
+                return;
+              }
+
+              if (mouseSlotKey === 'LMB') {
+                pointer.event?.preventDefault();
+                if (currentTargeting.skillId === 'fireball') {
+                  castFireball(worldPoint.x, worldPoint.y);
+                } else if (currentTargeting.skillId === 'fireField') {
+                  castFireField(worldPoint.x, worldPoint.y);
+                }
+                skillTargetCancelRef.current?.();
+                return;
+              }
             }
 
             if (mouseSlotKey) {
@@ -4524,27 +4717,6 @@ export function GameCanvas({
               }
             }
 
-            if (!activeSkillTargetingRef.current) {
-              return;
-            }
-
-            const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-
-            if (mouseSlotKey === 'RMB') {
-              pointer.event?.preventDefault();
-              skillTargetCancelRef.current?.();
-              return;
-            }
-
-            if (mouseSlotKey === 'LMB') {
-              pointer.event?.preventDefault();
-              if (activeSkillTargetingRef.current === 'fireball') {
-                castFireball(worldPoint.x, worldPoint.y);
-              } else if (activeSkillTargetingRef.current === 'fireField') {
-                castFireField(worldPoint.x, worldPoint.y);
-              }
-              skillTargetCancelRef.current?.();
-            }
           });
 
           this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
@@ -4753,6 +4925,7 @@ export function GameCanvas({
                 meadowMap.height * tileSize,
                 meadowMap,
                 meadowDecorations,
+                currentWorldAsset.stamps,
                 CLIENT_PLAYER_SPEED,
                 mobBlockers,
               );
@@ -5518,6 +5691,7 @@ export function GameCanvas({
                   mapHeight,
                   meadowMap,
                   meadowDecorations,
+                  currentWorldAsset.stamps,
                   CLIENT_PLAYER_SPEED,
                   mobBlockers,
                 );
@@ -5716,6 +5890,7 @@ export function GameCanvas({
                 movementSignal || this.time.now - character.lastMovedAt <= 120;
 
               updateCharacterPose(
+                sessionId,
                 character,
                 shouldAnimateMove,
                 deltaSeconds,
@@ -6375,7 +6550,7 @@ export function GameCanvas({
                   | null = null;
 
                 currentWorldAsset.stamps
-                  .filter((stamp) => stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH)
+                  .filter((stamp) => isBlockingMeadowStamp(stamp))
                   .forEach((stamp) => {
                     const workbenchX = stamp.x * tileSize + tileSize / 2;
                     const workbenchY = stamp.y * tileSize + tileSize / 2;
@@ -6757,7 +6932,7 @@ export function GameCanvas({
               targetingCursor.setText('+');
               targetingCursor.setColor('#d7f0b6');
               targetingCursor.setVisible(true);
-            } else if (activeSkillTargetingRef.current === 'fireball') {
+            } else if (activeSkillTargetingRef.current?.type === 'skill' && activeSkillTargetingRef.current.skillId === 'fireball') {
               const pointer = this.input.activePointer;
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
               const originX = localCharacter?.container.x ?? pointerWorld.x;
@@ -6775,7 +6950,7 @@ export function GameCanvas({
               targetingCursor.setText('+');
               targetingCursor.setColor(resolvedTarget.clamped ? '#ff9a7a' : '#ffd18a');
               targetingCursor.setVisible(true);
-            } else if (activeSkillTargetingRef.current === 'fireField') {
+            } else if (activeSkillTargetingRef.current?.type === 'skill' && activeSkillTargetingRef.current.skillId === 'fireField') {
               const pointer = this.input.activePointer;
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
               const originX = localCharacter?.container.x ?? pointerWorld.x;
@@ -6808,6 +6983,30 @@ export function GameCanvas({
               targetingCursor.setPosition(pointerWorld.x, pointerWorld.y);
               targetingCursor.setText('+');
               targetingCursor.setColor(resolvedTarget.clamped ? '#ff9a7a' : '#ffd18a');
+              targetingCursor.setVisible(true);
+            } else if (activeSkillTargetingRef.current?.type === 'consumable') {
+              const pointer = this.input.activePointer;
+              const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
+              const tileX = Math.floor(pointerWorld.x / meadowMap.tileSize);
+              const tileY = Math.floor(pointerWorld.y / meadowMap.tileSize);
+              let previewIndex = 0;
+
+              for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+                for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+                  const previewTile = targetingPreviewTiles[previewIndex];
+                  const previewX = (tileX + offsetX) * meadowMap.tileSize + meadowMap.tileSize / 2;
+                  const previewY = (tileY + offsetY) * meadowMap.tileSize + meadowMap.tileSize / 2;
+                  previewTile.setPosition(previewX, previewY);
+                  previewTile.setFillStyle(0x7ddf8a, 0.16);
+                  previewTile.setStrokeStyle(1, 0xc8ffd1, 0.5);
+                  previewTile.setVisible(true);
+                  previewIndex += 1;
+                }
+              }
+
+              targetingCursor.setPosition(pointerWorld.x, pointerWorld.y);
+              targetingCursor.setText('!');
+              targetingCursor.setColor('#c8ffd1');
               targetingCursor.setVisible(true);
             } else {
               if (lastWorldHoverTileRef.current !== null) {
@@ -6896,7 +7095,7 @@ export function GameCanvas({
                     continue;
                   }
 
-                  if (isBlockedMeadowTile(meadowMap, meadowDecorations, tileX, tileY)) {
+                  if (isBlockedMeadowTile(meadowMap, meadowDecorations, worldStamps, tileX, tileY)) {
                     collisionDebugGraphics.fillStyle(DEBUG_COLLISION_TILE_COLOR, 0.16);
                     collisionDebugGraphics.fillRect(tileLeft, tileTop, tileSize, tileSize);
                     collisionDebugGraphics.lineStyle(1, DEBUG_COLLISION_TILE_COLOR, 0.9);

@@ -3,6 +3,7 @@ import {
   type CastSkillMessage,
   type SyncChestMessage,
 } from "@mmorpg/shared/realtime/contracts";
+import { type ItemId, serializeInventoryItem } from "@mmorpg/shared";
 import { type MobKind } from "@mmorpg/shared/mobs/catalog";
 import {
   SKELETON_DASH_SKILL,
@@ -119,7 +120,7 @@ import {
 } from "./runtime/balanceRuntime.js";
 import type { BasePlayerState } from "./schema/BasePlayerState.js";
 import type { MobState } from "./schema/MobState.js";
-import type { ChestState } from "./schema/ChestState.js";
+import { ChestState } from "./schema/ChestState.js";
 import { GroundEffectState } from "./schema/GroundEffectState.js";
 import { type ProjectileState, type ProjectileServerData, createDefaultProjectileServerData } from "./schema/ProjectileState.js";
 import { applyDamageToPlayer as applyDamageToPlayerService } from "./services/CombatService.js";
@@ -138,6 +139,15 @@ import {
 import { publishKafkaEvent } from "../services/KafkaPublisher.js";
 import type { EquipmentState, InventoryState } from "@mmorpg/shared/player/contracts";
 import type { QuestLog } from "@mmorpg/shared/quests/core";
+
+const ESSENCE_DROP_CHANCE = 0.1;
+const RANDOM_ESSENCE_ITEM_IDS = [
+  "fire_essence",
+  "lightning_essence",
+  "ice_essence",
+  "darkness_essence",
+  "void_essence",
+] as const satisfies readonly ItemId[];
 
 // Re-export types subclasses need
 export type { DamageType } from "./projectileSkills.js";
@@ -162,6 +172,7 @@ type WoodStaffStrikeTarget =
  * present on both.
  */
 export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerState> extends Room {
+  protected static readonly MOB_RESPAWN_MIN_PLAYER_DISTANCE_PX = 8 * 16;
   // ── Gameplay profile (subclass picks world vs raid) ──────────────
   protected abstract get profile(): RoomGameplayProfile;
   protected get simulationIntervalMs() {
@@ -209,6 +220,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     handlePlayerKilled: (player) => this.handlePlayerKilled(player),
     handleMobDeath: (mob) => this.handleMobDeath(mob),
     onCombatLog: (text) => this.onCombatLog(text),
+    showHealingText: (x, y, amount) => this.broadcastHealingText(x, y, amount),
     awardExperience: (playerId, amount) => this.awardExperience(playerId, amount),
     getOwnerProjectileGemConfig: (ownerId) => this.getOwnerProjectileGemConfig(ownerId, "fireball"),
   });
@@ -432,15 +444,24 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     sourceSlots: string[],
     slotIndex: number,
     commitSlots: (nextSlots: string[]) => void,
+    options: {
+      mode?: "self" | "throw";
+      targetX?: number;
+      targetY?: number;
+    } = {},
   ) {
     const consumedEntry = consumeSupportedRoomConsumable(sourceSlots[slotIndex]);
     const parsed = consumedEntry?.parsed;
     if (!consumedEntry || !parsed) {
       return;
     }
+    if (parsed.raidUnidentified) {
+      return;
+    }
 
     const now = Date.now();
     const p = this.profile;
+    const mode = options.mode === "throw" ? "throw" : "self";
 
     if (parsed.code === HEALING_POTION_ID) {
       const activeCooldownEndsAt = this.consumableCooldownEndsAt.get(sessionId) ?? 0;
@@ -453,17 +474,13 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     commitSlots(sourceSlots);
 
     if (parsed.code === HEALING_POTION_ID) {
-      const healingTicks = p.healingPotionDurationMs / p.healingPotionTickMs;
       const nextCooldownEndsAt = now + p.healingPotionCooldownMs;
       this.consumableCooldownEndsAt.set(sessionId, nextCooldownEndsAt);
-      this.statusEffects.startHealing(
-        sessionId,
-        healingTicks,
-        p.healingPotionTickMs,
-        p.healingPotionDurationMs,
-        player as BasePlayerState & ArmorGemCarrier & { healingTicksRemaining: number; healingEndsAt: number },
-        now,
-      );
+      if (mode === "throw") {
+        this.applyThrownHealingPotion(player, options.targetX, options.targetY, now);
+      } else {
+        this.applyHealingPotionToPlayer(sessionId, player, now);
+      }
 
       const client = this.clients.find((c) => c.sessionId === sessionId);
       client?.send("consumableCooldown", {
@@ -481,6 +498,50 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.skillCastSystem.queueTeleportScroll(sessionId);
   }
 
+  protected applyHealingPotionToPlayer(
+    sessionId: string,
+    player: BasePlayerState,
+    now: number,
+  ) {
+    const p = this.profile;
+    const healingTicks = p.healingPotionDurationMs / p.healingPotionTickMs;
+    this.statusEffects.startHealing(
+      sessionId,
+      healingTicks,
+      p.healingPotionTickMs,
+      p.healingPotionDurationMs,
+      player as BasePlayerState & ArmorGemCarrier & { healingTicksRemaining: number; healingEndsAt: number },
+      now,
+    );
+  }
+
+  protected applyThrownHealingPotion(
+    sourcePlayer: BasePlayerState,
+    targetX: number | undefined,
+    targetY: number | undefined,
+    now: number,
+  ) {
+    const tileSize = this.profile.tileSize;
+    const landingX = Number.isFinite(targetX) ? Math.max(0, Math.min(this.getMapWidthPx(), targetX!)) : sourcePlayer.x;
+    const landingY = Number.isFinite(targetY) ? Math.max(0, Math.min(this.getMapHeightPx(), targetY!)) : sourcePlayer.y;
+    const centerTileX = Math.floor(landingX / tileSize);
+    const centerTileY = Math.floor(landingY / tileSize);
+
+    for (const player of this.roomPlayers.values()) {
+      if (player.dead) {
+        continue;
+      }
+
+      const playerTileX = Math.floor(player.x / tileSize);
+      const playerTileY = Math.floor(player.y / tileSize);
+      if (Math.abs(playerTileX - centerTileX) > 1 || Math.abs(playerTileY - centerTileY) > 1) {
+        continue;
+      }
+
+      this.applyHealingPotionToPlayer(player.id, player, now);
+    }
+  }
+
   // ── SyncChest (identical in both rooms) ──────────────────────────
   protected handleSyncChest(message: { chestId?: string; slots?: string[] }) {
     if (typeof message?.chestId !== "string" || !Array.isArray(message.slots)) {
@@ -491,6 +552,19 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
     syncRoomChestSlots(chest, message.slots);
+    this.removeChestIfEmptyLootBag(chest.id);
+  }
+
+  protected removeChestIfEmptyLootBag(chestId: string) {
+    const chest = this.roomChests.get(chestId);
+    if (!chest || chest.subtitle !== "Dropped Loot") {
+      return;
+    }
+
+    const hasItems = Array.from(chest.slots).some((slot) => parseRoomInventoryEntry(slot) !== null);
+    if (!hasItems) {
+      this.roomChests.delete(chestId);
+    }
   }
 
   protected publishPlayerProfileSnapshot(options: {
@@ -551,9 +625,17 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     for (const mob of this.roomMobs.values()) {
       if (mob.dead) {
         if (mob.respawnAt > 0 && now >= mob.respawnAt) {
-          resetMobToSpawn(mob);
-          clearMobPath(this.mobPathCache, mob.id);
-          this.statusEffects.deleteMobBurn(mob.id);
+          const respawnX = mob.spawnX > 0 ? mob.spawnX : mob.x;
+          const respawnY = mob.spawnY > 0 ? mob.spawnY : mob.y;
+          const playerTooClose = players.some((player) =>
+            !player.dead &&
+            Math.hypot(player.x - respawnX, player.y - respawnY) < BaseGameRoom.MOB_RESPAWN_MIN_PLAYER_DISTANCE_PX,
+          );
+          if (!playerTooClose) {
+            resetMobToSpawn(mob);
+            clearMobPath(this.mobPathCache, mob.id);
+            this.statusEffects.deleteMobBurn(mob.id);
+          }
         }
         continue;
       }
@@ -1688,7 +1770,30 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     this.clearMobSkillState(mob);
     clearMobPath(this.mobPathCache, mob.id);
     this.statusEffects.deleteMobBurn(mob.id);
+    this.tryCreateMobLootChest(mob);
     this.onCombatLog(`${mob.name} collapses.`);
+  }
+
+  protected tryCreateMobLootChest(mob: MobState) {
+    if (Math.random() > ESSENCE_DROP_CHANCE) {
+      return;
+    }
+
+    const itemId = RANDOM_ESSENCE_ITEM_IDS[Math.floor(Math.random() * RANDOM_ESSENCE_ITEM_IDS.length)];
+    if (!itemId) {
+      return;
+    }
+
+    const chest = new ChestState();
+    chest.id = `mob-loot-${mob.id}-${Date.now()}`;
+    chest.title = "Essence";
+    chest.subtitle = "Dropped Loot";
+    chest.columns = 1;
+    chest.rows = 1;
+    chest.x = Math.max(0, Math.floor(mob.x / this.profile.tileSize));
+    chest.y = Math.max(0, Math.floor(mob.y / this.profile.tileSize));
+    chest.slots.push(serializeInventoryItem(itemId, 1));
+    this.roomChests.set(chest.id, chest);
   }
 
   // ── Experience (overridable for chat in world room) ──────────────
@@ -1833,13 +1938,23 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   }
 
   protected applyProjectileLifesteal(ownerId: string, resolvedDamage: number, targetPlayerId?: string) {
-    applyRoomProjectileLifesteal(
+    const healedAmount = applyRoomProjectileLifesteal(
       ownerId,
       resolvedDamage,
       targetPlayerId,
       (id) => this.getPlayer(id),
       (nextOwnerId, skillId) => this.getOwnerProjectileGemConfig(nextOwnerId, skillId),
     );
+    if (healedAmount <= 0) {
+      return;
+    }
+
+    const owner = this.getPlayer(ownerId);
+    if (!owner) {
+      return;
+    }
+
+    this.broadcastHealingText(owner.x, owner.y - 18, healedAmount);
   }
 
   protected getProjectileHitHistory(projectileId: string) {
@@ -1867,6 +1982,14 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
   protected broadcastDamageText(x: number, y: number, text: string, color = "#ff5959") {
     broadcastDamageTextRuntime(this, x, y, text, color);
+  }
+
+  protected broadcastHealingText(x: number, y: number, amount: number) {
+    if (amount <= 0) {
+      return;
+    }
+
+    this.broadcastDamageText(x, y, `+${amount}`, "#6dff8f");
   }
 
   // ── Balance config ───────────────────────────────────────────────

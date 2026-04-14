@@ -20,7 +20,14 @@ import {
   RAID_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
 } from "./sharedGameplay.js";
-import { INVENTORY_SIZE, isGemItemId } from "@mmorpg/shared";
+import {
+  INVENTORY_SIZE,
+  identifyAllRaidUnidentifiedInventoryEntries,
+  isGemItemId,
+  resolveEquipmentItemTierVariant,
+  serializeRaidUnidentifiedInventoryItem,
+  type ItemId,
+} from "@mmorpg/shared";
 import {
   getMobDefinition,
   type MobKind,
@@ -72,7 +79,12 @@ const RAID_DURATION_MS = 15 * 60_000;
 const RAT_PACK_JOIN_DISTANCE = TILE_SIZE * 3.5;
 const RAT_PACK_ROAM_INTERVAL_MS = 5000;
 const RAT_PACK_TARGET_REACHED_DISTANCE = TILE_SIZE * 0.75;
-const RAID_CHEST_GEM_ROLL_CHANCE = 0.16;
+const RAID_INITIAL_MOB_MIN_SPAWN_DISTANCE_PX = TILE_SIZE * 10;
+const RAID_CHEST_GEM_ROLL_CHANCE = 0.05;
+const RAID_CHEST_LOOT_REDUCTION_FACTOR = 10;
+const RAID_CHEST_ITEM_TIER_2_CHANCE = 0.14;
+const RAID_CHEST_ITEM_TIER_3_CHANCE = 0.03;
+const RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS = new Set(["healing_potion"]);
 
 export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   maxClients = 8;
@@ -402,8 +414,14 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
             const chest = this.state.chests.get(message.containerId);
             if (chest) {
               replaceRoomStringSlots(chest.slots, nextSlots);
+              this.removeChestIfEmptyLootBag(chest.id);
             }
           }
+        },
+        {
+          mode: message?.mode,
+          targetX: message?.targetX,
+          targetY: message?.targetY,
         },
       );
     });
@@ -855,7 +873,40 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       ...this.state.exitPoints,
       ...Array.from(this.state.chests.values(), (chest) => `${chest.x}:${chest.y}`),
     ]);
-    const candidates = rooms
+    const playerSpawnWorldPoints = this.state.spawnPoints
+      .map((value) => {
+        const [spawnX, spawnY] = value.split(":").map((part) => Number.parseInt(part, 10));
+        if (!Number.isFinite(spawnX) || !Number.isFinite(spawnY)) {
+          return null;
+        }
+        return {
+          x: spawnX * TILE_SIZE + TILE_SIZE / 2,
+          y: spawnY * TILE_SIZE + TILE_SIZE / 2,
+        };
+      })
+      .filter((point): point is { x: number; y: number } => point !== null);
+    const allCandidates = rooms
+      .map((room) => {
+        const centerX = room.x + Math.floor(room.width / 2);
+        const centerY = room.y + Math.floor(room.height / 2);
+        return {
+          room,
+          centerX,
+          centerY,
+        };
+      })
+      .filter(({ centerX, centerY }) => {
+        if (reservedPoints.has(`${centerX}:${centerY}`)) {
+          return false;
+        }
+
+        const centerWorldX = centerX * TILE_SIZE + TILE_SIZE / 2;
+        const centerWorldY = centerY * TILE_SIZE + TILE_SIZE / 2;
+        return playerSpawnWorldPoints.every((spawnPoint) =>
+          Math.hypot(centerWorldX - spawnPoint.x, centerWorldY - spawnPoint.y) >= RAID_INITIAL_MOB_MIN_SPAWN_DISTANCE_PX,
+        );
+      });
+    const candidates = allCandidates.length > 0 ? allCandidates : rooms
       .map((room) => {
         const centerX = room.x + Math.floor(room.width / 2);
         const centerY = room.y + Math.floor(room.height / 2);
@@ -885,11 +936,17 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         (room.width >= mobGeneration.batMinRoomWidth ||
           centerY < this.state.height / 2 ||
           random() > mobGeneration.batRandomThreshold);
-      const kind: MobKind = isBat ? "bat" : "rat";
+      const isSkeleton = !isBat && random() < mobGeneration.skeletonSpawnChance;
+      const kind: MobKind = isBat ? "bat" : isSkeleton ? "skeleton" : "rat";
       const balance = this.getMobBalanceByKind(kind);
       const definition = getMobDefinition(kind);
       const mob = new MobState();
-      mob.id = `${kind === "bat" ? "raid-bat" : "raid-rat"}-${index}`;
+      mob.id =
+        kind === "bat"
+          ? `raid-bat-${index}`
+          : kind === "skeleton"
+            ? `raid-skeleton-${index}`
+            : `raid-rat-${index}`;
       mob.kind = kind;
       mob.name = definition.name;
       mob.texture = definition.texture;
@@ -946,7 +1003,11 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     const normalizedDistanceToCenter = Math.min(1, Math.hypot(x - centerX, y - centerY) / maxCenterDistance);
     const centerBias = 1 - normalizedDistanceToCenter;
     const lootBand = chestContent.lootBands.find((band) => centerBias >= band.minCenterBias);
-    const itemCount = lootBand?.itemCount ?? 0;
+    const baseItemCount = lootBand?.itemCount ?? 0;
+    const itemCount =
+      baseItemCount > 0
+        ? Math.max(1, Math.floor(baseItemCount / RAID_CHEST_LOOT_REDUCTION_FACTOR))
+        : 0;
     const slots = new Array<string>(chest.columns * chest.rows).fill("");
     const itemPool = (lootBand?.pools ?? []).flatMap((poolId) => chestContent.lootPools[poolId] ?? []);
     const usedItems = new Set<string>();
@@ -973,8 +1034,17 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       ) {
         itemId = nonGemItemPool[Math.floor(random() * nonGemItemPool.length)] ?? itemId;
       }
+      const rarityRoll = random();
+      if (rarityRoll < RAID_CHEST_ITEM_TIER_3_CHANCE) {
+        itemId = resolveEquipmentItemTierVariant(itemId, 3) ?? itemId;
+      } else if (rarityRoll < RAID_CHEST_ITEM_TIER_3_CHANCE + RAID_CHEST_ITEM_TIER_2_CHANCE) {
+        itemId = resolveEquipmentItemTierVariant(itemId, 2) ?? itemId;
+      }
       usedItems.add(itemId);
-      slots[slotIndex] = itemId;
+      const resolvedItemId = itemId as ItemId;
+      slots[slotIndex] = RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS.has(resolvedItemId)
+        ? serializeRaidUnidentifiedInventoryItem(resolvedItemId)
+        : resolvedItemId;
     }
 
     slots.forEach((itemId) => chest.slots.push(itemId));
@@ -1052,7 +1122,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   }
 
   private createRaidExitPayload(player: RaidPlayerState): RaidExitStateMessage {
-    const inventory = Array.from({ length: INVENTORY_SIZE }, (_, index) => player.inventory[index] || null);
+    const inventory = identifyAllRaidUnidentifiedInventoryEntries(
+      Array.from({ length: INVENTORY_SIZE }, (_, index) => player.inventory[index] || null),
+    );
     const equipment = createEquipmentStateSnapshot({
       headItem: player.headItem,
       bodyItem: player.bodyItem,

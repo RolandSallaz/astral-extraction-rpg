@@ -50,6 +50,15 @@ export function WorkbenchWindow({
       storageKey="mmorpg.ui.workbench.position.v1"
       defaultPosition={{ left: 420, top: 180 }}
       onClose={onClose}
+      headerActions={
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src="/items/equipment/workbench-16x16.png"
+          alt="Workbench"
+          draggable={false}
+          className="pixelated h-8 w-8 rounded-lg border border-[#d9efbd]/20 bg-[#102108]/60 p-1"
+        />
+      }
       className="z-30 w-[420px] max-w-[92vw] border-[#d9efbd]/35 bg-[#17320d]/82"
     >
       <div className="space-y-4">

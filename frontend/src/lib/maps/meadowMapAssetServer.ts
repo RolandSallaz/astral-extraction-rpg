@@ -16,6 +16,7 @@ import { isMobKind } from '@mmorpg/shared/mobs/catalog';
 import { getEquipmentBodyTexturePath, getEquipmentVisual } from '@mmorpg/shared/visuals/equipmentVisuals';
 import {
   createDefaultMeadowMapAsset,
+  isBlockingMeadowStamp,
   type MeadowDecoration,
   type MeadowMapAsset,
   type MeadowMobAsset,
@@ -329,6 +330,14 @@ function buildWorldDefinitionFromMapAsset(
     }
 
     blockedTiles.set(`${decoration.x}:${decoration.y}`, { x: decoration.x, y: decoration.y });
+  });
+
+  asset.stamps.forEach((stamp) => {
+    if (!isBlockingMeadowStamp(stamp)) {
+      return;
+    }
+
+    blockedTiles.set(`${stamp.x}:${stamp.y}`, { x: stamp.x, y: stamp.y });
   });
 
   const staticChests = chestDecorations.map((decoration, index) => {

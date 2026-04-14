@@ -9,6 +9,7 @@ import {
   getQuestProgress as getQuestProgressFromLog,
   getSealedRelicQuestProgress as getSealedRelicQuestProgressFromLog,
   INTRODUCTION_QUEST_ID,
+  isSameEquipmentItemFamily,
   normalizeQuestLog,
   QUEST_NARRATIVE_CONTENT,
   QUEST_STEP_CONTENT,
@@ -166,7 +167,7 @@ export function hasTutorialChestBeenLooted(chestSlots?: Array<string | null> | n
     return false;
   }
 
-  const hasStaff = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'wood_staff');
+  const hasStaff = chestSlots.some((value) => isSameEquipmentItemFamily(parseInventoryItem(value)?.itemId, 'wood_staff'));
   const hasGem = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'fire_trail_gem');
   return !hasStaff && !hasGem;
 }

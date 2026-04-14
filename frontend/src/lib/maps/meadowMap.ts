@@ -107,9 +107,9 @@ export type MeadowMobAsset = {
   };
 };
 
-export const WORLD_WORKBENCH_TEXTURE_PATH = '/pack/potion and poison asset pack/Portable Alchemy Crate of Potions.png';
+export const WORLD_WORKBENCH_TEXTURE_PATH = '/items/equipment/workbench-16x16.png';
 export const WORLD_WORKBENCH_DEFAULT_STAMP: MeadowStampAsset = {
-  x: 19,
+  x: 20,
   y: 18,
   texturePath: WORLD_WORKBENCH_TEXTURE_PATH,
   rotation: 0,
@@ -117,10 +117,21 @@ export const WORLD_WORKBENCH_DEFAULT_STAMP: MeadowStampAsset = {
   scale: 1.25,
 };
 
+export function isBlockingMeadowStamp(stamp: MeadowStampAsset) {
+  return stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH;
+}
+
 export function ensureWorldWorkbenchStamp(asset: MeadowMapAsset): MeadowMapAsset {
-  const hasWorkbench = (asset.stamps ?? []).some((stamp) => stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH);
-  if (hasWorkbench) {
-    return asset;
+  const workbenchStamps = (asset.stamps ?? []).filter((stamp) => stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH);
+  if (workbenchStamps.length > 0) {
+    return {
+      ...asset,
+      stamps: (asset.stamps ?? []).map((stamp) =>
+        stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH
+          ? { ...WORLD_WORKBENCH_DEFAULT_STAMP }
+          : stamp,
+      ),
+    };
   }
 
   return {
@@ -132,11 +143,15 @@ export function ensureWorldWorkbenchStamp(asset: MeadowMapAsset): MeadowMapAsset
 export function isBlockedMeadowTile(
   map: MeadowMap,
   decorations: MeadowDecoration[],
+  stamps: MeadowStampAsset[],
   x: number,
   y: number,
 ) {
-  return decorations.some(
-    (decoration) => decoration.blocked && decoration.x === x && decoration.y === y,
+  return (
+    decorations.some(
+      (decoration) => decoration.blocked && decoration.x === x && decoration.y === y,
+    ) ||
+    stamps.some((stamp) => isBlockingMeadowStamp(stamp) && stamp.x === x && stamp.y === y)
   );
 }
 

@@ -38,6 +38,9 @@ type UseConsumableRequest = {
   source: 'inventory' | 'container';
   slotIndex: number;
   containerId?: string;
+  mode?: 'self' | 'throw';
+  targetX?: number;
+  targetY?: number;
   nonce: number;
 } | null;
 
@@ -160,6 +163,9 @@ export function useRoomOutboundSync({
       source: useConsumableRequest.source,
       slotIndex: useConsumableRequest.slotIndex,
       containerId: useConsumableRequest.containerId,
+      mode: useConsumableRequest.mode,
+      targetX: useConsumableRequest.targetX,
+      targetY: useConsumableRequest.targetY,
     };
     roomRef.current.send('useConsumable', useConsumableMessage);
   }, [roomRef, useConsumableRequest]);

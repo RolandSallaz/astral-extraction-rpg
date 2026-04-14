@@ -22,6 +22,7 @@ type StatusEffectContext = {
   handlePlayerKilled: (player: BasePlayerState) => void;
   handleMobDeath: (mob: MobState) => void;
   onCombatLog: (text: string) => void;
+  showHealingText: (x: number, y: number, amount: number) => void;
   awardExperience: (playerId: string, amount: number) => void;
   getOwnerProjectileGemConfig: (ownerId: string) => { durationMultiplier: number };
 };
@@ -141,6 +142,9 @@ export class StatusEffectSystem {
       tickMs: profile.healingPotionTickMs,
       healPerTick: profile.healingPotionTotalHeal / (profile.healingPotionDurationMs / profile.healingPotionTickMs),
       getPlayer: (playerId) => this.context.getPlayer(playerId) as HealablePlayer | undefined,
+      onHeal: (_playerId, player, amount) => {
+        this.context.showHealingText(player.x, player.y - 18, amount);
+      },
     });
   }
 

@@ -61,6 +61,7 @@ const PLAYER_OFFLINE_GRACE_MS = 60000;
 const PLAYER_MOB_COLLISION_HALF_WIDTH = WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth;
 const PLAYER_MOB_COLLISION_HALF_HEIGHT = WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight;
 const PLAYER_MOB_COLLISION_OFFSET_Y = WORLD_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
+const WORLD_TILE_COLLISION_OFFSET_Y = TILE_SIZE * 0.375;
 
 export class MyRoom extends BaseGameRoom<PlayerState> {
   maxClients = 100;
@@ -394,8 +395,14 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
             const chest = this.state.chests.get(message.containerId);
             if (chest) {
               replaceRoomStringSlots(chest.slots, nextSlots);
+              this.removeChestIfEmptyLootBag(chest.id);
             }
           }
+        },
+        {
+          mode: message?.mode,
+          targetX: message?.targetX,
+          targetY: message?.targetY,
         },
       );
     });
@@ -579,7 +586,10 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
   private canPlayerMoveTo(x: number, y: number, player?: PlayerState) {
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, x));
-    const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.getMapHeightPx() - TILE_SIZE / 2, y));
+    const clampedY = Math.max(
+      TILE_SIZE / 2,
+      Math.min(this.getMapHeightPx() - TILE_SIZE / 2, y + WORLD_TILE_COLLISION_OFFSET_Y),
+    );
     const tileX = Math.floor(clampedX / TILE_SIZE);
     const tileY = Math.floor(clampedY / TILE_SIZE);
 
@@ -786,7 +796,10 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     }
 
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, position.x));
-    const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.getMapHeightPx() - TILE_SIZE / 2, position.y));
+    const clampedY = Math.max(
+      TILE_SIZE / 2,
+      Math.min(this.getMapHeightPx() - TILE_SIZE / 2, position.y + WORLD_TILE_COLLISION_OFFSET_Y),
+    );
     const tileX = Math.floor(clampedX / TILE_SIZE);
     const tileY = Math.floor(clampedY / TILE_SIZE);
 
@@ -796,7 +809,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
     return {
       x: clampedX,
-      y: clampedY,
+      y: position.y,
     };
   }
 

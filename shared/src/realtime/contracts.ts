@@ -44,6 +44,9 @@ export type UseConsumableMessage = {
   source?: "inventory" | "container";
   slotIndex?: number;
   containerId?: string;
+  mode?: "self" | "throw";
+  targetX?: number;
+  targetY?: number;
 };
 
 export type UseExitMessage = {

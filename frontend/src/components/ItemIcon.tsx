@@ -2,12 +2,13 @@
 
 import type { CSSProperties } from 'react';
 import { type ItemDefinition } from '@/lib/items/equipmentItems';
+import { getItemSpriteSheetStyle } from '@/lib/items/itemSpriteSheet';
 import { cn } from '@/lib/utils';
 
 type ItemIconProps = {
   item: Pick<
     ItemDefinition,
-    'name' | 'texturePath' | 'iconTint' | 'iconRotationDeg' | 'iconScale' | 'compactIconScale'
+    'id' | 'name' | 'texturePath' | 'iconTint' | 'iconRotationDeg' | 'iconScale' | 'compactIconScale'
   >;
   alt?: string;
   className?: string;
@@ -40,6 +41,23 @@ function getMaskStyles(texturePath: string, tint: string, transform: string): CS
   };
 }
 
+function getSpriteSheetMaskStyles(spriteSheetStyle: CSSProperties, tint: string, transform: string): CSSProperties {
+  return {
+    backgroundColor: tint,
+    WebkitMaskImage: spriteSheetStyle.backgroundImage,
+    maskImage: spriteSheetStyle.backgroundImage,
+    WebkitMaskRepeat: 'no-repeat',
+    maskRepeat: 'no-repeat',
+    WebkitMaskPosition: '0% 0%',
+    maskPosition: '0% 0%',
+    WebkitMaskSize: spriteSheetStyle.backgroundSize,
+    maskSize: spriteSheetStyle.backgroundSize,
+    mixBlendMode: 'multiply',
+    transform,
+    transformOrigin: 'center center',
+  };
+}
+
 export function ItemIcon({
   item,
   alt,
@@ -51,7 +69,36 @@ export function ItemIcon({
 }: ItemIconProps) {
   const transform = getItemIconTransform(item, compact);
   const tint = tintOverride ?? item.iconTint ?? null;
-  const imageClassName = 'pixelated absolute inset-0 h-full w-full object-contain';
+  const spriteSheetStyle = getItemSpriteSheetStyle(item.id, item.texturePath);
+  const imageClassName = cn(
+    'pixelated absolute inset-0 h-full w-full',
+    spriteSheetStyle ? undefined : 'object-contain',
+  );
+  const visualStyle = {
+    ...(spriteSheetStyle ?? {}),
+    transform,
+    transformOrigin: 'center center',
+  } satisfies CSSProperties;
+
+  if (spriteSheetStyle) {
+    return (
+      <span
+        role="img"
+        aria-label={alt ?? item.name}
+        className={cn('relative block isolate', className)}
+        style={style}
+      >
+        <span aria-hidden="true" className={imageClassName} style={visualStyle} />
+        {tint ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 pixelated"
+            style={getSpriteSheetMaskStyles(spriteSheetStyle, tint, transform)}
+          />
+        ) : null}
+      </span>
+    );
+  }
 
   if (tint) {
     return (
@@ -62,10 +109,7 @@ export function ItemIcon({
           alt={alt ?? item.name}
           draggable={draggable}
           className={imageClassName}
-          style={{
-            transform,
-            transformOrigin: 'center center',
-          }}
+          style={visualStyle}
         />
         <span
           aria-hidden="true"
@@ -85,8 +129,7 @@ export function ItemIcon({
       className={cn('pixelated h-full w-full object-contain', className)}
       style={{
         ...style,
-        transform,
-        transformOrigin: 'center center',
+        ...visualStyle,
       }}
     />
   );

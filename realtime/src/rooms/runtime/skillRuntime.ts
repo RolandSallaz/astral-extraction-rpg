@@ -163,22 +163,24 @@ export function applyRoomProjectileLifesteal<TPlayer extends ProjectileRuntimePl
   getGemConfig: (ownerId: string, skillId: string) => ProjectileGemConfig,
 ) {
   if (resolvedDamage <= 0 || targetPlayerId === ownerId) {
-    return;
+    return 0;
   }
 
   const owner = getPlayerById(ownerId);
   if (!owner || owner.dead) {
-    return;
+    return 0;
   }
 
   const lifestealRatio = getGemConfig(ownerId, "fireball").lifestealRatio;
   if (lifestealRatio <= 0) {
-    return;
+    return 0;
   }
 
+  const previousHealth = owner.health;
   const healAmount = applyHealingMultiplier(
     resolvedDamage * lifestealRatio,
     owner,
   );
   owner.health = Math.min(owner.maxHealth, owner.health + healAmount);
+  return Math.max(0, owner.health - previousHealth);
 }

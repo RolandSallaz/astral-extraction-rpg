@@ -192,7 +192,7 @@ describe("world room", () => {
     assert.strictEqual(stoppedPlayer?.lastProcessedInput, 8);
   });
 
-  it("loads configured static skeletons in the world lobby without legacy rat or bat ids", async () => {
+  it("loads the world lobby without legacy starter mobs", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", { worldOwner: "tester" });
     await colyseus.connectTo(room, {
       worldOwner: "tester",
@@ -205,8 +205,7 @@ describe("world room", () => {
     const bat = room.state.mobs.get(BAT_ID);
     assert.strictEqual(rat, undefined);
     assert.strictEqual(bat, undefined);
-    assert.strictEqual(room.state.mobs.size, 1);
-    assert.strictEqual([...room.state.mobs.values()][0]?.kind, "skeleton");
+    assert.strictEqual(room.state.mobs.size, 0);
   });
 
   it("spawns a rat mob with balance-driven health and patrol movement", async () => {
@@ -944,6 +943,51 @@ describe("world room", () => {
     const updatedRestoredPlayer = room.state.players.get(reconnectedClient.sessionId);
     assert.ok(updatedRestoredPlayer);
     assert.ok((updatedRestoredPlayer?.health ?? 50) > 50);
+  });
+
+  it("broadcasts green floating text when a player receives healing", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const client = await colyseus.connectTo(room, {
+      name: "Healing Popup",
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    if (!player) {
+      assert.fail("Expected player to exist");
+    }
+
+    player.health = 50;
+
+    const healingTextPromise = new Promise<{ text?: string; color?: string }>((resolve) => {
+      client.onMessage("damageText", (payload) => {
+        if (typeof payload?.text === "string" && payload.text.startsWith("+")) {
+          resolve(payload as { text?: string; color?: string });
+        }
+      });
+    });
+
+    (
+      room as unknown as {
+        statusEffects: {
+          startHealing: (
+            playerId: string,
+            totalTicks: number,
+            tickMs: number,
+            durationMs: number,
+            target: typeof player,
+            now?: number,
+          ) => void;
+        };
+      }
+    ).statusEffects.startHealing(client.sessionId, 1, 50, 50, player, Date.now());
+
+    const payload = await healingTextPromise;
+    assert.strictEqual(payload.text, "+2");
+    assert.strictEqual(payload.color, "#6dff8f");
   });
 
   it("removes a disconnected player after the offline grace period expires", async () => {
