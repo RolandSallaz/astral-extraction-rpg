@@ -1,6 +1,6 @@
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { SkillHandler, SkillCastContext } from "./SkillHandler.js";
-import { getFireballCooldownMs, getFireballCastRange } from "../fireballGems.js";
+import { getFireballCooldownMs } from "../fireballGems.js";
 import { buildFireballCastPlan } from "../projectileSkills.js";
 
 export const FireballHandler: SkillHandler = {
@@ -41,7 +41,7 @@ export const FireballHandler: SkillHandler = {
       gemConfig,
     });
 
-    plan.delayedSpawns.forEach((burst) => ctx.pendingBurstSpawns.push(burst));
+    ctx.queueBurstSpawns(plan.delayedSpawns);
     plan.immediateSpawns.forEach((spawn) => {
       ctx.spawnProjectile(
         spawn.ownerId,

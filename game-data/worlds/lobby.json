@@ -10,23 +10,12 @@
     "x": 18,
     "y": 13
   },
-  "blockedTiles": [],
-  "staticChests": [],
-  "staticMobs": [
+  "blockedTiles": [
     {
-      "id": "lobby-skeleton-guard",
-      "kind": "skeleton",
-      "spawn": {
-        "x": 40,
-        "y": 26
-      },
-      "patrol": {
-        "minX": 40,
-        "maxX": 40,
-        "y": 26,
-        "radiusY": 0,
-        "phase": 0
-      }
+      "x": 20,
+      "y": 18
     }
-  ]
+  ],
+  "staticChests": [],
+  "staticMobs": []
 }

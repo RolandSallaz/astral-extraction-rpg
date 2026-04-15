@@ -9,6 +9,7 @@ import {
   getQuestProgress as getQuestProgressFromLog,
   getSealedRelicQuestProgress as getSealedRelicQuestProgressFromLog,
   INTRODUCTION_QUEST_ID,
+  isSameEquipmentItemFamily,
   normalizeQuestLog,
   QUEST_NARRATIVE_CONTENT,
   QUEST_STEP_CONTENT,
@@ -153,11 +154,11 @@ export function updateIntroductionQuestProgress(
   return updateQuestProgress(character, INTRODUCTION_QUEST_ID, updater);
 }
 
-export function isCryptSmallRaidTarget(options?: Record<string, string | number>) {
+export function isCryptSmallRaidTarget(options?: Record<string, unknown>) {
   return options?.templateCode === CRYPT_SMALL_TEMPLATE_CODE;
 }
 
-export function getRaidRunId(options?: Record<string, string | number>) {
+export function getRaidRunId(options?: Record<string, unknown>) {
   return typeof options?.raidRunId === 'string' ? options.raidRunId : null;
 }
 
@@ -166,7 +167,7 @@ export function hasTutorialChestBeenLooted(chestSlots?: Array<string | null> | n
     return false;
   }
 
-  const hasStaff = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'wood_staff');
+  const hasStaff = chestSlots.some((value) => isSameEquipmentItemFamily(parseInventoryItem(value)?.itemId, 'wood_staff'));
   const hasGem = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'fire_trail_gem');
   return !hasStaff && !hasGem;
 }

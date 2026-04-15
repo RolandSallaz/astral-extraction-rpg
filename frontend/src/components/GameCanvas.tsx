@@ -3,35 +3,35 @@
 import { useEffect, useRef } from 'react';
 import type { Room } from '@colyseus/sdk';
 import type { MouseActionSlotKey, MouseSkillBindings, SkillId } from '@/components/GameHud';
-import { COMMON_DEATH_ANIMATION } from '@mmorpg/shared';
+import {
+  COMMON_DEATH_ANIMATION,
+  DEFAULT_MOB_BALANCE_CONFIG,
+  DEFAULT_SKILL_BALANCE_CONFIG,
+  type MobBalanceConfig,
+  type SkillBalanceConfig,
+} from '@mmorpg/shared';
 import {
   RAID_GAMEPLAY_PROFILE,
   WORLD_GAMEPLAY_PROFILE,
 } from '@mmorpg/shared/gameplay/profiles';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { QuestLog } from '@mmorpg/shared/quests/core';
 import {
   DEFAULT_PLAYER_VISUALS,
   type PlayerAnimationState,
   type PlayerEyeLookDirection,
 } from '@mmorpg/shared/player/visuals';
 import type {
-  AdminUpdateMobBalanceMessage,
-  AdminUpdateSkillBalanceMessage,
   BaseProfileMessage,
   CastSkillMessage,
   ChatInputMessage,
-  ConsumableCooldownMessage,
-  DamageTextMessage,
   DiedMessage,
   EquipmentSyncFields,
-  InventoryUpdateMessage,
   MoveMessage,
   RaidExitStateMessage,
   RaidRoomJoinOptions,
   RealtimeChatMessage,
   RespawnedMessage,
-  SyncChestMessage,
-  UseConsumableMessage,
   UseExitMessage,
   WorldProfileMessage,
   WorldRoomJoinOptions,
@@ -42,11 +42,12 @@ import {
   createDefaultMeadowMapAsset,
   createMeadowDecorations,
   createMeadowDecorationsFromAsset,
-  createMeadowMap,
   createMeadowMapFromAsset,
   createMeadowMobsFromAsset,
   createMeadowStampsFromAsset,
   createMeadowTradersFromAsset,
+  ensureWorldWorkbenchStamp,
+  isBlockingMeadowStamp,
   isBlockedMeadowTile,
   type MeadowMapAsset,
   type MeadowMobAsset,
@@ -63,7 +64,12 @@ import {
   type EquipmentItemId,
   type ItemDefinition,
 } from '@/lib/items/equipmentItems';
-import { getEquipmentBodyTexturePath } from '@mmorpg/shared/visuals/equipmentVisuals';
+import {
+  BODY_EQUIPMENT_IDS,
+  getEquipmentBodyTexturePath,
+  getEquipmentVisual,
+  type EquipmentAnimationClip,
+} from '@mmorpg/shared/visuals/equipmentVisuals';
 import {
   DEFAULT_SKILL_EFFECT_OVERRIDES,
   type SkillEffectConfig,
@@ -71,13 +77,14 @@ import {
   type SkillEffectOverrides,
 } from '@/lib/skillEffects';
 import {
-  DEFAULT_SKILL_BALANCE_CONFIG,
-  type SkillBalanceConfig,
-} from '@/lib/skillBalance';
-import {
-  DEFAULT_MOB_BALANCE_CONFIG,
-  type MobBalanceConfig,
-} from '@/lib/mobBalance';
+  getStoredSessionToken,
+  loadRaidRun,
+} from '@/lib/playerStorage';
+
+type ActiveTargetingState =
+  | { type: 'skill'; skillId: 'fireball' | 'fireField' }
+  | { type: 'consumable'; itemId: 'healing_potion' }
+  | null;
 import {
   createDefaultMobVisualConfig,
   type MobAnimationState,
@@ -99,6 +106,27 @@ import {
   resolveSpriteSheetAnimationColumns,
   type SpriteSheetAnimation,
 } from '@/lib/animations/runtime';
+import { getProjectileAnimation, getProjectileDisplaySize } from '@/components/game-canvas/projectileHelpers';
+import {
+  clampTargetToCastRange,
+  getCharacterCastRange,
+  getCharacterCastTimeMs,
+  hasWoodStaffEquipped,
+} from '@/components/game-canvas/castHelpers';
+import { createWorldEditorInputHandler } from '@/components/game-canvas/worldEditorInput';
+import {
+  getWorldTraderAnimationKey,
+  getWorldTraderBodyOverlayAnimation,
+  getWorldTraderSpriteSheetKey,
+} from '@/components/game-canvas/worldTraderHelpers';
+import {
+  getAnimatedMobTexture,
+  getMobRenderScale,
+  getMobVisualKind,
+  toRuntimeAnimationFromMobClip,
+} from '@/components/game-canvas/mobRenderHelpers';
+import { useGameCanvasRoomSync } from '@/components/game-canvas/useGameCanvasRoomSync';
+import { createMinimapEmitter, type MinimapSnapshot } from '@/components/game-canvas/minimapEmitter';
 
 type PhaserGame = import('phaser').Game;
 type PhaserImage = Phaser.GameObjects.Image;
@@ -154,6 +182,7 @@ const PLAYER_ANIMATIONS: Partial<Record<PlayerAnimationState, PlayerSheetAnimati
     ]),
   ) as Partial<Record<PlayerAnimationState, PlayerSheetAnimation>>;
 const PLAYER_EYE_COLOR = Number.parseInt(DEFAULT_PLAYER_VISUALS.eyes.color.replace('#', ''), 16);
+const PLAYER_FIRE_EYE_COLOR = 0xff4d4d;
 const PLAYER_HAND_ANIMATION_OFFSETS: Partial<Record<PlayerAnimationState, HandAnimationOffsets>> = {
   idle: {
     leftX: [0, 0, -1, 0],
@@ -184,8 +213,22 @@ const SHARED_DEATH_ANIMATION: SheetAnimation = {
 type MovementBlocker = {
   x: number;
   y: number;
-  radius: number;
+  halfWidth: number;
+  halfHeight: number;
 };
+
+const ENTITY_SORT_BASE_DEPTH = 1;
+const ENTITY_SORT_DEPTH_RANGE = 2.2;
+const ENTITY_SORT_SHADOW_OFFSET = 0.24;
+const ENTITY_SORT_AURA_OFFSET = 0.12;
+const ENTITY_SORT_LABEL_OFFSET = 0.16;
+const ENTITY_SORT_EFFECT_OFFSET = 0.04;
+const DEBUG_COLLISION_OVERLAY_DEPTH = 4.4;
+const DEBUG_COLLISION_TILE_COLOR = 0xff6b6b;
+const DEBUG_COLLISION_CHEST_TILE_COLOR = 0xffc857;
+const DEBUG_COLLISION_PLAYER_COLOR = 0x5edfff;
+const DEBUG_COLLISION_REMOTE_PLAYER_COLOR = 0x8af28a;
+const DEBUG_COLLISION_MOB_COLOR = 0xffa552;
 
 export type PlayerEquipment = EquipmentState;
 export type ContainerSnapshot = {
@@ -197,41 +240,112 @@ export type ContainerSnapshot = {
   slots: Array<string | null>;
 };
 export type { RealtimeChatMessage };
-
-export type MinimapSnapshot = {
-  roomName: 'world' | 'raid';
-  width: number;
-  height: number;
-  tiles: string[];
-  explored: number[];
-  visible: number[];
-  playerTile: {
-    x: number;
-    y: number;
-  };
-};
+export type { MinimapSnapshot };
 
 export type WorldTraderInteraction = MeadowTraderAsset;
+export type WorldWorkbenchInteraction = {
+  id: string;
+  x: number;
+  y: number;
+};
 export type TraderQuestMarker = {
   symbol: '!' | '?';
   color: string;
   state: 'available' | 'active' | 'ready';
 } | null;
 
-type CharacterEquipment = {
-  body?: EquipmentItemId;
-  head?: EquipmentItemId;
-  weapon?: EquipmentItemId;
-  'head-gem-1'?: EquippableItemId;
-  'head-gem-2'?: EquippableItemId;
-  'head-gem-3'?: EquippableItemId;
-  'body-gem-1'?: EquippableItemId;
-  'body-gem-2'?: EquippableItemId;
-  'body-gem-3'?: EquippableItemId;
-  'weapon-gem-1'?: EquippableItemId;
-  'weapon-gem-2'?: EquippableItemId;
-  'weapon-gem-3'?: EquippableItemId;
-};
+type CharacterEquipment = EquipmentState;
+
+const ELEMENTAL_EQUIPMENT_KEYS = [
+  'head',
+  'body',
+  'weapon',
+  'head-gem-1',
+  'head-gem-2',
+  'head-gem-3',
+  'body-gem-1',
+  'body-gem-2',
+  'body-gem-3',
+  'weapon-gem-1',
+  'weapon-gem-2',
+  'weapon-gem-3',
+] as const satisfies ReadonlyArray<keyof CharacterEquipment>;
+
+function getEquipmentElement(itemId: EquippableItemId | undefined) {
+  if (typeof itemId !== 'string') {
+    return null;
+  }
+
+  if (itemId.startsWith('fire_')) {
+    return 'fire';
+  }
+  if (itemId.startsWith('ice_')) {
+    return 'ice';
+  }
+  if (itemId.startsWith('lightning_')) {
+    return 'lightning';
+  }
+  if (itemId.startsWith('darkness_')) {
+    return 'darkness';
+  }
+  if (itemId.startsWith('void_')) {
+    return 'void';
+  }
+
+  return null;
+}
+
+function hasDominantFireEquipment(equipment: CharacterEquipment) {
+  let elementalCount = 0;
+  let fireCount = 0;
+
+  for (const key of ELEMENTAL_EQUIPMENT_KEYS) {
+    const element = getEquipmentElement(equipment[key]);
+    if (!element) {
+      continue;
+    }
+
+    elementalCount += 1;
+    if (element === 'fire') {
+      fireCount += 1;
+    }
+  }
+
+  return elementalCount > 0 && fireCount * 2 > elementalCount;
+}
+
+function toPlayerAnimationFromEquipmentClip(clip: EquipmentAnimationClip): PlayerSheetAnimation {
+  return {
+    textureKey: clip.textureKey,
+    texturePath: clip.texturePath,
+    frameWidth: clip.frameWidth,
+    frameHeight: clip.frameHeight,
+    startFrame: clip.startFrame,
+    startRowFrames: 0,
+    frameCount: clip.frameCount,
+    fps: 1000 / clip.frameMs,
+    columns: 1,
+    loop: clip.loop,
+    headOffsetYFrames: clip.headOffsetYFrames,
+  };
+}
+
+function getBodyAnimationForEquipment(
+  bodyItemId: EquipmentItemId | undefined,
+  state: PlayerAnimationState,
+): PlayerSheetAnimation | undefined {
+  if (!bodyItemId) {
+    return undefined;
+  }
+
+  const visual = getEquipmentVisual(bodyItemId);
+  if (!visual || visual.slot !== 'body') {
+    return undefined;
+  }
+
+  const clip = visual.animations[state] ?? visual.animations.idle;
+  return clip ? toPlayerAnimationFromEquipmentClip(clip) : undefined;
+}
 
 type NetworkPlayerState = {
   id: string;
@@ -294,6 +408,10 @@ type NetworkChestState = {
   y: number;
   slots: string[];
 };
+
+function getChestTextureKey(chest: Pick<NetworkChestState, 'subtitle'>) {
+  return chest.subtitle === 'Dropped Loot' ? 'loot-bag-8x8' : 'chest-8x8';
+}
 
 type NetworkMobState = {
   id: string;
@@ -411,6 +529,8 @@ type ProfileSnapshot = {
   playerStrength: number;
   playerAgility: number;
   playerIntellect: number;
+  playerGold: number;
+  playerQuests: QuestLog;
   playerInventory: Array<string | null>;
   playerEquipment: PlayerEquipment;
 };
@@ -443,6 +563,8 @@ function createBaseProfileMessage(profile: ProfileSnapshot): BaseProfileMessage 
     strength: profile.playerStrength,
     agility: profile.playerAgility,
     intellect: profile.playerIntellect,
+    gold: profile.playerGold,
+    quests: profile.playerQuests,
     inventory: profile.playerInventory.map((itemId) => itemId ?? ''),
     ...createEquipmentSyncFields(profile.playerEquipment),
   };
@@ -483,6 +605,7 @@ type MobVisual = {
   castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
+  currentHealthSegmentCount: number;
   targetX: number;
   targetY: number;
   lastX: number;
@@ -551,6 +674,7 @@ type CharacterVisual = {
   castBarFill: Phaser.GameObjects.Rectangle;
   healthText: Phaser.GameObjects.Text;
   healthSegments: Phaser.GameObjects.Rectangle[];
+  currentHealthSegmentCount: number;
   targetX: number;
   targetY: number;
   lastX: number;
@@ -568,6 +692,7 @@ type CharacterVisual = {
   currentWeaponOffsetY: number;
   currentBodyTextureKey?: string;
   currentBodyFrame?: number;
+  currentBodyItem?: EquipmentItemId;
   currentWeaponItem?: EquipmentItemId;
   currentCastItemId?: ConsumableItemId;
   isFollowTarget: boolean;
@@ -602,6 +727,10 @@ type CharacterVisual = {
 
 type PlayerVisualRefs = {
   weaponItem: PhaserImage;
+  currentBodyItem?: EquipmentItemId;
+  currentWeaponItem?: EquipmentItemId;
+  currentWeaponOffsetX?: number;
+  currentWeaponOffsetY?: number;
 };
 
 type WorldRoom = Room<{
@@ -667,6 +796,7 @@ type RaidRoom = Room<{
   spawnPoints: string[];
   exitPoints: string[];
   players: Map<string, RaidNetworkPlayerState>;
+  mobs: Map<string, NetworkMobState>;
   chests: Map<string, NetworkChestState>;
   groundEffects: Map<string, NetworkGroundEffectState>;
   projectiles: Map<string, NetworkProjectileState>;
@@ -680,9 +810,16 @@ const FIRE_TRAIL_CAST_PENALTY_MS = WORLD_GAMEPLAY_PROFILE.fireTrailCastPenaltyMs
 const FIRE_BURST_EXTRA_LOCK_MS = 200;
 const WOOD_STAFF_STRIKE_LOCK_MS = 180;
 const FIRE_RANGE_GEM_ID = 'fire_range_gem';
-const SKELETON_RENDER_SCALE = 2;
 const DEFAULT_MOB_BURN_SCALE = 1;
 const STAFF_CAST_RANGE = WORLD_GAMEPLAY_PROFILE.staffCastRange;
+const CAST_HELPERS_CONFIG = {
+  fireballBaseCastTimeMs: FIREBALL_BASE_CAST_TIME_MS,
+  fireTrailCastPenaltyMs: FIRE_TRAIL_CAST_PENALTY_MS,
+  fireBurstExtraLockMs: FIRE_BURST_EXTRA_LOCK_MS,
+  staffCastRange: STAFF_CAST_RANGE,
+  fireRangeGemId: FIRE_RANGE_GEM_ID,
+  woodStaffItemId: WOOD_STAFF_ITEM_ID,
+};
 const RAID_VISIBILITY_UPDATE_INTERVAL_MS = 90;
 const RAID_MINIMAP_UPDATE_INTERVAL_MS = 260;
 const RAID_OBJECT_VISIBILITY_UPDATE_INTERVAL_MS = 140;
@@ -690,6 +827,11 @@ const WORLD_CLIENT_SIMULATION_STEP_MS = 1000 / WORLD_GAMEPLAY_PROFILE.networkTic
 const RAID_CLIENT_SIMULATION_STEP_MS = 1000 / RAID_GAMEPLAY_PROFILE.networkTickRate;
 const WORLD_REMOTE_INTERPOLATION_DELAY_MS = WORLD_GAMEPLAY_PROFILE.remoteInterpolationDelayMs;
 const RAID_REMOTE_INTERPOLATION_DELAY_MS = RAID_GAMEPLAY_PROFILE.remoteInterpolationDelayMs;
+const LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES = 6;
+const HEALTH_PER_BAR_SEGMENT = 10;
+const MAX_HEALTH_BAR_SEGMENTS = 24;
+const HEALTH_BAR_WIDTH_PX = 24;
+const HEALTH_SEGMENT_GAP_PX = 0.4;
 const RAID_VISION_RADIUS_TILES = 6;
 const RAID_FOOT_TILE_OFFSET_Y = 32 * 0.375;
 const RAID_MINIMAP_EXPLORED_STORAGE_PREFIX = 'mmorpg.raid-minimap-explored.v1';
@@ -976,6 +1118,36 @@ function getMobDeathAnimationCenterY(mob: Pick<MobVisual, 'sprite'>) {
   return mob.sprite.y + (0.5 - mob.sprite.originY) * mob.sprite.displayHeight;
 }
 
+function getEntitySortDepth(footY: number, mapHeight: number) {
+  return (
+    ENTITY_SORT_BASE_DEPTH +
+    Phaser.Math.Clamp(footY / Math.max(1, mapHeight), 0, 1) * ENTITY_SORT_DEPTH_RANGE
+  );
+}
+
+function getCharacterFootY(character: Pick<CharacterVisual, 'container'>, tileSize: number) {
+  return character.container.y + tileSize * 0.42;
+}
+
+function getMobFootY(mob: Pick<MobVisual, 'sprite'>) {
+  return mob.sprite.y + mob.sprite.displayHeight * (1 - mob.sprite.originY);
+}
+
+function getWorldTraderFootY(trader: Pick<WorldTraderVisual, 'container'>, tileSize: number) {
+  return trader.container.y + tileSize * 0.42;
+}
+
+function getPlayerMobCollisionCenterY(y: number) {
+  return y + WORLD_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
+}
+
+function getBlockerCollisionDistance(x: number, y: number, blocker: MovementBlocker) {
+  return Math.hypot(
+    (x - blocker.x) / Math.max(0.001, blocker.halfWidth),
+    (y - blocker.y) / Math.max(0.001, blocker.halfHeight),
+  );
+}
+
 function createSkillAnimation(skillId: SkillEffectId, config: SkillEffectConfig): SheetAnimation {
   return {
     skillId,
@@ -998,32 +1170,32 @@ function canMoveToWorldPosition(
   tileSize: number,
   mapWidth: number,
   mapHeight: number,
-  meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
+  meadowStamps: ReturnType<typeof createMeadowStampsFromAsset>,
   mobBlockers: MovementBlocker[] = [],
   currentX?: number,
   currentY?: number,
 ) {
   const clampedX = Math.max(tileSize / 2, Math.min(mapWidth - tileSize / 2, x));
-  const clampedY = Math.max(tileSize / 2, Math.min(mapHeight - tileSize / 2, y));
+  const clampedY = Math.max(tileSize / 2, Math.min(mapHeight - tileSize / 2, y + tileSize * 0.375));
   const tileX = Math.floor(clampedX / tileSize);
   const tileY = Math.floor(clampedY / tileSize);
 
-  if (isBlockedMeadowTile(meadowMap, meadowDecorations, tileX, tileY)) {
+  if (isBlockedMeadowTile(meadowDecorations, meadowStamps, tileX, tileY)) {
     return false;
   }
 
   for (const blocker of mobBlockers) {
-    const nextDistance = Phaser.Math.Distance.Between(clampedX, clampedY, blocker.x, blocker.y);
-    if (nextDistance >= blocker.radius) {
+    const nextDistance = getBlockerCollisionDistance(clampedX, clampedY, blocker);
+    if (nextDistance >= 1) {
       continue;
     }
 
     const currentDistance =
       typeof currentX === 'number' && typeof currentY === 'number'
-        ? Phaser.Math.Distance.Between(currentX, currentY, blocker.x, blocker.y)
+        ? getBlockerCollisionDistance(currentX, currentY, blocker)
         : Number.POSITIVE_INFINITY;
-    const isAlreadyOverlapping = currentDistance < blocker.radius;
+    const isAlreadyOverlapping = currentDistance < 1;
     const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
     if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
       return false;
@@ -1063,16 +1235,16 @@ function canMoveToRaidWorldPosition(
   }
 
   for (const blocker of mobBlockers) {
-    const nextDistance = Phaser.Math.Distance.Between(clampedX, y, blocker.x, blocker.y);
-    if (nextDistance >= blocker.radius) {
+    const nextDistance = getBlockerCollisionDistance(clampedX, y, blocker);
+    if (nextDistance >= 1) {
       continue;
     }
 
     const currentDistance =
       typeof currentX === 'number' && typeof currentY === 'number'
-        ? Phaser.Math.Distance.Between(currentX, currentY, blocker.x, blocker.y)
+        ? getBlockerCollisionDistance(currentX, currentY, blocker)
         : Number.POSITIVE_INFINITY;
-    const isAlreadyOverlapping = currentDistance < blocker.radius;
+    const isAlreadyOverlapping = currentDistance < 1;
     const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
     if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
       return false;
@@ -1091,8 +1263,8 @@ function applyWorldPredictedMovement(
   tileSize: number,
   mapWidth: number,
   mapHeight: number,
-  meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
+  meadowStamps: ReturnType<typeof createMeadowStampsFromAsset>,
   speed: number,
   mobBlockers: MovementBlocker[] = [],
 ) {
@@ -1115,8 +1287,8 @@ function applyWorldPredictedMovement(
       tileSize,
       mapWidth,
       mapHeight,
-      meadowMap,
       meadowDecorations,
+      meadowStamps,
       mobBlockers,
       currentX,
       currentY,
@@ -1366,6 +1538,7 @@ function applyEquipmentToVisual(
       baseAlpha: number;
       animation?: SheetAnimation;
     }>;
+    currentBodyItem?: EquipmentItemId;
     currentWeaponItem?: EquipmentItemId;
     currentWeaponOffsetX: number;
     currentWeaponOffsetY: number;
@@ -1376,8 +1549,14 @@ function applyEquipmentToVisual(
     return;
   }
 
-  const weaponItemId = equipment.weapon;
+  const bodyItemId = toEquipmentItemId(equipment.body);
+  const weaponItemId = toEquipmentItemId(equipment.weapon);
   const weaponItem = weaponItemId ? EQUIPMENT_ITEMS[weaponItemId] : undefined;
+  visual.currentBodyItem = bodyItemId;
+  const eyeColor = hasDominantFireEquipment(equipment) ? PLAYER_FIRE_EYE_COLOR : PLAYER_EYE_COLOR;
+
+  visual.leftEye.setFillStyle(eyeColor, 1);
+  visual.rightEye.setFillStyle(eyeColor, 1);
 
   if (weaponItemId !== visual.currentWeaponItem) {
     visual.weaponEffects.forEach(({ image, aura }) => {
@@ -1459,7 +1638,7 @@ function applyEquipmentToVisual(
 function applyMobHealthToVisual(
   visual: Pick<
     MobVisual,
-    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth'
+    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth' | 'currentHealthSegmentCount'
   >,
   health: number,
   maxHealth: number,
@@ -1467,15 +1646,19 @@ function applyMobHealthToVisual(
   const safeMaxHealth = Math.max(1, Math.floor(maxHealth));
   const safeHealth = Phaser.Math.Clamp(Math.floor(health), 0, safeMaxHealth);
   const hpRatio = Phaser.Math.Clamp(safeHealth / safeMaxHealth, 0, 1);
-  const filledSegments = Math.round(hpRatio * visual.healthSegments.length);
+  const segmentCount = Math.max(1, Math.min(MAX_HEALTH_BAR_SEGMENTS, Math.ceil(safeMaxHealth / HEALTH_PER_BAR_SEGMENT)));
+  const filledSegments = Math.round(hpRatio * segmentCount);
 
   visual.currentHealth = safeHealth;
   visual.currentMaxHealth = safeMaxHealth;
-  visual.healthBarFill.width = 24 * hpRatio;
+  visual.currentHealthSegmentCount = segmentCount;
+  visual.healthBarFill.width = HEALTH_BAR_WIDTH_PX * hpRatio;
   visual.healthText.setText(`${safeHealth}/${safeMaxHealth}`);
 
   visual.healthSegments.forEach((segment, index) => {
-    const isFilled = index < filledSegments;
+    const isActive = index < segmentCount;
+    const isFilled = isActive && index < filledSegments;
+    segment.setVisible(isActive);
     segment.setFillStyle(isFilled ? 0xef4444 : 0x2a140f, isFilled ? 1 : 0.9);
   });
 }
@@ -1483,7 +1666,7 @@ function applyMobHealthToVisual(
 function applyCharacterHealthToVisual(
   visual: Pick<
     CharacterVisual,
-    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth'
+    'healthBarFill' | 'healthText' | 'healthSegments' | 'currentHealth' | 'currentMaxHealth' | 'currentHealthSegmentCount'
   >,
   health: number,
   maxHealth: number,
@@ -1491,16 +1674,41 @@ function applyCharacterHealthToVisual(
   const safeMaxHealth = Math.max(1, Math.floor(maxHealth));
   const safeHealth = Phaser.Math.Clamp(Math.floor(health), 0, safeMaxHealth);
   const hpRatio = Phaser.Math.Clamp(safeHealth / safeMaxHealth, 0, 1);
-  const filledSegments = Math.round(hpRatio * visual.healthSegments.length);
+  const segmentCount = Math.max(1, Math.min(MAX_HEALTH_BAR_SEGMENTS, Math.ceil(safeMaxHealth / HEALTH_PER_BAR_SEGMENT)));
+  const filledSegments = Math.round(hpRatio * segmentCount);
 
   visual.currentHealth = safeHealth;
   visual.currentMaxHealth = safeMaxHealth;
-  visual.healthBarFill.width = 24 * hpRatio;
+  visual.currentHealthSegmentCount = segmentCount;
+  visual.healthBarFill.width = HEALTH_BAR_WIDTH_PX * hpRatio;
   visual.healthText.setText(`${safeHealth}/${safeMaxHealth}`);
 
   visual.healthSegments.forEach((segment, index) => {
-    const isFilled = index < filledSegments;
+    const isActive = index < segmentCount;
+    const isFilled = isActive && index < filledSegments;
+    segment.setVisible(isActive);
     segment.setFillStyle(isFilled ? 0xef4444 : 0x2a140f, isFilled ? 1 : 0.9);
+  });
+}
+
+function layoutHealthSegments(
+  segments: Phaser.GameObjects.Rectangle[],
+  centerX: number,
+  centerY: number,
+  activeSegmentCount: number,
+) {
+  const count = Math.max(1, Math.min(segments.length, activeSegmentCount));
+  const totalGapWidth = Math.max(0, (count - 1) * HEALTH_SEGMENT_GAP_PX);
+  const segmentWidth = Math.max(1, (HEALTH_BAR_WIDTH_PX - totalGapWidth) / count);
+  const startX = centerX - HEALTH_BAR_WIDTH_PX / 2 + segmentWidth / 2;
+
+  segments.forEach((segment, index) => {
+    if (index >= count) {
+      return;
+    }
+
+    segment.setPosition(startX + index * (segmentWidth + HEALTH_SEGMENT_GAP_PX), centerY);
+    segment.setSize(segmentWidth, 4);
   });
 }
 
@@ -1653,52 +1861,6 @@ function updateCharacterEffectDisplay(
   });
 }
 
-function getCharacterCastTimeMs(equipment: PlayerEquipment) {
-  let castTimeMs = FIREBALL_BASE_CAST_TIME_MS;
-
-  if (
-    equipment['weapon-gem-1'] === 'fire_trail_gem' ||
-    equipment['weapon-gem-2'] === 'fire_trail_gem' ||
-    equipment['weapon-gem-3'] === 'fire_trail_gem'
-  ) {
-    castTimeMs += FIRE_TRAIL_CAST_PENALTY_MS;
-  }
-
-  if (
-    equipment['weapon-gem-1'] === 'cast_speed_gem' ||
-    equipment['weapon-gem-2'] === 'cast_speed_gem' ||
-    equipment['weapon-gem-3'] === 'cast_speed_gem'
-  ) {
-    castTimeMs *= 0.65;
-  }
-
-  if (
-    equipment['weapon-gem-1'] === 'fire_burst_gem' ||
-    equipment['weapon-gem-2'] === 'fire_burst_gem' ||
-    equipment['weapon-gem-3'] === 'fire_burst_gem'
-  ) {
-    castTimeMs += FIRE_BURST_EXTRA_LOCK_MS;
-  }
-
-  return Math.round(castTimeMs);
-}
-
-function getCharacterCastRange(equipment: PlayerEquipment) {
-  if (
-    equipment['weapon-gem-1'] === FIRE_RANGE_GEM_ID ||
-    equipment['weapon-gem-2'] === FIRE_RANGE_GEM_ID ||
-    equipment['weapon-gem-3'] === FIRE_RANGE_GEM_ID
-  ) {
-    return STAFF_CAST_RANGE * 1.25;
-  }
-
-  return STAFF_CAST_RANGE;
-}
-
-function hasWoodStaffEquipped(equipment: PlayerEquipment) {
-  return equipment.weapon === WOOD_STAFF_ITEM_ID;
-}
-
 function applyCastingToCharacterVisual(
   visual: Pick<CharacterVisual, 'currentCastingSkillId' | 'currentCastStartedAt' | 'currentCastEndsAt'>,
   castingSkillId: string,
@@ -1718,6 +1880,16 @@ function getHeldCastConsumableItemId(
   }
 
   return toConsumableItemId(visual.currentCastingSkillId);
+}
+
+function getHeldTargetingConsumableItemId(
+  activeTargeting: ActiveTargetingState,
+): ConsumableItemId | undefined {
+  if (activeTargeting?.type !== 'consumable') {
+    return undefined;
+  }
+
+  return activeTargeting.itemId;
 }
 
 function applyBurningToMobVisual(
@@ -1803,143 +1975,13 @@ async function loadWorldMapAsset(): Promise<MeadowMapAsset> {
       throw new Error('Failed to load world map asset');
     }
 
-    return await response.json() as MeadowMapAsset;
+    return ensureWorldWorkbenchStamp(await response.json() as MeadowMapAsset);
   } catch {
-    return createDefaultMeadowMapAsset();
+    return ensureWorldWorkbenchStamp(createDefaultMeadowMapAsset());
   }
 }
 
-function getMobRenderScale(texture: string) {
-  if (texture === 'skeleton') {
-    return SKELETON_RENDER_SCALE;
-  }
 
-  if (texture === 'skeleton-npc-16x16') {
-    return SKELETON_RENDER_SCALE;
-  }
-
-  if (texture === 'bat') {
-    return 2;
-  }
-
-  if (texture === 'rat') {
-    return 2;
-  }
-
-  return 1;
-}
-
-function getAnimatedMobTexture(texture: string, timeMs: number) {
-  if (texture === 'bat' || texture === 'rat') {
-    const frame = Math.floor(timeMs / 240) % 2 === 0 ? 1 : 2;
-    return `${texture}_${frame}`;
-  }
-
-  return texture;
-}
-
-function getMobClipTextureKey(spritesheet: string) {
-  return `mob-clip:${encodeURIComponent(spritesheet)}`;
-}
-
-function getMobVisualKind(texture: string) {
-  return texture === 'bat' || texture === 'rat' || texture === 'skeleton' ? texture : null;
-}
-
-function toRuntimeAnimationFromMobClip(clip: MobAnimationClipDefinition): SheetAnimation {
-  return {
-    textureKey: getMobClipTextureKey(clip.spritesheet),
-    texturePath: clip.spritesheet,
-    frameWidth: clip.frameWidth,
-    frameHeight: clip.frameHeight,
-    startFrame: clip.startFrame,
-    startRowFrames: 0,
-    frameCount: Math.max(1, clip.endFrame - clip.startFrame + 1),
-    fps: Math.max(1, clip.frameRate),
-    columns: Math.max(1, clip.columns),
-    loop: clip.repeat !== 0,
-  };
-}
-
-function getWorldTraderSpriteSheetKey(texturePath: string) {
-  return `world-trader-sheet:${texturePath}`;
-}
-
-function getWorldTraderBodyOverlayTextureKey(texturePath: string) {
-  return `world-trader-body-overlay:${encodeURIComponent(texturePath)}`;
-}
-
-function isAnimatedWorldTraderBodyOverlay(texturePath: string | undefined) {
-  return typeof texturePath === 'string' && /^\/character\/equipment\/.+_idle\.(png|jpg|jpeg|webp|gif)$/i.test(texturePath);
-}
-
-function getWorldTraderBodyOverlayAnimation(texturePath: string | undefined): PlayerSheetAnimation | null {
-  if (!texturePath || !isAnimatedWorldTraderBodyOverlay(texturePath)) {
-    return null;
-  }
-
-  const idleAnimation = PLAYER_ANIMATIONS.idle;
-  if (!idleAnimation) {
-    return null;
-  }
-
-  return {
-    ...idleAnimation,
-    textureKey: getWorldTraderBodyOverlayTextureKey(texturePath),
-    texturePath,
-  };
-}
-
-function getWorldTraderAnimationKey(traderId: string) {
-  return `world-trader-anim:${traderId}`;
-}
-
-function getProjectileAnimation(
-  skillId: string,
-  projectileAnimations: Pick<Record<SkillEffectId, SheetAnimation>, 'fireball' | 'fireNova'>,
-) {
-  return skillId === 'fireNova' ? projectileAnimations.fireNova : projectileAnimations.fireball;
-}
-
-function getProjectileDisplaySize(skillId: string, skillEffects: SkillEffectOverrides) {
-  if (skillId === 'fireNova') {
-    return skillEffects.fireNova.displaySize;
-  }
-
-  if (skillId === 'fireballShard') {
-    return Math.max(12, Math.round(skillEffects.fireball.displaySize * 0.6));
-  }
-
-  if (skillId === 'fireballSplit') {
-    return Math.max(14, Math.round(skillEffects.fireball.displaySize * 0.8));
-  }
-
-  return skillEffects.fireball.displaySize;
-}
-
-function clampTargetToCastRange(
-  equipment: PlayerEquipment,
-  originX: number,
-  originY: number,
-  targetX: number,
-  targetY: number,
-) {
-  const deltaX = targetX - originX;
-  const deltaY = targetY - originY;
-  const distance = Math.hypot(deltaX, deltaY);
-  const castRange = getCharacterCastRange(equipment);
-
-  if (distance <= castRange || distance <= 0.001) {
-    return { x: targetX, y: targetY, clamped: false };
-  }
-
-  const scale = castRange / distance;
-  return {
-    x: originX + deltaX * scale,
-    y: originY + deltaY * scale,
-    clamped: true,
-  };
-}
 
 export function GameCanvas({
   playerEquipment,
@@ -1953,6 +1995,8 @@ export function GameCanvas({
   playerStrength,
   playerAgility,
   playerIntellect,
+  playerGold,
+  playerQuests,
   playerRole,
   activeSkillTargeting,
   mouseSkillBindings = { LMB: null, RMB: null },
@@ -1960,12 +2004,16 @@ export function GameCanvas({
   onNearbyChestChange,
   onTraderInteract,
   onNearbyTraderChange,
+  onWorkbenchInteract,
+  onNearbyWorkbenchChange,
   getTraderQuestMarker,
   objectiveTarget = null,
   onObjectiveArrowChange,
   onMinimapChange,
   onSkillTargetCancel,
   onFireballCast,
+  onHeldConsumableUseSelf,
+  onHeldConsumableThrow,
   onSkillCooldownsChange,
   onPlayerVitalsChange,
   onPlayerProgressChange,
@@ -1994,6 +2042,7 @@ export function GameCanvas({
   keyboardInputEnabled = true,
   activeRoomName = 'world',
   activeRoomOptions,
+  contentVersion = '',
   worldMapAssetOverride = null,
   worldEditorEnabled = false,
   worldEditorMode = 'tile',
@@ -2005,6 +2054,7 @@ export function GameCanvas({
   onWorldEditPaint,
   onWorldEditHoverChange,
   onWorldEditDebugChange,
+  debugCollisionEnabled = false,
   locale = 'ru',
 }: {
   playerEquipment: PlayerEquipment;
@@ -2018,19 +2068,25 @@ export function GameCanvas({
   playerStrength: number;
   playerAgility: number;
   playerIntellect: number;
+  playerGold: number;
+  playerQuests: QuestLog;
   playerRole: string;
-  activeSkillTargeting: 'fireball' | 'fireField' | null;
+  activeSkillTargeting: ActiveTargetingState;
   mouseSkillBindings?: MouseSkillBindings;
   onChestInteract?: (chestId: string) => void;
   onNearbyChestChange?: (chestId: string | null) => void;
   onTraderInteract?: (trader: WorldTraderInteraction) => void;
   onNearbyTraderChange?: (traderId: string | null) => void;
+  onWorkbenchInteract?: (workbench: WorldWorkbenchInteraction) => void;
+  onNearbyWorkbenchChange?: (workbenchId: string | null) => void;
   getTraderQuestMarker?: (trader: WorldTraderInteraction) => TraderQuestMarker;
   objectiveTarget?: ObjectiveTarget;
   onObjectiveArrowChange?: (state: ObjectiveArrowState) => void;
   onMinimapChange?: (snapshot: MinimapSnapshot | null) => void;
   onSkillTargetCancel?: () => void;
   onFireballCast?: (payload: { x: number; y: number }) => void;
+  onHeldConsumableUseSelf?: (payload: { itemId: 'healing_potion' }) => void;
+  onHeldConsumableThrow?: (payload: { itemId: 'healing_potion'; x: number; y: number }) => void;
   onSkillCooldownsChange?: (payload: {
     woodStaffStrike: number;
     fireball: number;
@@ -2047,7 +2103,7 @@ export function GameCanvas({
   onRaidExit?: (payload: RaidExitStateMessage) => void;
   onRoomConnected?: (payload: {
     roomName: 'world' | 'raid';
-    options?: Record<string, string | number>;
+    options?: Record<string, unknown>;
   }) => void;
   respawnRequestNonce: number;
   fireNovaCastNonce: number;
@@ -2056,6 +2112,9 @@ export function GameCanvas({
     source: 'inventory' | 'container';
     slotIndex: number;
     containerId?: string;
+    mode?: 'self' | 'throw';
+    targetX?: number;
+    targetY?: number;
     nonce: number;
   } | null;
   containerStates?: Record<string, Array<string | null>>;
@@ -2071,7 +2130,8 @@ export function GameCanvas({
   mobVisualConfig?: MobVisualConfig;
   keyboardInputEnabled?: boolean;
   activeRoomName?: 'world' | 'raid';
-  activeRoomOptions?: Record<string, string | number>;
+  activeRoomOptions?: Record<string, unknown>;
+  contentVersion?: string;
   worldMapAssetOverride?: MeadowMapAsset | null;
   worldEditorEnabled?: boolean;
   worldEditorMode?: 'tile' | 'sprite' | 'mob' | 'spawn' | 'trader';
@@ -2100,6 +2160,7 @@ export function GameCanvas({
   onWorldEditPaint?: (tileX: number, tileY: number, eraseOverlay?: boolean) => void;
   onWorldEditHoverChange?: (tile: { x: number; y: number } | null) => void;
   onWorldEditDebugChange?: (debug: { textureKey: string; textureLoaded: boolean }) => void;
+  debugCollisionEnabled?: boolean;
   locale?: 'ru' | 'en';
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -2117,6 +2178,8 @@ export function GameCanvas({
   const nearbyChestChangeRef = useRef(onNearbyChestChange);
   const traderInteractRef = useRef(onTraderInteract);
   const nearbyTraderChangeRef = useRef(onNearbyTraderChange);
+  const workbenchInteractRef = useRef(onWorkbenchInteract);
+  const nearbyWorkbenchChangeRef = useRef(onNearbyWorkbenchChange);
   const traderQuestMarkerRef = useRef(getTraderQuestMarker);
   const objectiveTargetRef = useRef(objectiveTarget);
   const objectiveArrowChangeRef = useRef(onObjectiveArrowChange);
@@ -2125,6 +2188,8 @@ export function GameCanvas({
   const mouseSkillBindingsRef = useRef(mouseSkillBindings);
   const skillTargetCancelRef = useRef(onSkillTargetCancel);
   const fireballCastRef = useRef(onFireballCast);
+  const heldConsumableUseSelfRef = useRef(onHeldConsumableUseSelf);
+  const heldConsumableThrowRef = useRef(onHeldConsumableThrow);
   const skillCooldownsChangeRef = useRef(onSkillCooldownsChange);
   const playerVitalsChangeRef = useRef(onPlayerVitalsChange);
   const playerProgressChangeRef = useRef(onPlayerProgressChange);
@@ -2132,6 +2197,7 @@ export function GameCanvas({
   const playerDeathRef = useRef(onPlayerDeath);
   const playerInventoryChangeRef = useRef(onPlayerInventoryChange);
   const consumableCooldownChangeRef = useRef(onConsumableCooldownChange);
+  const beforePlayerRespawnRef = useRef<((payload: RespawnedMessage) => void) | undefined>(undefined);
   const playerRespawnRef = useRef(onPlayerRespawn);
   const roomConnectedRef = useRef(onRoomConnected);
   const raidExitRef = useRef(onRaidExit);
@@ -2149,6 +2215,7 @@ export function GameCanvas({
   const worldEditPaintRef = useRef(onWorldEditPaint);
   const worldEditHoverChangeRef = useRef(onWorldEditHoverChange);
   const worldEditDebugChangeRef = useRef(onWorldEditDebugChange);
+  const debugCollisionEnabledRef = useRef(debugCollisionEnabled);
   const worldEditorEnabledRef = useRef(worldEditorEnabled);
   const worldEditorModeRef = useRef(worldEditorMode);
   const selectedWorldTileRef = useRef(selectedWorldTile);
@@ -2160,6 +2227,7 @@ export function GameCanvas({
   const worldMapAssetOverrideSerializedRef = useRef(JSON.stringify(worldMapAssetOverride));
   const lastNotifiedNearbyChestIdRef = useRef<string | null>(null);
   const lastNotifiedNearbyTraderIdRef = useRef<string | null>(null);
+  const lastNotifiedNearbyWorkbenchIdRef = useRef<string | null>(null);
   const lastNotifiedPlayerPositionRef = useRef<{ x: number; y: number } | null>(null);
   const lastWorldHoverTileRef = useRef<string | null>(null);
   const lastWorldEditDebugRef = useRef<string>('{"textureKey":"","textureLoaded":false}');
@@ -2167,6 +2235,8 @@ export function GameCanvas({
   const lastKnownSkillBalanceSerializedRef = useRef(JSON.stringify(skillBalanceConfig));
   const hasReceivedMobBalanceRef = useRef(false);
   const lastKnownMobBalanceSerializedRef = useRef(JSON.stringify(mobBalanceConfig));
+  const sessionTokenRef = useRef(getStoredSessionToken());
+  const contentVersionRef = useRef(contentVersion);
   const pendingRespawnNonceRef = useRef(0);
   const lastSentRespawnNonceRef = useRef(0);
   const latestProfileRef = useRef({
@@ -2180,6 +2250,8 @@ export function GameCanvas({
     playerStrength,
     playerAgility,
     playerIntellect,
+    playerGold,
+    playerQuests,
     playerRole,
     playerInventory,
   });
@@ -2203,6 +2275,14 @@ export function GameCanvas({
   useEffect(() => {
     nearbyTraderChangeRef.current = onNearbyTraderChange;
   }, [onNearbyTraderChange]);
+
+  useEffect(() => {
+    workbenchInteractRef.current = onWorkbenchInteract;
+  }, [onWorkbenchInteract]);
+
+  useEffect(() => {
+    nearbyWorkbenchChangeRef.current = onNearbyWorkbenchChange;
+  }, [onNearbyWorkbenchChange]);
 
   useEffect(() => {
     traderQuestMarkerRef.current = getTraderQuestMarker;
@@ -2235,6 +2315,14 @@ export function GameCanvas({
   useEffect(() => {
     fireballCastRef.current = onFireballCast;
   }, [onFireballCast]);
+
+  useEffect(() => {
+    heldConsumableUseSelfRef.current = onHeldConsumableUseSelf;
+  }, [onHeldConsumableUseSelf]);
+
+  useEffect(() => {
+    heldConsumableThrowRef.current = onHeldConsumableThrow;
+  }, [onHeldConsumableThrow]);
 
   useEffect(() => {
     skillCooldownsChangeRef.current = onSkillCooldownsChange;
@@ -2290,6 +2378,9 @@ export function GameCanvas({
   useEffect(() => {
     worldEditDebugChangeRef.current = onWorldEditDebugChange;
   }, [onWorldEditDebugChange]);
+  useEffect(() => {
+    debugCollisionEnabledRef.current = debugCollisionEnabled;
+  }, [debugCollisionEnabled]);
   useEffect(() => {
     worldEditorEnabledRef.current = worldEditorEnabled;
   }, [worldEditorEnabled]);
@@ -2349,6 +2440,14 @@ export function GameCanvas({
   }, [mobVisualConfig]);
 
   useEffect(() => {
+    sessionTokenRef.current = getStoredSessionToken();
+  }, [playerName]);
+
+  useEffect(() => {
+    contentVersionRef.current = contentVersion;
+  }, [contentVersion]);
+
+  useEffect(() => {
     skillBalanceConfigChangeRef.current = onSkillBalanceConfigChange;
   }, [onSkillBalanceConfigChange]);
 
@@ -2368,6 +2467,8 @@ export function GameCanvas({
       playerStrength,
       playerAgility,
       playerIntellect,
+      playerGold,
+      playerQuests,
       playerRole,
       playerInventory,
     };
@@ -2384,146 +2485,78 @@ export function GameCanvas({
     playerPosition,
     playerRole,
     playerStrength,
+    playerGold,
+    playerQuests,
   ]);
 
-  useEffect(() => {
-    const profileMessage = createWorldProfileMessage({
-      playerName,
+  const {
+    attachRoomInboundHandlers,
+    syncProjectilesFromRoom: syncProjectilesFromRoomShared,
+    syncGroundEffectsFromRoom: syncGroundEffectsFromRoomShared,
+    syncMobsFromRoom: syncMobsFromRoomShared,
+    setMobVisibility: setMobVisibilityShared,
+    syncPlayersFromRoom: syncPlayersFromRoomShared,
+    setCharacterVisibility: setCharacterVisibilityShared,
+  } = useGameCanvasRoomSync({
+    inbound: {
+      chatHistoryRef,
+      chatMessageRef,
+      hasReceivedSkillBalanceRef,
+      lastKnownSkillBalanceSerializedRef,
+      skillBalanceConfigChangeRef,
+      hasReceivedMobBalanceRef,
+      lastKnownMobBalanceSerializedRef,
+      mobBalanceConfigChangeRef,
+      playerDeathRef,
+      beforePlayerRespawnRef,
+      playerRespawnRef,
+      playerInventoryChangeRef,
+      consumableCooldownChangeRef,
+      raidExitRef,
+    },
+    outbound: {
+      activeRoomName,
       playerRole,
-      playerPosition,
-      playerHealth,
-      playerMaxHealth,
-      playerLevel,
-      playerExperience,
-      playerStrength,
-      playerAgility,
-      playerIntellect,
-      playerInventory,
-      playerEquipment,
-    });
-    roomRef.current?.send('profile', profileMessage);
-  }, [activeRoomName, playerAgility, playerEquipment, playerExperience, playerHealth, playerIntellect, playerInventory, playerLevel, playerMaxHealth, playerName, playerRole, playerStrength]);
-
-  useEffect(() => {
-    if (activeRoomName !== 'world' || !roomRef.current || playerRole !== 'admin' || !hasReceivedSkillBalanceRef.current) {
-      return;
-    }
-
-    const nextSerialized = JSON.stringify(skillBalanceConfig);
-    if (nextSerialized === lastKnownSkillBalanceSerializedRef.current) {
-      return;
-    }
-
-    lastKnownSkillBalanceSerializedRef.current = nextSerialized;
-    const updateMessage: AdminUpdateSkillBalanceMessage = skillBalanceConfig;
-    roomRef.current.send('adminUpdateSkillBalance', updateMessage);
-  }, [activeRoomName, playerRole, skillBalanceConfig]);
-
-  useEffect(() => {
-    if (activeRoomName !== 'world' || !roomRef.current || playerRole !== 'admin' || !hasReceivedMobBalanceRef.current) {
-      return;
-    }
-
-    const nextSerialized = JSON.stringify(mobBalanceConfig);
-    if (nextSerialized === lastKnownMobBalanceSerializedRef.current) {
-      return;
-    }
-
-    lastKnownMobBalanceSerializedRef.current = nextSerialized;
-    const updateMessage: AdminUpdateMobBalanceMessage = mobBalanceConfig;
-    roomRef.current.send('adminUpdateMobBalance', updateMessage);
-  }, [activeRoomName, playerRole, mobBalanceConfig]);
-
-  useEffect(() => {
-    if (!roomRef.current || !useConsumableRequest || useConsumableRequest.nonce <= 0) {
-      return;
-    }
-
-    const useConsumableMessage: UseConsumableMessage = {
-      source: useConsumableRequest.source,
-      slotIndex: useConsumableRequest.slotIndex,
-      containerId: useConsumableRequest.containerId,
-    };
-    roomRef.current.send('useConsumable', useConsumableMessage);
-  }, [useConsumableRequest]);
-
-  useEffect(() => {
-    if (!roomRef.current || !containerStates || !('chests' in roomRef.current.state)) {
-      return;
-    }
-
-    Object.entries(containerStates).forEach(([chestId, slots]) => {
-      const knownSlots = serverContainersRef.current[chestId] ?? [];
-      const nextSerialized = JSON.stringify(slots);
-      const knownSerialized = JSON.stringify(knownSlots);
-
-      if (nextSerialized === knownSerialized) {
-        return;
-      }
-
-      const syncChestMessage: SyncChestMessage = {
-        chestId,
-        slots: slots.map((itemId) => itemId ?? ''),
-      };
-      roomRef.current?.send('syncChest', syncChestMessage);
-    });
-  }, [containerStates]);
-
-  useEffect(() => {
-    if (activeRoomName !== 'world') {
-      return;
-    }
-
-    if (respawnRequestNonce <= 0) {
-      return;
-    }
-
-    pendingRespawnNonceRef.current = Math.max(pendingRespawnNonceRef.current, respawnRequestNonce);
-    if (!roomRef.current || lastSentRespawnNonceRef.current >= pendingRespawnNonceRef.current) {
-      return;
-    }
-
-    roomRef.current.send('respawn', {});
-    lastSentRespawnNonceRef.current = pendingRespawnNonceRef.current;
-  }, [activeRoomName, respawnRequestNonce]);
-
-  useEffect(() => {
-    if (fireNovaCastNonce <= 0) {
-      return;
-    }
-
-    const castSkillMessage = createTimedCastSkillMessage(
-      { skillId: 'fireNova' },
-      estimatedOneWayLatencyMsRef.current,
-    );
-    roomRef.current?.send('castSkill', castSkillMessage);
-  }, [activeRoomName, fireNovaCastNonce]);
-
-  useEffect(() => {
-    if (woodStaffStrikeCastNonce <= 0) {
-      return;
-    }
-
-    if (!roomRef.current) {
-      return;
-    }
-
-    const now = Date.now();
-    if ((skillCooldownsRef.current.woodStaffStrike ?? 0) > now) {
-      return;
-    }
-
-    const target = lastPointerWorldRef.current;
-    const castSkillMessage = createTimedCastSkillMessage(
-      {
-        skillId: 'woodStaffStrike',
-        targetX: target.x,
-        targetY: target.y,
+      playerProfile: {
+        playerName,
+        playerRole,
+        playerPosition,
+        playerHealth,
+        playerMaxHealth,
+        playerLevel,
+        playerExperience,
+        playerStrength,
+        playerAgility,
+        playerIntellect,
+        playerGold,
+        playerQuests,
+        playerInventory,
+        playerEquipment,
       },
-      estimatedOneWayLatencyMsRef.current,
-    );
-    roomRef.current.send('castSkill', castSkillMessage);
-  }, [activeRoomName, woodStaffStrikeCastNonce]);
+      roomRef,
+      skillBalanceConfig,
+      mobBalanceConfig,
+      hasReceivedSkillBalanceRef,
+      lastKnownSkillBalanceSerializedRef,
+      hasReceivedMobBalanceRef,
+      lastKnownMobBalanceSerializedRef,
+      useConsumableRequest,
+      containerStates,
+      serverContainersRef,
+      respawnRequestNonce,
+      pendingRespawnNonceRef,
+      lastSentRespawnNonceRef,
+      fireNovaCastNonce,
+      woodStaffStrikeCastNonce,
+      sessionTokenRef,
+      contentVersionRef,
+      estimatedOneWayLatencyMsRef,
+      lastPointerWorldRef,
+      skillCooldownsRef,
+      createWorldProfileMessage,
+      createTimedCastSkillMessage,
+    },
+  });
 
   useEffect(() => {
     let game: PhaserGame | null = null;
@@ -2570,6 +2603,7 @@ export function GameCanvas({
             : await loadWorldMapAsset();
       const meadowMap = createMeadowMapFromAsset(meadowAsset);
       const meadowDecorations = createMeadowDecorationsFromAsset(meadowAsset);
+      const meadowStamps = createMeadowStampsFromAsset(meadowAsset);
       const equipmentItems = Object.values(EQUIPMENT_ITEMS);
       const tileSize = meadowMap.tileSize;
       const raidWidth = Math.max(12, Number(activeRoomOptions?.width) || 30);
@@ -2620,6 +2654,18 @@ export function GameCanvas({
           this.load.image(TRADER_BODY_TEXTURE_KEY, '/sprites/characters/body-torso-8x8.png');
           Object.values(PLAYER_ANIMATIONS).forEach((animation) => {
             loadSpriteSheetAnimation(this, animation);
+          });
+          const loadedEquipmentAnimationKeys = new Set<string>();
+          BODY_EQUIPMENT_IDS.forEach((itemId) => {
+            const visual = getEquipmentVisual(itemId);
+            Object.values(visual?.animations ?? {}).forEach((clip) => {
+              if (!clip || loadedEquipmentAnimationKeys.has(clip.textureKey)) {
+                return;
+              }
+
+              loadedEquipmentAnimationKeys.add(clip.textureKey);
+              loadSpriteSheetAnimation(this, toPlayerAnimationFromEquipmentClip(clip));
+            });
           });
           loadSpriteSheetAnimation(this, SHARED_DEATH_ANIMATION);
           this.load.spritesheet('skeleton', '/npc/skeleton/skeleton.png', {
@@ -2695,8 +2741,9 @@ export function GameCanvas({
                 ? []
                 : [{
                   x: mob.sprite.x,
-                  y: mob.sprite.y,
-                  radius: 22,
+                  y: getPlayerMobCollisionCenterY(mob.sprite.y),
+                  halfWidth: WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth,
+                  halfHeight: WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight,
                 }],
             );
           const completedDeadPlayerIds = new Set<string>();
@@ -2722,6 +2769,7 @@ export function GameCanvas({
           const worldStampSpritesByTile = new Map<string, Phaser.GameObjects.Image>();
           const worldMobVisuals = new Map<string, WorldMobVisual>();
           const worldTraderVisuals = new Map<string, WorldTraderVisual>();
+          const collisionDebugGraphics = this.add.graphics().setDepth(DEBUG_COLLISION_OVERLAY_DEPTH);
           const worldTradersById = new Map<string, MeadowTraderAsset>();
           const pendingWorldTextureKeys = new Set<string>();
           const pendingWorldTraderSheetKeys = new Set<string>();
@@ -2739,15 +2787,12 @@ export function GameCanvas({
           let previousInput = '0:0';
           let lastLookX = 0;
           let lastLookY = 1;
-          let lastMinimapPlayerTileKey = '';
-          let lastRaidMinimapVisionKey = '';
           let lastRaidTilesWidth = 0;
           let lastRaidTilesHeight = 0;
           let lastRaidVisibilityRenderKey = '';
           let lastRaidVisibilityUpdateAt = 0;
           let lastRaidObjectVisibilityUpdateAt = 0;
-          let lastRaidMinimapUpdateAt = 0;
-          let latencyPingIntervalId: ReturnType<typeof window.setInterval> | null = null;
+          let latencyPingIntervalId: number | null = null;
           let nextRaidInputSequence = 1;
           let lastProcessedRaidInput = 0;
           let pendingRaidInputs: PendingRaidInputSample[] = [];
@@ -2789,15 +2834,69 @@ export function GameCanvas({
           };
           let lastSyncedPositionX = latestProfileRef.current.playerPosition.x;
           let lastSyncedPositionY = latestProfileRef.current.playerPosition.y;
+          beforePlayerRespawnRef.current = ({ x, y }) => {
+            pendingRaidInputs = [];
+            pendingWorldInputs = [];
+            lastProcessedRaidInput = 0;
+            lastProcessedWorldInput = 0;
+            movementSimulationAccumulatorMs = 0;
+            previousInput = '0:0';
+            lastSyncedPositionX = x;
+            lastSyncedPositionY = y;
+            lastPositionSyncAt = this.time.now;
+
+            if (!localSessionId) {
+              return;
+            }
+
+            const localCharacter = characters.get(localSessionId);
+            if (!localCharacter) {
+              return;
+            }
+
+            localCharacter.simPrevX = x;
+            localCharacter.simPrevY = y;
+            localCharacter.simX = x;
+            localCharacter.simY = y;
+            localCharacter.simErrorX = 0;
+            localCharacter.simErrorY = 0;
+            localCharacter.targetX = x;
+            localCharacter.targetY = y;
+            localCharacter.container.setPosition(x, y);
+          };
+          const movementState = {
+            getPendingRaidInputs: () => pendingRaidInputs,
+            setPendingRaidInputs: (next: PendingRaidInputSample[]) => {
+              pendingRaidInputs = next;
+            },
+            getPendingWorldInputs: () => pendingWorldInputs,
+            setPendingWorldInputs: (next: PendingWorldInputSample[]) => {
+              pendingWorldInputs = next;
+            },
+            getLastProcessedRaidInput: () => lastProcessedRaidInput,
+            setLastProcessedRaidInput: (value: number) => {
+              lastProcessedRaidInput = value;
+            },
+            getLastProcessedWorldInput: () => lastProcessedWorldInput,
+            setLastProcessedWorldInput: (value: number) => {
+              lastProcessedWorldInput = value;
+            },
+          };
+          const positionSyncState = {
+            setLastSyncedPosition: (x: number, y: number, at: number) => {
+              lastSyncedPositionX = x;
+              lastSyncedPositionY = y;
+              lastPositionSyncAt = at;
+            },
+          };
           let canOpenChest = false;
           let interactableChestId: string | null = null;
           let canInteractWithTrader = false;
           let interactableTraderId: string | null = null;
+          let canInteractWithWorkbench = false;
+          let interactableWorkbenchId: string | null = null;
           let canUseRaidExit = false;
           let interactableRaidExitId: string | null = null;
-          let worldEditPointerActive = false;
-          let worldEditEraseMode = false;
-          let lastWorldEditedTileKey = '';
           const statusText = this.add
             .text(24, 118, isRaidScene ? 'Connecting to raid...' : 'Connecting to world...', {
               color: '#d7efc9',
@@ -2922,6 +3021,21 @@ export function GameCanvas({
             worldEditTraderRightEye,
             worldEditTraderHeadLayer,
           ]);
+          const worldEditorInput = createWorldEditorInputHandler({
+            scene: this,
+            camera,
+            tileSize,
+            meadowWidth: meadowMap.width,
+            meadowHeight: meadowMap.height,
+            isRaidScene,
+            worldEditorEnabledRef,
+            worldEditorModeRef,
+            selectedWorldSpriteRef,
+            worldEditPaintRef,
+            worldStampSprites,
+            worldStampSpritesByTile,
+            getWorldStampTextureKey,
+          });
           const castRangeIndicator = this.add
             .circle(0, 0, STAFF_CAST_RANGE, 0xffb15a, 0.05)
             .setStrokeStyle(2, 0xffd59a, 0.35)
@@ -2939,74 +3053,23 @@ export function GameCanvas({
           const mapHeight = (isRaidScene ? raidHeight : meadowMap.height) * tileSize;
           const meadowMinimapTiles = meadowMap.tiles.flatMap((row, y) =>
             row.map((tile, x) => {
-              if (isBlockedMeadowTile(meadowMap, meadowDecorations, x, y)) {
+              if (isBlockedMeadowTile(meadowDecorations, meadowStamps, x, y)) {
                 return 'blocked';
               }
 
               return tile;
             }),
           );
-
-          const emitLobbyMinimapSnapshot = (playerWorldX: number, playerWorldY: number) => {
-            const playerTileX = Math.max(0, Math.min(meadowMap.width - 1, Math.floor(playerWorldX / tileSize)));
-            const playerTileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(playerWorldY / tileSize)));
-            const playerTileKey = `${playerTileX}:${playerTileY}`;
-
-            if (playerTileKey === lastMinimapPlayerTileKey) {
-              return;
-            }
-
-            lastMinimapPlayerTileKey = playerTileKey;
-            minimapChangeRef.current?.({
-              roomName: 'world',
-              width: meadowMap.width,
-              height: meadowMap.height,
-              tiles: meadowMinimapTiles,
-              explored: meadowMinimapTiles.map((_, index) => index),
-              visible: meadowMinimapTiles.map((_, index) => index),
-              playerTile: {
-                x: playerTileX,
-                y: playerTileY,
-              },
-            });
-          };
-
-          const emitRaidMinimapSnapshot = (
-            playerTileX: number,
-            playerTileY: number,
-            width: number,
-            height: number,
-            tiles: string[],
-            visionKey: string,
-            now: number,
-            force = false,
-          ) => {
-            if (!force && now - lastRaidMinimapUpdateAt < RAID_MINIMAP_UPDATE_INTERVAL_MS) {
-              return;
-            }
-            if (visionKey === lastRaidMinimapVisionKey) {
-              return;
-            }
-
-            const explored = Array.from(exploredRaidTiles.values()).sort((left, right) => left - right);
-            const visible = Array.from(visibleRaidTiles.values()).sort((left, right) => left - right);
-            const playerTileKey = `${playerTileX}:${playerTileY}`;
-            lastRaidMinimapVisionKey = visionKey;
-            lastRaidMinimapUpdateAt = now;
-            lastMinimapPlayerTileKey = playerTileKey;
-            minimapChangeRef.current?.({
-              roomName: 'raid',
-              width,
-              height,
-              tiles: [...tiles],
-              explored,
-              visible,
-              playerTile: {
-                x: playerTileX,
-                y: playerTileY,
-              },
-            });
-          };
+          const minimapEmitter = createMinimapEmitter({
+            tileSize,
+            meadowWidth: meadowMap.width,
+            meadowHeight: meadowMap.height,
+            meadowTiles: meadowMinimapTiles,
+            raidMinimapUpdateIntervalMs: RAID_MINIMAP_UPDATE_INTERVAL_MS,
+            onMinimapChange: (snapshot) => {
+              minimapChangeRef.current?.(snapshot);
+            },
+          });
           camera.setBackgroundColor(isRaidScene ? '#1d1a16' : '#6fbe4a');
           camera.setBounds(0, 0, mapWidth, mapHeight);
           camera.setZoom(2.25);
@@ -3039,7 +3102,10 @@ export function GameCanvas({
           };
 
           const ensureWorldTraderBodyOverlayLoaded = (texturePath: string) => {
-            const overlayAnimation = getWorldTraderBodyOverlayAnimation(texturePath);
+            const overlayAnimation = getWorldTraderBodyOverlayAnimation(
+              texturePath,
+              PLAYER_ANIMATIONS.idle,
+            );
             if (!overlayAnimation) {
               return ensureWorldTextureLoaded(texturePath);
             }
@@ -3252,7 +3318,8 @@ export function GameCanvas({
                   (trader.headItemId ? getEquipmentBodyTexturePath(trader.headItemId) : undefined) ??
                   trader.headTexturePath ??
                   '';
-                bodyOverlayAnimation = getWorldTraderBodyOverlayAnimation(resolvedBodyTexturePath) ?? undefined;
+                bodyOverlayAnimation =
+                  getWorldTraderBodyOverlayAnimation(resolvedBodyTexturePath, PLAYER_ANIMATIONS.idle) ?? undefined;
                 const bodyTextureKey = resolvedBodyTexturePath
                   ? bodyOverlayAnimation
                     ? ensureWorldTraderBodyOverlayLoaded(resolvedBodyTexturePath)
@@ -3728,9 +3795,9 @@ export function GameCanvas({
               .setOrigin(0, 0.5)
               .setDepth(6.2)
               .setVisible(false);
-            const healthSegments = Array.from({ length: 10 }, (_, index) =>
+            const healthSegments = Array.from({ length: MAX_HEALTH_BAR_SEGMENTS }, () =>
               this.add
-                .rectangle(x - 10.8 + index * 2.4, y + 22, 2, 4, 0xef4444, 1)
+                .rectangle(x, y + 22, 2, 4, 0xef4444, 1)
                 .setOrigin(0.5)
                 .setDepth(7),
             );
@@ -3786,6 +3853,7 @@ export function GameCanvas({
               castBarFill,
               healthText,
               healthSegments,
+              currentHealthSegmentCount: 1,
               targetX: x,
               targetY: y,
               lastX: x,
@@ -3944,9 +4012,9 @@ export function GameCanvas({
               .setOrigin(0, 0.5)
               .setDepth(6.2)
               .setVisible(false);
-            const healthSegments = Array.from({ length: 10 }, (_, index) =>
+            const healthSegments = Array.from({ length: MAX_HEALTH_BAR_SEGMENTS }, () =>
               this.add
-                .rectangle(x - 10.8 + index * 2.4, y + 22, 2, 4, 0xef4444, 1)
+                .rectangle(x, y + 22, 2, 4, 0xef4444, 1)
                 .setOrigin(0.5)
                 .setDepth(7),
             );
@@ -3985,6 +4053,7 @@ export function GameCanvas({
               castBarFill,
               healthText,
               healthSegments,
+              currentHealthSegmentCount: 1,
               targetX: x,
               targetY: y,
               lastX: x,
@@ -4085,6 +4154,7 @@ export function GameCanvas({
           };
 
           const updateCharacterPose = (
+            sessionId: string,
             character: CharacterVisual,
             isMoving: boolean,
             deltaSeconds: number,
@@ -4100,7 +4170,9 @@ export function GameCanvas({
             syncAnimationState(character, nextAnimationState, now);
 
             const bodyAnimation =
-              PLAYER_ANIMATIONS[character.currentAnimationState] ?? PLAYER_ANIMATIONS.idle;
+              getBodyAnimationForEquipment(character.currentBodyItem, character.currentAnimationState) ??
+              PLAYER_ANIMATIONS[character.currentAnimationState] ??
+              PLAYER_ANIMATIONS.idle;
             if (bodyAnimation) {
               const bodyFrame = getAnimationFrameAtState(bodyAnimation, character, now);
               if (
@@ -4147,8 +4219,24 @@ export function GameCanvas({
             let swingOffsetX = 0;
             let swingOffsetY = 0;
             let swingAngleDeg = 0;
+            let handAimAngleDeg = 0;
+            let swingAimAngleRad = character.facingX < 0 ? Math.PI : 0;
             let isSwinging = false;
             let swingProgress = 0;
+            let swingTrailStart = 0;
+            let swingTrailEnd = 1;
+            if (swingTarget) {
+              const dx = swingTarget.x - character.container.x;
+              const dy = swingTarget.y - character.container.y;
+              const length = Math.hypot(dx, dy);
+              if (length > 0.001) {
+                handAimAngleDeg = Math.atan2(dy, dx) * (180 / Math.PI);
+                swingAimAngleRad = Math.atan2(dy, dx);
+                if (character.facingX < 0) {
+                  handAimAngleDeg = 180 - handAimAngleDeg;
+                }
+              }
+            }
             if (
               character.currentCastingSkillId === 'woodStaffStrike' &&
               character.currentWeaponItem === WOOD_STAFF_ITEM_ID &&
@@ -4161,14 +4249,23 @@ export function GameCanvas({
                 0,
                 1,
               );
-              const windupCutoff = 0.3;
-              const strikeCutoff = 0.7;
-              const windupDist = 18;
-              const strikeDist = 34;
-              const windupLift = 32;
-              const strikeDrop = 2;
-              const windupAngleOffset = -90;
-              const strikeAngleOffset = 50;
+              const windupCutoff = 0.25;
+              const strikeCutoff = 0.6;
+              swingTrailStart = windupCutoff;
+              swingTrailEnd = strikeCutoff;
+              const windupDist = 12;
+              const strikeDist = 32;
+              const windupLift = 26;
+              const strikeDrop = 1;
+              const strikeDistUpY = 40;
+              const strikeDistDownY = 22;
+              const windupAngleOffset = -70;
+              const coneHalfAngle = 45;
+              const strikeImpactAngleBoost = 24;
+              const staffTiltDeg = -8;
+              const handConeHalfAngle = 22;
+              const handImpactAngleBoost = 6;
+              const handWindupAngleOffset = -35;
               let dirX = 1;
               let dirY = 0;
               if (swingTarget) {
@@ -4180,34 +4277,64 @@ export function GameCanvas({
                   dirY = dy / length;
                 }
               }
-              const aimAngle = Math.atan2(dirY, dirX) * (180 / Math.PI);
+              const aimAngleRad = Math.atan2(dirY, dirX);
+              const aimAngleDeg = aimAngleRad * (180 / Math.PI);
+              const strikeDistY =
+                dirY < -0.1
+                  ? strikeDistUpY
+                  : dirY > 0.1
+                    ? strikeDistDownY
+                    : strikeDist;
 
               if (swingProgress < windupCutoff) {
                 const t = Math.sin((swingProgress / windupCutoff) * Math.PI * 0.5);
-                swingOffsetX = -dirX * windupDist * t;
-                swingOffsetY = -dirY * windupDist * t - windupLift * t;
-                swingAngleDeg = aimAngle + windupAngleOffset * t;
+                const handAngleRad =
+                  aimAngleRad + (handWindupAngleOffset * (Math.PI / 180)) * t;
+                const handRadius = Phaser.Math.Linear(0, windupDist, t);
+                swingOffsetX = Math.cos(handAngleRad) * handRadius;
+                swingOffsetY = Math.sin(handAngleRad) * handRadius - windupLift * t;
+                swingAngleDeg = aimAngleDeg + windupAngleOffset * t + staffTiltDeg;
               } else if (swingProgress < strikeCutoff) {
                 const t = Math.sin(((swingProgress - windupCutoff) / (strikeCutoff - windupCutoff)) * Math.PI * 0.5);
-                swingOffsetX = Phaser.Math.Linear(-dirX * windupDist, dirX * strikeDist, t);
-                swingOffsetY = Phaser.Math.Linear(-dirY * windupDist - windupLift, dirY * strikeDist + strikeDrop, t);
-                swingAngleDeg = Phaser.Math.Linear(aimAngle + windupAngleOffset, aimAngle + strikeAngleOffset, t);
+                const forwardBlend = 1 - Math.min(1, Math.abs(dirY) / 0.35);
+                const handConeSpan = Phaser.Math.Linear(handConeHalfAngle * 0.5, handConeHalfAngle, 1 - forwardBlend);
+                const handAngleRad = aimAngleRad + Phaser.Math.Linear(-handConeSpan, handConeSpan, t) * (Math.PI / 180);
+                const handRadius = Phaser.Math.Linear(windupDist, strikeDistY, t);
+                swingOffsetX = Math.cos(handAngleRad) * handRadius;
+                swingOffsetY = Math.sin(handAngleRad) * handRadius + strikeDrop;
+                swingAngleDeg = Phaser.Math.Linear(
+                  aimAngleDeg + windupAngleOffset,
+                  aimAngleDeg + coneHalfAngle + strikeImpactAngleBoost,
+                  t,
+                ) + staffTiltDeg;
               } else {
                 const t = Math.sin(((swingProgress - strikeCutoff) / (1 - strikeCutoff)) * Math.PI * 0.5);
-                swingOffsetX = Phaser.Math.Linear(dirX * strikeDist, 0, t);
-                swingOffsetY = Phaser.Math.Linear(dirY * strikeDist + strikeDrop, 0, t);
-                swingAngleDeg = Phaser.Math.Linear(aimAngle + strikeAngleOffset, 0, t);
+                const handAngleRad =
+                  aimAngleRad +
+                  Phaser.Math.Linear(handConeHalfAngle + handImpactAngleBoost, 0, t) * (Math.PI / 180);
+                const handRadius = Phaser.Math.Linear(strikeDistY, 0, t);
+                swingOffsetX = Math.cos(handAngleRad) * handRadius;
+                swingOffsetY = Math.sin(handAngleRad) * handRadius + Phaser.Math.Linear(strikeDrop, 0, t);
+                swingAngleDeg = Phaser.Math.Linear(
+                  aimAngleDeg + coneHalfAngle + strikeImpactAngleBoost,
+                  aimAngleDeg,
+                  t,
+                ) + staffTiltDeg;
               }
             }
 
             if (holdingHand === 'left') {
               character.leftHand.x = leftHandPosition.x + swingOffsetX;
               character.leftHand.y = leftHandPosition.y + swingOffsetY;
+              character.leftHand.setAngle(handAimAngleDeg);
+              character.rightHand.setAngle(0);
               character.rightHand.x = rightHandPosition.x;
               character.rightHand.y = rightHandPosition.y;
             } else {
               character.rightHand.x = rightHandPosition.x + swingOffsetX;
               character.rightHand.y = rightHandPosition.y + swingOffsetY;
+              character.rightHand.setAngle(handAimAngleDeg);
+              character.leftHand.setAngle(0);
               character.leftHand.x = leftHandPosition.x;
               character.leftHand.y = leftHandPosition.y;
             }
@@ -4229,7 +4356,10 @@ export function GameCanvas({
               { x: character.leftHand.x, y: character.leftHand.y },
               { x: character.rightHand.x, y: character.rightHand.y },
             );
-            const heldCastItemId = getHeldCastConsumableItemId(character);
+            const heldCastItemId =
+              sessionId === localSessionId
+                ? getHeldTargetingConsumableItemId(activeSkillTargetingRef.current) ?? getHeldCastConsumableItemId(character)
+                : getHeldCastConsumableItemId(character);
             const heldCastItem = heldCastItemId ? EQUIPMENT_ITEMS[heldCastItemId] : undefined;
             const showHeldCastItem = Boolean(heldCastItem);
             const showWeapon = Boolean(character.currentWeaponItem) && !showHeldCastItem;
@@ -4263,59 +4393,47 @@ export function GameCanvas({
 
             const trailPoints = character.swingTrailPoints;
             const swingTrail = character.swingTrail;
-            const trailDurationMs = 220;
-            const maxTrailPoints = 14;
             if (!showWeapon) {
               trailPoints.length = 0;
               swingTrail.clear();
               swingTrail.setVisible(false);
             } else {
-              if (isSwinging) {
-                const weaponTipLength = Math.max(6, character.weaponItem.displayHeight * 0.46);
-                const weaponRotation = character.weaponItem.rotation;
-                const tipX = character.weaponItem.x + Math.sin(weaponRotation) * weaponTipLength;
-                const tipY = character.weaponItem.y - Math.cos(weaponRotation) * weaponTipLength;
-                const lastPoint = trailPoints[trailPoints.length - 1];
-                const distance = lastPoint ? Math.hypot(tipX - lastPoint.x, tipY - lastPoint.y) : 999;
-                if (!lastPoint || distance > 1.4 || castNow - lastPoint.time > 40) {
-                  trailPoints.push({ x: tipX, y: tipY, time: castNow });
-                  if (trailPoints.length > maxTrailPoints) {
-                    trailPoints.shift();
-                  }
-                }
-              }
+              if (isSwinging && swingProgress >= swingTrailStart && swingProgress <= swingTrailEnd) {
+                const profile = isRaidScene ? RAID_GAMEPLAY_PROFILE : WORLD_GAMEPLAY_PROFILE;
+                const originX = 0;
+                const originY = -profile.playerHitRadius + profile.meleeStrikeOriginOffsetY;
+                const trailAimAngle =
+                  character.facingX < 0 ? Math.PI - swingAimAngleRad : swingAimAngleRad;
+                const startAngle = trailAimAngle - profile.meleeStrikeArcHalfAngleRad;
+                const endAngle = trailAimAngle + profile.meleeStrikeArcHalfAngleRad;
+                const phaseT = Phaser.Math.Clamp(
+                  (swingProgress - swingTrailStart) / Math.max(0.001, swingTrailEnd - swingTrailStart),
+                  0,
+                  1,
+                );
+                const fade = Math.sin(phaseT * Math.PI);
+                const sweepAngle = Phaser.Math.Linear(startAngle, endAngle, phaseT);
 
-              while (trailPoints.length > 0 && castNow - trailPoints[0].time > trailDurationMs) {
-                trailPoints.shift();
-              }
-
-              if (trailPoints.length < 2) {
-                swingTrail.clear();
-                swingTrail.setVisible(false);
-              } else {
+                trailPoints.length = 0;
                 swingTrail.clear();
                 swingTrail.setVisible(true);
-                const trailBoost = Phaser.Math.Clamp((swingProgress - 0.1) / 0.9, 0.35, 1);
-                for (let index = 1; index < trailPoints.length; index += 1) {
-                  const from = trailPoints[index - 1];
-                  const to = trailPoints[index];
-                  const age = Phaser.Math.Clamp((castNow - from.time) / trailDurationMs, 0, 1);
-                  const fade = (1 - age) * trailBoost;
-                  const outerWidth = Phaser.Math.Linear(9, 2, age);
-                  const innerWidth = Math.max(1.6, outerWidth * 0.55);
-                  const outerAlpha = 0.2 * fade;
-                  const innerAlpha = 0.55 * fade;
-                  swingTrail.lineStyle(outerWidth, 0xf0c27b, outerAlpha);
-                  swingTrail.beginPath();
-                  swingTrail.moveTo(from.x, from.y);
-                  swingTrail.lineTo(to.x, to.y);
-                  swingTrail.strokePath();
-                  swingTrail.lineStyle(innerWidth, 0xffe6b5, innerAlpha);
-                  swingTrail.beginPath();
-                  swingTrail.moveTo(from.x, from.y);
-                  swingTrail.lineTo(to.x, to.y);
-                  swingTrail.strokePath();
-                }
+                const radius = Math.max(8, profile.meleeStrikeRange);
+                const tipX = originX + Math.cos(sweepAngle) * radius;
+                const tipY = originY + Math.sin(sweepAngle) * radius;
+                swingTrail.lineStyle(18, 0xffe6b5, 0.55 * fade);
+                swingTrail.beginPath();
+                swingTrail.moveTo(originX, originY);
+                swingTrail.lineTo(tipX, tipY);
+                swingTrail.strokePath();
+                swingTrail.lineStyle(8, 0xffd089, 0.7 * fade);
+                swingTrail.beginPath();
+                swingTrail.moveTo(originX, originY);
+                swingTrail.lineTo(tipX, tipY);
+                swingTrail.strokePath();
+              } else {
+                trailPoints.length = 0;
+                swingTrail.clear();
+                swingTrail.setVisible(false);
               }
             }
             character.castItem.x = 10 + character.currentWeaponOffsetX;
@@ -4365,6 +4483,8 @@ export function GameCanvas({
             } else {
               character.body.clearTint();
               character.head.clearTint();
+              character.leftHand.clearTint();
+              character.rightHand.clearTint();
             }
             character.head.x = DEFAULT_PLAYER_VISUALS.head.offsetX;
             character.head.y = DEFAULT_PLAYER_VISUALS.head.offsetY + headAnimationOffsetY;
@@ -4389,7 +4509,14 @@ export function GameCanvas({
               return;
             }
             const resolvedTarget = localCharacter
-              ? clampTargetToCastRange(latestProfileRef.current.playerEquipment, localCharacter.container.x, localCharacter.container.y, targetX, targetY)
+              ? clampTargetToCastRange(
+                  latestProfileRef.current.playerEquipment,
+                  localCharacter.container.x,
+                  localCharacter.container.y,
+                  targetX,
+                  targetY,
+                  CAST_HELPERS_CONFIG,
+                )
               : { x: targetX, y: targetY, clamped: false };
             const castSkillMessage = createTimedCastSkillMessage(
               {
@@ -4403,7 +4530,10 @@ export function GameCanvas({
 
             if (localCharacter) {
               const castStartedAt = Date.now();
-              const castTimeMs = getCharacterCastTimeMs(latestProfileRef.current.playerEquipment);
+              const castTimeMs = getCharacterCastTimeMs(
+                latestProfileRef.current.playerEquipment,
+                CAST_HELPERS_CONFIG,
+              );
               if (castTimeMs > 0) {
                 applyCastingToCharacterVisual(
                   localCharacter,
@@ -4452,7 +4582,14 @@ export function GameCanvas({
               return;
             }
             const resolvedTarget = localCharacter
-              ? clampTargetToCastRange(latestProfileRef.current.playerEquipment, localCharacter.container.x, localCharacter.container.y, targetX, targetY)
+              ? clampTargetToCastRange(
+                  latestProfileRef.current.playerEquipment,
+                  localCharacter.container.x,
+                  localCharacter.container.y,
+                  targetX,
+                  targetY,
+                  CAST_HELPERS_CONFIG,
+                )
               : { x: targetX, y: targetY, clamped: false };
 
             const castSkillMessage = createTimedCastSkillMessage(
@@ -4486,7 +4623,10 @@ export function GameCanvas({
           };
 
           const castWoodStaffStrike = (targetX: number, targetY: number) => {
-            if (!roomRef.current || !hasWoodStaffEquipped(latestProfileRef.current.playerEquipment)) {
+            if (
+              !roomRef.current ||
+              !hasWoodStaffEquipped(latestProfileRef.current.playerEquipment, CAST_HELPERS_CONFIG)
+            ) {
               return;
             }
 
@@ -4531,66 +4671,45 @@ export function GameCanvas({
           this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
             const { isLeftButton, isRightButton } = resolvePointerButtons(pointer);
             const mouseSlotKey = resolveMouseActionSlotKey(isLeftButton, isRightButton);
+            const currentTargeting = activeSkillTargetingRef.current;
 
-            if (!isRaidScene && worldEditorEnabledRef.current) {
-              const activeElement = document.activeElement;
-              if (activeElement instanceof HTMLElement) {
-                activeElement.blur();
-              }
-              const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-              const tileX = Math.max(0, Math.min(meadowMap.width - 1, Math.floor(worldPoint.x / tileSize)));
-              const tileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(worldPoint.y / tileSize)));
-              const currentEditorMode = worldEditorModeRef.current;
-              const canEraseWorldEdit =
-                currentEditorMode === 'sprite' || currentEditorMode === 'trader' || currentEditorMode === 'mob';
-
-              if (mouseSlotKey) {
-                pointer.event?.preventDefault();
-                worldEditPointerActive = true;
-                worldEditEraseMode = mouseSlotKey === 'RMB' && canEraseWorldEdit;
-                lastWorldEditedTileKey = `${tileX}:${tileY}:${worldEditEraseMode ? 'erase' : 'paint'}`;
-                worldEditPaintRef.current?.(tileX, tileY, mouseSlotKey === 'RMB' && canEraseWorldEdit);
-
-                if (currentEditorMode === 'sprite') {
-                  const tileKey = `${tileX}:${tileY}`;
-                  if (mouseSlotKey === 'RMB') {
-                    const existingSprite = worldStampSpritesByTile.get(tileKey);
-                    if (existingSprite) {
-                      const existingIndex = worldStampSprites.indexOf(existingSprite);
-                      if (existingIndex >= 0) {
-                        worldStampSprites.splice(existingIndex, 1);
-                      }
-                      existingSprite.destroy();
-                      worldStampSpritesByTile.delete(tileKey);
-                    }
-                  } else {
-                    const currentSelectedWorldSprite = selectedWorldSpriteRef.current;
-                    const previewTextureKey = getWorldStampTextureKey(currentSelectedWorldSprite.texturePath);
-                    if (currentSelectedWorldSprite.texturePath && this.textures.exists(previewTextureKey)) {
-                      const existingSprite = worldStampSpritesByTile.get(tileKey);
-                      if (existingSprite) {
-                        const existingIndex = worldStampSprites.indexOf(existingSprite);
-                        if (existingIndex >= 0) {
-                          worldStampSprites.splice(existingIndex, 1);
-                        }
-                        existingSprite.destroy();
-                      }
-                      const worldX = tileX * tileSize + tileSize / 2;
-                      const worldY = tileY * tileSize + tileSize / 2;
-                      const stampSprite = this.add
-                        .image(worldX, worldY, previewTextureKey)
-                        .setDisplaySize(tileSize * currentSelectedWorldSprite.scale, tileSize * currentSelectedWorldSprite.scale)
-                        .setAngle(currentSelectedWorldSprite.rotation)
-                        .setFlipX(currentSelectedWorldSprite.flipX)
-                        .setOrigin(0.5)
-                        .setDepth(1.5);
-                      worldStampSprites.push(stampSprite);
-                      worldStampSpritesByTile.set(tileKey, stampSprite);
-                    }
-                  }
-                }
-              }
+            if (worldEditorInput.handlePointerDown(pointer, mouseSlotKey)) {
               return;
+            }
+
+            if (currentTargeting) {
+              const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
+
+              if (currentTargeting.type === 'consumable') {
+                pointer.event?.preventDefault();
+                if (mouseSlotKey === 'LMB') {
+                  heldConsumableUseSelfRef.current?.({ itemId: currentTargeting.itemId });
+                } else if (mouseSlotKey === 'RMB') {
+                  heldConsumableThrowRef.current?.({
+                    itemId: currentTargeting.itemId,
+                    x: worldPoint.x,
+                    y: worldPoint.y,
+                  });
+                }
+                return;
+              }
+
+              if (mouseSlotKey === 'RMB') {
+                pointer.event?.preventDefault();
+                skillTargetCancelRef.current?.();
+                return;
+              }
+
+              if (mouseSlotKey === 'LMB') {
+                pointer.event?.preventDefault();
+                if (currentTargeting.skillId === 'fireball') {
+                  castFireball(worldPoint.x, worldPoint.y);
+                } else if (currentTargeting.skillId === 'fireField') {
+                  castFireField(worldPoint.x, worldPoint.y);
+                }
+                skillTargetCancelRef.current?.();
+                return;
+              }
             }
 
             if (mouseSlotKey) {
@@ -4603,322 +4722,58 @@ export function GameCanvas({
               }
             }
 
-            if (!activeSkillTargetingRef.current) {
-              if (mouseSlotKey === 'LMB') {
-                pointer.event?.preventDefault();
-                const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-                castWoodStaffStrike(worldPoint.x, worldPoint.y);
-              }
-              return;
-            }
-
-            const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-
-            if (mouseSlotKey === 'RMB') {
-              pointer.event?.preventDefault();
-              skillTargetCancelRef.current?.();
-              return;
-            }
-
-            if (mouseSlotKey === 'LMB') {
-              pointer.event?.preventDefault();
-              if (activeSkillTargetingRef.current === 'fireball') {
-                castFireball(worldPoint.x, worldPoint.y);
-              } else if (activeSkillTargetingRef.current === 'fireField') {
-                castFireField(worldPoint.x, worldPoint.y);
-              }
-              skillTargetCancelRef.current?.();
-            }
           });
 
           this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
-            if (!worldEditPointerActive || isRaidScene || !worldEditorEnabledRef.current) {
-              return;
-            }
-
-            const worldPoint = camera.getWorldPoint(pointer.x, pointer.y);
-            const tileX = Math.max(0, Math.min(meadowMap.width - 1, Math.floor(worldPoint.x / tileSize)));
-            const tileY = Math.max(0, Math.min(meadowMap.height - 1, Math.floor(worldPoint.y / tileSize)));
-            const tileKey = `${tileX}:${tileY}:${worldEditEraseMode ? 'erase' : 'paint'}`;
-            if (tileKey === lastWorldEditedTileKey) {
-              return;
-            }
-
-            lastWorldEditedTileKey = tileKey;
-            worldEditPaintRef.current?.(tileX, tileY, worldEditEraseMode);
-
-            if (worldEditorModeRef.current === 'sprite') {
-              const mapTileKey = `${tileX}:${tileY}`;
-              if (worldEditEraseMode) {
-                const existingSprite = worldStampSpritesByTile.get(mapTileKey);
-                if (existingSprite) {
-                  const existingIndex = worldStampSprites.indexOf(existingSprite);
-                  if (existingIndex >= 0) {
-                    worldStampSprites.splice(existingIndex, 1);
-                  }
-                  existingSprite.destroy();
-                  worldStampSpritesByTile.delete(mapTileKey);
-                }
-              } else {
-                const currentSelectedWorldSprite = selectedWorldSpriteRef.current;
-                const previewTextureKey = getWorldStampTextureKey(currentSelectedWorldSprite.texturePath);
-                if (currentSelectedWorldSprite.texturePath && this.textures.exists(previewTextureKey)) {
-                  const existingSprite = worldStampSpritesByTile.get(mapTileKey);
-                  if (existingSprite) {
-                    const existingIndex = worldStampSprites.indexOf(existingSprite);
-                    if (existingIndex >= 0) {
-                      worldStampSprites.splice(existingIndex, 1);
-                    }
-                    existingSprite.destroy();
-                  }
-                  const worldX = tileX * tileSize + tileSize / 2;
-                  const worldY = tileY * tileSize + tileSize / 2;
-                  const stampSprite = this.add
-                    .image(worldX, worldY, previewTextureKey)
-                    .setDisplaySize(tileSize * currentSelectedWorldSprite.scale, tileSize * currentSelectedWorldSprite.scale)
-                    .setAngle(currentSelectedWorldSprite.rotation)
-                    .setFlipX(currentSelectedWorldSprite.flipX)
-                    .setOrigin(0.5)
-                    .setDepth(1.5);
-                  worldStampSprites.push(stampSprite);
-                  worldStampSpritesByTile.set(mapTileKey, stampSprite);
-                }
-              }
-            }
+            worldEditorInput.handlePointerMove(pointer);
           });
 
           this.input.on('pointerup', () => {
-            worldEditPointerActive = false;
-            lastWorldEditedTileKey = '';
+            worldEditorInput.handlePointerUp();
           });
 
           this.input.on('pointerupoutside', () => {
-            worldEditPointerActive = false;
-            lastWorldEditedTileKey = '';
+            worldEditorInput.handlePointerUp();
           });
 
           const syncPlayersFromRoom = () => {
-            if (!room) {
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.players.forEach((networkPlayer, sessionId) => {
-              const networkPlayerState = networkPlayer as Partial<NetworkPlayerState> & RaidNetworkPlayerState;
-              seen.add(sessionId);
-
-              if (networkPlayerState.dead !== true) {
-                completedDeadPlayerIds.delete(sessionId);
-              }
-
-              let character = characters.get(sessionId);
-              if (!character) {
-                if (networkPlayerState.dead === true && completedDeadPlayerIds.has(sessionId)) {
-                  return;
-                }
-              }
-              const equipment = {
-                body: toEquipmentItemId(networkPlayerState.bodyItem ?? ''),
-                head: toEquipmentItemId(networkPlayerState.headItem ?? ''),
-                weapon: toEquipmentItemId(networkPlayerState.weaponItem ?? ''),
-                'head-gem-1': networkPlayerState.headGemItem1 ? (networkPlayerState.headGemItem1 as EquippableItemId) : undefined,
-                'head-gem-2': networkPlayerState.headGemItem2 ? (networkPlayerState.headGemItem2 as EquippableItemId) : undefined,
-                'head-gem-3': networkPlayerState.headGemItem3 ? (networkPlayerState.headGemItem3 as EquippableItemId) : undefined,
-                'body-gem-1': networkPlayerState.bodyGemItem1 ? (networkPlayerState.bodyGemItem1 as EquippableItemId) : undefined,
-                'body-gem-2': networkPlayerState.bodyGemItem2 ? (networkPlayerState.bodyGemItem2 as EquippableItemId) : undefined,
-                'body-gem-3': networkPlayerState.bodyGemItem3 ? (networkPlayerState.bodyGemItem3 as EquippableItemId) : undefined,
-                'weapon-gem-1': networkPlayerState.weaponGemItem1 ? (networkPlayerState.weaponGemItem1 as EquippableItemId) : undefined,
-                'weapon-gem-2': networkPlayerState.weaponGemItem2 ? (networkPlayerState.weaponGemItem2 as EquippableItemId) : undefined,
-                'weapon-gem-3': networkPlayerState.weaponGemItem3 ? (networkPlayerState.weaponGemItem3 as EquippableItemId) : undefined,
-              };
-
-              if (!character) {
-                character = createCharacter(
-                  networkPlayerState.x,
-                  networkPlayerState.y,
-                  networkPlayerState.name,
-                  networkPlayerState.health,
-                  networkPlayerState.maxHealth,
-                  equipment,
-                );
-                characters.set(sessionId, character);
-              }
-
-              const wasDead = character.isDead;
-              syncDeathState(character, networkPlayerState.dead === true, this.time.now);
-              if (wasDead !== character.isDead) {
-                setCharacterVisibility(
-                  character,
-                  character.isVisible ?? true,
-                  sessionId === localSessionId,
-                );
-              }
-
-              character.targetX = networkPlayerState.x;
-              character.targetY = networkPlayerState.y;
-              if (sessionId !== localSessionId) {
-                const now = this.time.now;
-                const distance = Phaser.Math.Distance.Between(
-                  character.interpNextX,
-                  character.interpNextY,
-                  character.targetX,
-                  character.targetY,
-                );
-                if (distance > 64) {
-                  character.container.setPosition(character.targetX, character.targetY);
-                  character.interpPrevX = character.targetX;
-                  character.interpPrevY = character.targetY;
-                  character.interpPrevAt = now;
-                  character.interpNextX = character.targetX;
-                  character.interpNextY = character.targetY;
-                  character.interpNextAt = now;
-                } else if (
-                  character.targetX !== character.interpNextX ||
-                  character.targetY !== character.interpNextY
-                ) {
-                  character.interpPrevX = character.interpNextX;
-                  character.interpPrevY = character.interpNextY;
-                  character.interpPrevAt = character.interpNextAt;
-                  character.interpNextX = character.targetX;
-                  character.interpNextY = character.targetY;
-                  character.interpNextAt = now;
-                }
-              }
-              if (character.currentName !== networkPlayerState.name) {
-                character.nameplate.setText(networkPlayerState.name);
-                character.currentName = networkPlayerState.name;
-              }
-              if (
-                character.currentHealth !== networkPlayerState.health ||
-                character.currentMaxHealth !== networkPlayerState.maxHealth
-              ) {
-                applyCharacterHealthToVisual(character, networkPlayerState.health, networkPlayerState.maxHealth);
-              }
-              if (
-                character.currentBurnTicksRemaining !== (networkPlayerState.burnTicksRemaining ?? 0) ||
-                character.currentBurnEndsAt !== (networkPlayerState.burnEndsAt ?? 0)
-              ) {
-                applyBurningToCharacterVisual(
-                  character,
-                  networkPlayerState.burnTicksRemaining ?? 0,
-                  networkPlayerState.burnEndsAt ?? 0,
-                );
-              }
-              if (
-                character.currentHealingTicksRemaining !== (networkPlayerState.healingTicksRemaining ?? 0) ||
-                character.currentHealingEndsAt !== (networkPlayerState.healingEndsAt ?? 0)
-              ) {
-                applyHealingToCharacterVisual(
-                  character,
-                  networkPlayerState.healingTicksRemaining ?? 0,
-                  networkPlayerState.healingEndsAt ?? 0,
-                );
-              }
-              if (
-                character.currentCastingSkillId !== (networkPlayerState.castingSkillId ?? '') ||
-                character.currentCastStartedAt !== (networkPlayerState.castStartedAt ?? 0) ||
-                character.currentCastEndsAt !== (networkPlayerState.castEndsAt ?? 0)
-              ) {
-                applyCastingToCharacterVisual(
-                  character,
-                  networkPlayerState.castingSkillId ?? '',
-                  networkPlayerState.castStartedAt ?? 0,
-                  networkPlayerState.castEndsAt ?? 0,
-                );
-              }
-              applyEquipmentToVisual(this, tileSize, character, equipment);
-
-              if (sessionId === localSessionId && !character.isFollowTarget) {
-                playerVisualRef.current = {
-                  weaponItem: character.weaponItem,
-                };
-                lastSyncedPositionX = networkPlayerState.x;
-                lastSyncedPositionY = networkPlayerState.y;
-                lastPositionSyncAt = this.time.now;
-                playerVitalsChangeRef.current?.({
-                  health: networkPlayerState.health,
-                  maxHealth: networkPlayerState.maxHealth,
-                });
-                playerProgressChangeRef.current?.({
-                  level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
-                  experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
-                });
-                const nextCooldowns = {
-                  woodStaffStrike: networkPlayerState.woodStaffStrikeCooldownEndsAt ?? 0,
-                  fireball: networkPlayerState.fireballCooldownEndsAt ?? 0,
-                  fireNova: networkPlayerState.fireNovaCooldownEndsAt ?? 0,
-                  fireField: networkPlayerState.fireFieldCooldownEndsAt ?? 0,
-                };
-                skillCooldownsRef.current = nextCooldowns;
-                skillCooldownsChangeRef.current?.(nextCooldowns);
-                if (isRaidScene) {
-                  lastProcessedRaidInput = networkPlayerState.lastProcessedInput ?? 0;
-                  pendingRaidInputs = pendingRaidInputs.filter(
-                    (input) => input.sequence > lastProcessedRaidInput,
-                  );
-                } else {
-                  lastProcessedWorldInput = networkPlayerState.lastProcessedInput ?? 0;
-                  pendingWorldInputs = pendingWorldInputs.filter(
-                    (input) => input.sequence > lastProcessedWorldInput,
-                  );
-                }
-                camera.startFollow(character.container, true, 0.18, 0.18);
-                character.isFollowTarget = true;
-              } else if (sessionId === localSessionId) {
-                playerVitalsChangeRef.current?.({
-                  health: networkPlayerState.health,
-                  maxHealth: networkPlayerState.maxHealth,
-                });
-                playerProgressChangeRef.current?.({
-                  level: networkPlayerState.level ?? latestProfileRef.current.playerLevel,
-                  experience: networkPlayerState.experience ?? latestProfileRef.current.playerExperience,
-                });
-                const nextCooldowns = {
-                  woodStaffStrike: networkPlayerState.woodStaffStrikeCooldownEndsAt ?? 0,
-                  fireball: networkPlayerState.fireballCooldownEndsAt ?? 0,
-                  fireNova: networkPlayerState.fireNovaCooldownEndsAt ?? 0,
-                  fireField: networkPlayerState.fireFieldCooldownEndsAt ?? 0,
-                };
-                skillCooldownsRef.current = nextCooldowns;
-                skillCooldownsChangeRef.current?.(nextCooldowns);
-
-                if (isRaidScene) {
-                  const processedInput = networkPlayerState.lastProcessedInput ?? 0;
-                  if (processedInput > lastProcessedRaidInput) {
-                    lastProcessedRaidInput = processedInput;
-                    pendingRaidInputs = pendingRaidInputs.filter(
-                      (input) => input.sequence > processedInput,
-                    );
-                  }
-                  reconcileRaidLocalCharacter(
-                    character,
-                    networkPlayerState.x,
-                    networkPlayerState.y,
-                    lastRaidTilesWidth || raidWidth,
-                    lastRaidTilesHeight || raidHeight,
-                  );
-                } else {
-                  const processedInput = networkPlayerState.lastProcessedInput ?? 0;
-                  if (processedInput > lastProcessedWorldInput) {
-                    lastProcessedWorldInput = processedInput;
-                    pendingWorldInputs = pendingWorldInputs.filter(
-                      (input) => input.sequence > processedInput,
-                    );
-                  }
-                  reconcileWorldLocalCharacter(
-                    character,
-                    networkPlayerState.x,
-                    networkPlayerState.y,
-                  );
-                }
-              }
-            });
-
-            [...characters.keys()].forEach((sessionId) => {
-              if (!seen.has(sessionId)) {
-                destroyCharacter(sessionId);
-              }
+            syncPlayersFromRoomShared({
+              scene: this,
+              Phaser,
+              room,
+              characters,
+              completedDeadPlayerIds,
+              localSessionId,
+              isRaidScene,
+              expectedServerTickMs: isRaidScene
+                ? RAID_CLIENT_SIMULATION_STEP_MS
+                : WORLD_CLIENT_SIMULATION_STEP_MS,
+              raidWidth,
+              raidHeight,
+              getLastRaidTilesWidth: () => lastRaidTilesWidth,
+              getLastRaidTilesHeight: () => lastRaidTilesHeight,
+              tileSize,
+              createCharacter,
+              destroyCharacter,
+              syncDeathState,
+              applyCharacterHealthToVisual,
+              applyBurningToCharacterVisual,
+              applyHealingToCharacterVisual,
+              applyCastingToCharacterVisual,
+              applyEquipmentToVisual,
+              toEquipmentItemId,
+              playerVisualRef,
+              playerVitalsChangeRef,
+              playerProgressChangeRef,
+              skillCooldownsRef,
+              skillCooldownsChangeRef,
+              latestProfileRef,
+              movementState,
+              positionSyncState,
+              camera,
+              reconcileRaidLocalCharacter,
+              reconcileWorldLocalCharacter,
+              hideStatusIcon,
             });
           };
 
@@ -4945,9 +4800,8 @@ export function GameCanvas({
             lastRaidTilesWidth = width;
             lastRaidTilesHeight = height;
             lastRaidVisibilityRenderKey = '';
-            lastRaidMinimapVisionKey = '';
+            minimapEmitter.resetRaidMinimapState();
             lastRaidObjectVisibilityUpdateAt = 0;
-            lastRaidMinimapUpdateAt = 0;
             pendingRaidInputs = [];
             lastProcessedRaidInput = 0;
             movementSimulationAccumulatorMs = 0;
@@ -5019,6 +4873,7 @@ export function GameCanvas({
               resolvedX,
               resolvedY,
             );
+            const strongDesyncDistance = tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES;
 
             if (reconciliationDistance > 18 * tileSize) {
               character.simPrevX = resolvedX;
@@ -5027,6 +4882,18 @@ export function GameCanvas({
               character.simY = resolvedY;
               character.simErrorX = 0;
               character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
+              return;
+            }
+
+            if (reconciliationDistance > strongDesyncDistance) {
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
+              character.simErrorX = 0;
+              character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
               return;
             }
 
@@ -5064,8 +4931,8 @@ export function GameCanvas({
                 tileSize,
                 meadowMap.width * tileSize,
                 meadowMap.height * tileSize,
-                meadowMap,
                 meadowDecorations,
+                currentWorldAsset.stamps,
                 CLIENT_PLAYER_SPEED,
                 mobBlockers,
               );
@@ -5079,6 +4946,7 @@ export function GameCanvas({
               resolvedX,
               resolvedY,
             );
+            const strongDesyncDistance = tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES;
 
             if (reconciliationDistance > 18 * tileSize) {
               character.simPrevX = resolvedX;
@@ -5087,6 +4955,18 @@ export function GameCanvas({
               character.simY = resolvedY;
               character.simErrorX = 0;
               character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
+              return;
+            }
+
+            if (reconciliationDistance > strongDesyncDistance) {
+              character.simPrevX = resolvedX;
+              character.simPrevY = resolvedY;
+              character.simX = resolvedX;
+              character.simY = resolvedY;
+              character.simErrorX = 0;
+              character.simErrorY = 0;
+              character.container.setPosition(resolvedX, resolvedY);
               return;
             }
 
@@ -5105,98 +4985,14 @@ export function GameCanvas({
             character.simY = resolvedY;
           };
 
-          const setCharacterVisibility = (character: CharacterVisual, visible: boolean, isLocalPlayer = false) => {
-            const shouldShowActor = visible || isLocalPlayer;
-            const shouldShowAliveVisuals = shouldShowActor && !character.isDead;
-            const alpha = shouldShowAliveVisuals ? 1 : 0;
-            character.shadow.setVisible(shouldShowAliveVisuals);
-            character.container.setVisible(shouldShowAliveVisuals);
-            character.deathEffect.setVisible(shouldShowActor && character.isDead);
-            character.nameplate.setVisible(shouldShowAliveVisuals);
-            character.healthBarFrame.setVisible(shouldShowAliveVisuals);
-            character.healthBarBack.setVisible(shouldShowAliveVisuals);
-            character.healthBarFill.setVisible(shouldShowAliveVisuals);
-            character.castBarFrame.setVisible(false);
-            character.castBarBack.setVisible(false);
-            character.castBarFill.setVisible(false);
-            character.healthText.setVisible(false);
-            character.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
-            character.burnAura.setVisible(
-              shouldShowAliveVisuals &&
-                character.currentBurnTicksRemaining > 0 &&
-                character.currentBurnEndsAt > Date.now(),
-            );
-            if (!shouldShowAliveVisuals) {
-              hideStatusIcon(character.burnStatusIcon);
-              hideStatusIcon(character.healingStatusIcon);
-            }
-            character.container.setAlpha(alpha);
-            character.shadow.setAlpha(shouldShowAliveVisuals ? 0.18 : 0);
-            character.deathEffect.setAlpha(shouldShowActor && character.isDead ? 1 : 0);
-            character.nameplate.setAlpha(alpha);
-            character.burnStatusIcon.back.setAlpha(alpha);
-            character.burnStatusIcon.cooldownOverlay.setAlpha(alpha);
-            character.burnStatusIcon.icon.setAlpha(alpha);
-            character.burnStatusIcon.timerText.setAlpha(alpha);
-            character.healingStatusIcon.back.setAlpha(alpha);
-            character.healingStatusIcon.cooldownOverlay.setAlpha(alpha);
-            character.healingStatusIcon.icon.setAlpha(alpha);
-            character.healingStatusIcon.timerText.setAlpha(alpha);
-            character.healthBarFrame.setAlpha(alpha);
-            character.healthBarBack.setAlpha(alpha);
-            character.healthBarFill.setAlpha(alpha);
-            character.castBarFrame.setAlpha(alpha);
-            character.castBarBack.setAlpha(alpha);
-            character.castBarFill.setAlpha(alpha);
-            character.healthText.setAlpha(0);
-            character.healthSegments.forEach((segment) => segment.setAlpha(alpha));
-          };
+          const setCharacterVisibility = (
+            character: CharacterVisual,
+            visible: boolean,
+            isLocalPlayer = false,
+          ) => setCharacterVisibilityShared(character, visible, isLocalPlayer, hideStatusIcon);
 
-          const setMobVisibility = (mob: MobVisual, visible: boolean) => {
-            const shouldShowAliveVisuals = visible && !mob.isDead;
-            mob.shadow.setVisible(shouldShowAliveVisuals);
-            mob.sprite.setVisible(shouldShowAliveVisuals);
-            mob.deathEffect.setVisible(visible && mob.isDead);
-            mob.nameplate.setVisible(false);
-            mob.healthBarFrame.setVisible(shouldShowAliveVisuals);
-            mob.healthBarBack.setVisible(shouldShowAliveVisuals);
-            mob.healthBarFill.setVisible(shouldShowAliveVisuals);
-            const shouldShowCastBar =
-              shouldShowAliveVisuals &&
-              mob.currentCastingSkillId.length > 0 &&
-              mob.currentCastEndsAt > Date.now() &&
-              mob.currentCastEndsAt > mob.currentCastStartedAt;
-            mob.castBarFrame.setVisible(shouldShowCastBar);
-            mob.castBarBack.setVisible(shouldShowCastBar);
-            mob.castBarFill.setVisible(shouldShowCastBar);
-            mob.healthText.setVisible(false);
-            mob.healthSegments.forEach((segment) => segment.setVisible(shouldShowAliveVisuals));
-            mob.burnAura.setVisible(
-              shouldShowAliveVisuals &&
-                mob.currentBurnTicksRemaining > 0 &&
-                mob.currentBurnEndsAt > Date.now(),
-            );
-            const alpha = shouldShowAliveVisuals ? 1 : 0;
-            mob.shadow.setAlpha(shouldShowAliveVisuals ? 0.18 : 0);
-            mob.sprite.setAlpha(alpha);
-            mob.deathEffect.setAlpha(visible && mob.isDead ? 1 : 0);
-            mob.nameplate.setAlpha(0);
-            if (!shouldShowAliveVisuals) {
-              hideStatusIcon(mob.burnStatusIcon);
-            }
-            mob.burnStatusIcon.back.setAlpha(alpha);
-            mob.burnStatusIcon.cooldownOverlay.setAlpha(alpha);
-            mob.burnStatusIcon.icon.setAlpha(alpha);
-            mob.burnStatusIcon.timerText.setAlpha(alpha);
-            mob.healthBarFrame.setAlpha(alpha);
-            mob.healthBarBack.setAlpha(alpha);
-            mob.healthBarFill.setAlpha(alpha);
-            mob.castBarFrame.setAlpha(alpha);
-            mob.castBarBack.setAlpha(alpha);
-            mob.castBarFill.setAlpha(alpha);
-            mob.healthText.setAlpha(0);
-            mob.healthSegments.forEach((segment) => segment.setAlpha(alpha));
-          };
+          const setMobVisibility = (mob: MobVisual, visible: boolean) =>
+            setMobVisibilityShared(mob, visible, hideStatusIcon);
 
           const updateRaidVisibility = (force = false) => {
             if (!isRaidScene || !room || !('tiles' in room.state)) {
@@ -5264,7 +5060,18 @@ export function GameCanvas({
 
             lastRaidVisibilityRenderKey = renderKey;
             lastRaidVisibilityUpdateAt = now;
-            emitRaidMinimapSnapshot(originTileX, originTileY, width, height, tiles, visionKey, now, force);
+            minimapEmitter.emitRaidMinimapSnapshot({
+              playerTileX: originTileX,
+              playerTileY: originTileY,
+              width,
+              height,
+              tiles,
+              exploredTiles: exploredRaidTiles,
+              visibleTiles: visibleRaidTiles,
+              visionKey,
+              now,
+              force,
+            });
             const isWithinCullBounds = (worldX: number, worldY: number) =>
               worldX >= cullLeft &&
               worldX <= cullRight &&
@@ -5401,84 +5208,17 @@ export function GameCanvas({
           };
 
           const syncMobsFromRoom = () => {
-            if (!room || !('mobs' in room.state)) {
-              [...mobs.keys()].forEach((mobId) => destroyMob(mobId));
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.mobs.forEach((networkMob, mobId) => {
-              seen.add(mobId);
-
-              if (networkMob.dead !== true) {
-                completedDeadMobIds.delete(mobId);
-              }
-
-              let mob = mobs.get(mobId);
-              if (!mob) {
-                if (networkMob.dead === true && completedDeadMobIds.has(mobId)) {
-                  return;
-                }
-
-                mob = createMob(
-                  networkMob.x,
-                  networkMob.y,
-                  networkMob.texture,
-                  networkMob.name,
-                  networkMob.health,
-                  networkMob.maxHealth,
-                );
-                mobs.set(mobId, mob);
-              }
-
-              if (
-                Math.abs(networkMob.x - mob.targetX) > 0.25 ||
-                Math.abs(networkMob.y - mob.targetY) > 0.25
-              ) {
-                mob.lastMovedAt = this.time.now;
-              }
-
-              mob.targetX = networkMob.x;
-              mob.targetY = networkMob.y;
-              const wasDead = mob.isDead;
-              syncDeathState(mob, networkMob.dead === true, this.time.now);
-              if (wasDead !== mob.isDead) {
-                setMobVisibility(mob, mob.isVisible ?? true);
-              }
-              mob.currentAttackCooldownEndsAt = networkMob.attackCooldownEndsAt ?? 0;
-              mob.currentAttackCooldownMs = networkMob.attackCooldownMs ?? 0;
-              mob.currentCastingSkillId = networkMob.castingSkillId ?? "";
-              mob.currentCastStartedAt = networkMob.castStartedAt ?? 0;
-              mob.currentCastEndsAt = networkMob.castEndsAt ?? 0;
-              mob.currentSkillLungeStartedAt = networkMob.skillLungeStartedAt ?? 0;
-              mob.currentSkillLungeEndsAt = networkMob.skillLungeEndsAt ?? 0;
-              if (mob.currentName !== networkMob.name) {
-                mob.nameplate.setText(networkMob.name);
-                mob.currentName = networkMob.name;
-              }
-              if (
-                mob.currentHealth !== networkMob.health ||
-                mob.currentMaxHealth !== networkMob.maxHealth
-              ) {
-                applyMobHealthToVisual(mob, networkMob.health, networkMob.maxHealth);
-              }
-              if (
-                mob.currentBurnTicksRemaining !== (networkMob.burnTicksRemaining ?? 0) ||
-                mob.currentBurnEndsAt !== (networkMob.burnEndsAt ?? 0)
-              ) {
-                applyBurningToMobVisual(
-                  mob,
-                  networkMob.burnTicksRemaining ?? 0,
-                  networkMob.burnEndsAt ?? 0,
-                );
-              }
-            });
-
-            [...mobs.keys()].forEach((mobId) => {
-              if (!seen.has(mobId)) {
-                destroyMob(mobId);
-              }
+            syncMobsFromRoomShared({
+              scene: this,
+              room,
+              mobs,
+              completedDeadMobIds,
+              createMob,
+              destroyMob,
+              syncDeathState,
+              applyMobHealthToVisual,
+              applyBurningToMobVisual,
+              hideStatusIcon,
             });
           };
 
@@ -5510,7 +5250,7 @@ export function GameCanvas({
               const chestX = networkChest.x * meadowMap.tileSize + meadowMap.tileSize / 2;
               const chestY = networkChest.y * meadowMap.tileSize + meadowMap.tileSize / 2;
 
-              const chestTexture = 'chest-8x8';
+              const chestTexture = getChestTextureKey(networkChest);
 
               if (!chestSprite) {
                 chestSprite = this.add
@@ -5615,158 +5355,27 @@ export function GameCanvas({
           };
 
           const syncProjectilesFromRoom = () => {
-            if (!room || !('projectiles' in room.state)) {
-              projectileSprites.forEach((projectileVisual) => {
-                projectileVisual.aura.destroy();
-                projectileVisual.sprite.destroy();
-              });
-              projectileSprites.clear();
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.projectiles.forEach((projectile, projectileId) => {
-              seen.add(projectileId);
-              let projectileVisual = projectileSprites.get(projectileId);
-
-              if (!projectileVisual) {
-                const isShard = projectile.skillId === 'fireballShard';
-                const aura = this.add
-                  .ellipse(
-                    projectile.x,
-                    projectile.y,
-                    isShard ? 14 : 22,
-                    isShard ? 14 : 22,
-                    0xff962f,
-                    projectile.skillId === 'fireNova' ? 0.32 : isShard ? 0.18 : 0.24,
-                  )
-                  .setDepth(34);
-                const animation = getProjectileAnimation(projectile.skillId, projectileAnimations);
-                const projectileDisplaySize = getProjectileDisplaySize(projectile.skillId, resolvedSkillEffects);
-                const sprite = this.add
-                  .image(projectile.x, projectile.y, animation.textureKey, 0)
-                  .setDisplaySize(
-                    projectileDisplaySize,
-                    projectileDisplaySize,
-                  )
-                  .setDepth(35)
-                  .setOrigin(0.5)
-                  .setAlpha(0.98);
-                projectileVisual = {
-                  aura,
-                  sprite,
-                  targetX: projectile.x,
-                  targetY: projectile.y,
-                  animation,
-                };
-                projectileSprites.set(projectileId, projectileVisual);
-              }
-
-              projectileVisual.targetX = projectile.x;
-              projectileVisual.targetY = projectile.y;
-              projectileVisual.sprite.setAngle(
-                Phaser.Math.RadToDeg(
-                  Phaser.Math.Angle.Between(
-                    projectile.x,
-                    projectile.y,
-                    projectile.x + projectile.directionX,
-                    projectile.y + projectile.directionY,
-                  ),
-                ),
-              );
-              projectileVisual.sprite.setFrame(
-                getSpriteSheetAnimationFrame(
-                  projectileVisual.animation,
-                  Math.max(0, projectile.lifetime * 1000),
-                ),
-              );
+            syncProjectilesFromRoomShared({
+              scene: this,
+              Phaser,
+              room,
+              projectileSprites,
+              projectileAnimations,
+              resolvedSkillEffects,
+              getProjectileAnimation,
+              getProjectileDisplaySize,
             });
-
-            for (const [projectileId, projectileVisual] of projectileSprites.entries()) {
-              if (seen.has(projectileId)) {
-                continue;
-              }
-
-              projectileVisual.aura.destroy();
-              projectileVisual.sprite.destroy();
-              projectileSprites.delete(projectileId);
-            }
           };
 
           const syncGroundEffectsFromRoom = () => {
-            if (!room || !('groundEffects' in room.state)) {
-              groundEffects.forEach((effectVisual) => {
-                effectVisual.tile.destroy();
-                effectVisual.aura.destroy();
-                effectVisual.flames.forEach((flame) => flame.destroy());
-              });
-              groundEffects.clear();
-              return;
-            }
-
-            const seen = new Set<string>();
-
-            room.state.groundEffects.forEach((effect, effectId) => {
-              seen.add(effectId);
-              let effectVisual = groundEffects.get(effectId);
-
-              if (!effectVisual) {
-                const isFireTrail = effect.skillId === 'fireTrail';
-                const trailDisplaySize = isFireTrail
-                  ? Math.max(18, resolvedSkillEffects.fireField.displaySize * 0.75)
-                  : resolvedSkillEffects.fireField.displaySize;
-                const tile = this.add
-                  .rectangle(effect.x, effect.y, meadowMap.tileSize, meadowMap.tileSize, isFireTrail ? 0xff7d1f : 0xff5e1a, isFireTrail ? 0.11 : 0.14)
-                  .setOrigin(0.5)
-                  .setDepth(0.4);
-                const aura = this.add
-                  .ellipse(effect.x, effect.y + 7, meadowMap.tileSize * 0.95, meadowMap.tileSize * 0.68, isFireTrail ? 0xffb347 : 0xff9f38, isFireTrail ? 0.14 : 0.18)
-                  .setOrigin(0.5)
-                  .setDepth(0.5);
-                const flames = [
-                  { x: -8, y: -7, scale: 0.56, alpha: 0.9 },
-                  { x: 8, y: -7, scale: 0.56, alpha: 0.9 },
-                  { x: -8, y: 7, scale: 0.56, alpha: 0.86 },
-                  { x: 8, y: 7, scale: 0.56, alpha: 0.86 },
-                ].map((offset) =>
-                  this.add
-                    .image(effect.x + offset.x, effect.y + offset.y, groundAnimation.textureKey, 0)
-                    .setDisplaySize(
-                      trailDisplaySize,
-                      trailDisplaySize,
-                    )
-                    .setScale(isFireTrail ? offset.scale * 0.82 : offset.scale)
-                    .setOrigin(0.5)
-                    .setDepth(0.6)
-                    .setAlpha(isFireTrail ? offset.alpha * 0.88 : offset.alpha),
-                );
-                effectVisual = {
-                  tile,
-                  aura,
-                  flames,
-                  x: effect.x,
-                  y: effect.y,
-                };
-                groundEffects.set(effectId, effectVisual);
-              }
-
-              effectVisual.x = effect.x;
-              effectVisual.y = effect.y;
-              effectVisual.tile.setPosition(effect.x, effect.y);
-              effectVisual.aura.setPosition(effect.x, effect.y + 6);
+            syncGroundEffectsFromRoomShared({
+              scene: this,
+              room,
+              groundEffects,
+              resolvedSkillEffects,
+              groundAnimation,
+              meadowMap,
             });
-
-            for (const [effectId, effectVisual] of groundEffects.entries()) {
-              if (seen.has(effectId)) {
-                continue;
-              }
-
-              effectVisual.tile.destroy();
-              effectVisual.aura.destroy();
-              effectVisual.flames.forEach((flame) => flame.destroy());
-              groundEffects.delete(effectId);
-            }
           };
 
           const createFloatingDamageText = (x: number, y: number, text: string, color = '#ff5959') => {
@@ -5817,34 +5426,52 @@ export function GameCanvas({
             playerStrength: latestProfileRef.current.playerStrength,
             playerAgility: latestProfileRef.current.playerAgility,
             playerIntellect: latestProfileRef.current.playerIntellect,
+            playerGold: latestProfileRef.current.playerGold,
+            playerQuests: latestProfileRef.current.playerQuests,
             playerInventory: latestProfileRef.current.playerInventory,
             playerEquipment: latestProfileRef.current.playerEquipment,
           };
-          const defaultWorldSpawn = {
-            x: meadowAsset.spawn.x * tileSize + tileSize / 2,
-            y: meadowAsset.spawn.y * tileSize + tileSize / 2,
-          };
-          const joinOptions: WorldRoomJoinOptions | RaidRoomJoinOptions = activeRoomName === 'world'
-            ? {
-              ...(activeRoomOptions ?? {}),
-              ...createWorldProfileMessage(
-                latestProfileSnapshot,
-                latestProfileSnapshot.playerPosition.x <= 0 &&
-                  latestProfileSnapshot.playerPosition.y <= 0
-                  ? defaultWorldSpawn
-                  : latestProfileSnapshot.playerPosition,
-              ),
-              worldOwner: latestProfileSnapshot.playerName,
-              worldSpawn: defaultWorldSpawn,
-            }
-            : {
-              ...(activeRoomOptions ?? {}),
-              ...createBaseProfileMessage(latestProfileSnapshot),
-            };
+          void (async () => {
+            try {
+              const sessionToken = sessionTokenRef.current ?? undefined;
+              const resolvedContentVersion = contentVersionRef.current;
+              if (!resolvedContentVersion) {
+                if (sceneActive && statusText.active) {
+                  statusText.setText('Syncing content snapshot...');
+                }
+                chatSenderReadyRef.current?.(null);
+                return;
+              }
 
-          void networkClient
-            .joinOrCreate(activeRoomName, joinOptions)
-            .then((joinedRoom) => {
+              let resolvedRoomOptions = { ...(activeRoomOptions ?? {}) } as Record<string, unknown>;
+              if (isRaidScene && typeof resolvedRoomOptions.raidRunId === 'string') {
+                const latestRaidRun = await loadRaidRun(resolvedRoomOptions.raidRunId);
+                resolvedRoomOptions = {
+                  ...resolvedRoomOptions,
+                  ...(latestRaidRun.realtimeRoom.options ?? {}),
+                  runtimeState:
+                    latestRaidRun.runtimeState ??
+                    latestRaidRun.realtimeRoom.options?.runtimeState ??
+                    null,
+                };
+              }
+
+              const joinOptions: WorldRoomJoinOptions | RaidRoomJoinOptions = activeRoomName === 'world'
+                ? {
+                  ...resolvedRoomOptions,
+                  ...createWorldProfileMessage(latestProfileSnapshot),
+                  worldOwner: latestProfileSnapshot.playerName,
+                  sessionToken,
+                  contentVersion: resolvedContentVersion,
+                }
+                : {
+                  ...resolvedRoomOptions,
+                  ...createBaseProfileMessage(latestProfileSnapshot),
+                  sessionToken,
+                  contentVersion: resolvedContentVersion,
+                };
+
+              const joinedRoom = await networkClient.joinOrCreate(activeRoomName, joinOptions);
               room = joinedRoom as RealtimeRoom;
               roomRef.current = room;
               localSessionId = room.sessionId;
@@ -5854,11 +5481,13 @@ export function GameCanvas({
               }
               roomConnectedRef.current?.({
                 roomName: activeRoomName,
-                options: activeRoomOptions,
+                options: resolvedRoomOptions,
               });
 
               if (!isRaidScene) {
                 const profileMessage = createWorldProfileMessage(latestProfileSnapshot);
+                profileMessage.sessionToken = sessionToken;
+                profileMessage.contentVersion = resolvedContentVersion;
                 room.send('profile', profileMessage);
                 chatSenderReadyRef.current?.((text: string) => {
                   const chatInputMessage: ChatInputMessage = { text };
@@ -5896,119 +5525,32 @@ export function GameCanvas({
                 }
                 chatSenderReadyRef.current?.(null);
               });
-
-              room.onMessage('chatHistory', (messages: RealtimeChatMessage[]) => {
-                chatHistoryRef.current?.(messages);
-              });
-
-              room.onMessage('chat', (message: RealtimeChatMessage) => {
-                chatMessageRef.current?.(message);
-              });
-
-              room.onMessage('skillBalanceConfig', (config: SkillBalanceConfig) => {
-                hasReceivedSkillBalanceRef.current = true;
-                lastKnownSkillBalanceSerializedRef.current = JSON.stringify(config);
-                skillBalanceConfigChangeRef.current?.(config);
-              });
-
-              room.onMessage('mobBalanceConfig', (config: MobBalanceConfig) => {
-                hasReceivedMobBalanceRef.current = true;
-                lastKnownMobBalanceSerializedRef.current = JSON.stringify(config);
-                mobBalanceConfigChangeRef.current?.(config);
-              });
-
-              room.onMessage(
-                'died',
-                (payload: DiedMessage) => {
-                  playerDeathRef.current?.(payload);
+              attachRoomInboundHandlers(
+                room,
+                {
+                  syncRaidTilesFromRoom,
+                  syncPlayersFromRoom,
+                  syncMobsFromRoom,
+                  syncChestsFromRoom,
+                  syncRaidExitPointsFromRoom,
+                  syncGroundEffectsFromRoom,
+                  syncProjectilesFromRoom,
+                  updateRaidVisibility,
+                  createFloatingDamageText,
                 },
+                true,
               );
-
-              room.onMessage(
-                'respawned',
-                (payload: RespawnedMessage) => {
-                  playerRespawnRef.current?.(payload);
-                },
-              );
-
-              room.onMessage(
-                'inventoryUpdate',
-                (payload: InventoryUpdateMessage) => {
-                  if (!Array.isArray(payload.inventory)) {
-                    return;
-                  }
-
-                  playerInventoryChangeRef.current?.(
-                    payload.inventory.map((item) => item || null),
-                  );
-                },
-              );
-
-              room.onMessage(
-                'consumableCooldown',
-                (payload: ConsumableCooldownMessage) => {
-                  if (
-                    typeof payload.itemId !== 'string' ||
-                    typeof payload.cooldownEndsAt !== 'number' ||
-                    !Number.isFinite(payload.cooldownEndsAt)
-                  ) {
-                    return;
-                  }
-
-                  consumableCooldownChangeRef.current?.({
-                    itemId: payload.itemId,
-                    cooldownEndsAt: payload.cooldownEndsAt,
-                  });
-                },
-              );
-
-              room.onMessage(
-                'damageText',
-                (payload: DamageTextMessage) => {
-                  if (
-                    typeof payload?.x !== 'number' ||
-                    typeof payload?.y !== 'number' ||
-                    typeof payload?.text !== 'string' ||
-                    !Number.isFinite(payload.x) ||
-                    !Number.isFinite(payload.y) ||
-                    payload.text.length === 0
-                  ) {
-                    return;
-                  }
-
-                  createFloatingDamageText(payload.x, payload.y, payload.text, payload.color ?? '#ff5959');
-                },
-              );
-
-              room.onMessage(
-                'raidExited',
-                (payload: RaidExitStateMessage) => {
-                  raidExitRef.current?.(payload);
-                },
-              );
-
-              room.onMessage(
-                'raidExpired',
-                (payload: RaidExitStateMessage) => {
-                  raidExitRef.current?.(payload);
-                },
-              );
-
-              syncRaidTilesFromRoom();
-              syncPlayersFromRoom();
-              syncMobsFromRoom();
-              syncChestsFromRoom();
-              syncRaidExitPointsFromRoom();
-              syncGroundEffectsFromRoom();
-              syncProjectilesFromRoom();
-              updateRaidVisibility(true);
-            })
-            .catch(() => {
+            } catch (error) {
               if (sceneActive && statusText.active) {
-                statusText.setText('Realtime server offline. Start realtime on :2567');
+                const message =
+                  error instanceof Error && error.message
+                    ? error.message
+                    : 'Realtime server offline. Start realtime on :2567';
+                statusText.setText(message);
               }
               chatSenderReadyRef.current?.(null);
-            });
+            }
+          })();
 
           this.add
             .text(24, 24, isRaidScene ? String(activeRoomOptions?.templateName ?? 'Raid Instance') : 'Personal World', {
@@ -6118,6 +5660,7 @@ export function GameCanvas({
                     x: normalizedX,
                     y: normalizedY,
                     sequence,
+                    clientEstimatedLatencyMs: estimatedOneWayLatencyMsRef.current,
                   };
                   room.send('move', moveMessage);
 
@@ -6138,6 +5681,7 @@ export function GameCanvas({
                     x: normalizedX,
                     y: normalizedY,
                     sequence,
+                    clientEstimatedLatencyMs: estimatedOneWayLatencyMsRef.current,
                   };
                   room.send('move', moveMessage);
 
@@ -6189,8 +5733,8 @@ export function GameCanvas({
                   tileSize,
                   mapWidth,
                   mapHeight,
-                  meadowMap,
                   meadowDecorations,
+                  currentWorldAsset.stamps,
                   CLIENT_PLAYER_SPEED,
                   mobBlockers,
                 );
@@ -6292,6 +5836,14 @@ export function GameCanvas({
                 character.container.x,
                 character.container.y + 15,
               );
+              const characterDepth = getEntitySortDepth(
+                getCharacterFootY(character, tileSize),
+                mapHeight,
+              );
+              character.shadow.setDepth(characterDepth - ENTITY_SORT_SHADOW_OFFSET);
+              character.burnAura.setDepth(characterDepth - ENTITY_SORT_AURA_OFFSET);
+              character.container.setDepth(characterDepth);
+              character.deathEffect.setDepth(characterDepth + ENTITY_SORT_EFFECT_OFFSET);
               character.nameplate.setPosition(
                 character.container.x,
                 character.container.y - 24,
@@ -6320,12 +5872,12 @@ export function GameCanvas({
                 character.container.x - 12,
                 character.container.y + 30,
               );
-              character.healthSegments.forEach((segment, index) => {
-                segment.setPosition(
-                  character.container.x - 10.8 + index * 2.4,
-                  character.container.y + 22,
-                );
-              });
+              layoutHealthSegments(
+                character.healthSegments,
+                character.container.x,
+                character.container.y + 22,
+                character.currentHealthSegmentCount,
+              );
 
               if (character.isDead) {
                 setCharacterVisibility(character, character.isVisible ?? true, isLocalPlayer);
@@ -6381,6 +5933,7 @@ export function GameCanvas({
                 movementSignal || this.time.now - character.lastMovedAt <= 120;
 
               updateCharacterPose(
+                sessionId,
                 character,
                 shouldAnimateMove,
                 deltaSeconds,
@@ -6620,15 +6173,24 @@ export function GameCanvas({
               }
               mob.sprite.setScale(mob.facingX * mob.renderScale, mob.renderScale);
               mob.shadow.setPosition(mob.sprite.x, mob.sprite.y + 15);
+              const mobDepth = getEntitySortDepth(getMobFootY(mob), mapHeight);
+              mob.shadow.setDepth(mobDepth - ENTITY_SORT_SHADOW_OFFSET);
+              mob.burnAura.setDepth(mobDepth - ENTITY_SORT_AURA_OFFSET);
+              mob.burnEffect.setDepth(mobDepth - ENTITY_SORT_EFFECT_OFFSET);
+              mob.sprite.setDepth(mobDepth);
+              mob.deathEffect.setDepth(mobDepth + ENTITY_SORT_EFFECT_OFFSET);
               mob.healthBarFrame.setPosition(mob.sprite.x, mob.sprite.y + 22 + bobOffset);
               mob.healthBarBack.setPosition(mob.sprite.x, mob.sprite.y + 22 + bobOffset);
               mob.healthBarFill.setPosition(mob.sprite.x - 12, mob.sprite.y + 22 + bobOffset);
               mob.castBarFrame.setPosition(mob.sprite.x, mob.sprite.y + 30 + bobOffset);
               mob.castBarBack.setPosition(mob.sprite.x, mob.sprite.y + 30 + bobOffset);
               mob.castBarFill.setPosition(mob.sprite.x - 12, mob.sprite.y + 30 + bobOffset);
-              mob.healthSegments.forEach((segment, index) => {
-                segment.setPosition(mob.sprite.x - 10.8 + index * 2.4, mob.sprite.y + 22 + bobOffset);
-              });
+              layoutHealthSegments(
+                mob.healthSegments,
+                mob.sprite.x,
+                mob.sprite.y + 22 + bobOffset,
+                mob.currentHealthSegmentCount,
+              );
               const isCasting =
                 mob.currentCastingSkillId.length > 0 &&
                 mob.currentCastEndsAt > serverNow &&
@@ -6757,7 +6319,7 @@ export function GameCanvas({
               }
 
               if (!isRaidScene) {
-                emitLobbyMinimapSnapshot(localCharacter.container.x, localCharacter.container.y);
+                minimapEmitter.emitLobbyMinimapSnapshot(localCharacter.container.x, localCharacter.container.y);
               }
 
               let closestChest:
@@ -7020,6 +6582,88 @@ export function GameCanvas({
                 }
               }
 
+              if (!isRaidScene) {
+                let closestWorkbench:
+                  | {
+                    id: string;
+                    x: number;
+                    y: number;
+                    distance: number;
+                  }
+                  | null = null;
+
+                currentWorldAsset.stamps
+                  .filter((stamp) => isBlockingMeadowStamp(stamp))
+                  .forEach((stamp) => {
+                    const workbenchX = stamp.x * tileSize + tileSize / 2;
+                    const workbenchY = stamp.y * tileSize + tileSize / 2;
+                    const dx = workbenchX - localCharacter.container.x;
+                    const dy = workbenchY - localCharacter.container.y;
+                    const distance = Math.hypot(dx, dy);
+
+                    if (!closestWorkbench || distance < closestWorkbench.distance) {
+                      closestWorkbench = {
+                        id: `workbench:${stamp.x}:${stamp.y}`,
+                        x: workbenchX,
+                        y: workbenchY,
+                        distance,
+                      };
+                    }
+                  });
+
+                const resolvedWorkbench = closestWorkbench as
+                  | {
+                    id: string;
+                    x: number;
+                    y: number;
+                    distance: number;
+                  }
+                  | null;
+
+                if (resolvedWorkbench) {
+                  const dx = resolvedWorkbench.x - localCharacter.container.x;
+                  const dy = resolvedWorkbench.y - localCharacter.container.y;
+                  const directionLength = Math.hypot(dx, dy) || 1;
+                  const lookDot =
+                    (lastLookX * (dx / directionLength)) +
+                    (lastLookY * (dy / directionLength));
+
+                  canInteractWithWorkbench =
+                    resolvedWorkbench.distance <= meadowMap.tileSize * 1.6 &&
+                    (lookDot >= 0.15 ||
+                      Math.abs(dx) <= meadowMap.tileSize * 0.75 ||
+                      Math.abs(dy) <= meadowMap.tileSize * 0.75);
+                  interactableWorkbenchId = canInteractWithWorkbench ? resolvedWorkbench.id : null;
+                  if (lastNotifiedNearbyWorkbenchIdRef.current !== interactableWorkbenchId) {
+                    lastNotifiedNearbyWorkbenchIdRef.current = interactableWorkbenchId;
+                    nearbyWorkbenchChangeRef.current?.(interactableWorkbenchId);
+                  }
+
+                  if (!canOpenChest && !canInteractWithTrader && canInteractWithWorkbench) {
+                    chestPrompt.setText('F CRAFT');
+                    chestPrompt.setPosition(
+                      localCharacter.container.x,
+                      localCharacter.container.y - 42,
+                    );
+                    chestPrompt.setVisible(true);
+                  }
+                } else {
+                  interactableWorkbenchId = null;
+                  canInteractWithWorkbench = false;
+                  if (lastNotifiedNearbyWorkbenchIdRef.current !== null) {
+                    lastNotifiedNearbyWorkbenchIdRef.current = null;
+                    nearbyWorkbenchChangeRef.current?.(null);
+                  }
+                }
+              } else {
+                interactableWorkbenchId = null;
+                canInteractWithWorkbench = false;
+                if (lastNotifiedNearbyWorkbenchIdRef.current !== null) {
+                  lastNotifiedNearbyWorkbenchIdRef.current = null;
+                  nearbyWorkbenchChangeRef.current?.(null);
+                }
+              }
+
               if (isRaidScene) {
                 let closestExit:
                   | {
@@ -7076,6 +6720,8 @@ export function GameCanvas({
               canOpenChest = false;
               interactableTraderId = null;
               canInteractWithTrader = false;
+              interactableWorkbenchId = null;
+              canInteractWithWorkbench = false;
               canUseRaidExit = false;
               interactableRaidExitId = null;
               if (lastNotifiedNearbyChestIdRef.current !== null) {
@@ -7086,6 +6732,10 @@ export function GameCanvas({
                 lastNotifiedNearbyTraderIdRef.current = null;
                 nearbyTraderChangeRef.current?.(null);
               }
+              if (lastNotifiedNearbyWorkbenchIdRef.current !== null) {
+                lastNotifiedNearbyWorkbenchIdRef.current = null;
+                nearbyWorkbenchChangeRef.current?.(null);
+              }
               chestPrompt.setVisible(false);
               objectiveArrowChangeRef.current?.(null);
               objectivePulse.setVisible(false);
@@ -7093,7 +6743,9 @@ export function GameCanvas({
 
             if (localCharacter && activeSkillTargetingRef.current) {
               castRangeIndicator.setPosition(localCharacter.container.x, localCharacter.container.y);
-              castRangeIndicator.setRadius(getCharacterCastRange(latestProfileRef.current.playerEquipment));
+              castRangeIndicator.setRadius(
+                getCharacterCastRange(latestProfileRef.current.playerEquipment, CAST_HELPERS_CONFIG),
+              );
               castRangeIndicator.setVisible(true);
             } else {
               castRangeIndicator.setVisible(false);
@@ -7232,6 +6884,7 @@ export function GameCanvas({
                   : undefined;
                 const traderBodyOverlayAnimation = getWorldTraderBodyOverlayAnimation(
                   resolvedBodyTexturePath,
+                  PLAYER_ANIMATIONS.idle,
                 );
                 const bodyTextureKey = resolvedBodyTexturePath
                   ? traderBodyOverlayAnimation
@@ -7322,23 +6975,37 @@ export function GameCanvas({
               targetingCursor.setText('+');
               targetingCursor.setColor('#d7f0b6');
               targetingCursor.setVisible(true);
-            } else if (activeSkillTargetingRef.current === 'fireball') {
+            } else if (activeSkillTargetingRef.current?.type === 'skill' && activeSkillTargetingRef.current.skillId === 'fireball') {
               const pointer = this.input.activePointer;
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
               const originX = localCharacter?.container.x ?? pointerWorld.x;
               const originY = localCharacter?.container.y ?? pointerWorld.y;
-              const resolvedTarget = clampTargetToCastRange(latestProfileRef.current.playerEquipment, originX, originY, pointerWorld.x, pointerWorld.y);
+              const resolvedTarget = clampTargetToCastRange(
+                latestProfileRef.current.playerEquipment,
+                originX,
+                originY,
+                pointerWorld.x,
+                pointerWorld.y,
+                CAST_HELPERS_CONFIG,
+              );
               targetingPreviewTiles.forEach((tile) => tile.setVisible(false));
               targetingCursor.setPosition(pointerWorld.x, pointerWorld.y);
               targetingCursor.setText('+');
               targetingCursor.setColor(resolvedTarget.clamped ? '#ff9a7a' : '#ffd18a');
               targetingCursor.setVisible(true);
-            } else if (activeSkillTargetingRef.current === 'fireField') {
+            } else if (activeSkillTargetingRef.current?.type === 'skill' && activeSkillTargetingRef.current.skillId === 'fireField') {
               const pointer = this.input.activePointer;
               const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
               const originX = localCharacter?.container.x ?? pointerWorld.x;
               const originY = localCharacter?.container.y ?? pointerWorld.y;
-              const resolvedTarget = clampTargetToCastRange(latestProfileRef.current.playerEquipment, originX, originY, pointerWorld.x, pointerWorld.y);
+              const resolvedTarget = clampTargetToCastRange(
+                latestProfileRef.current.playerEquipment,
+                originX,
+                originY,
+                pointerWorld.x,
+                pointerWorld.y,
+                CAST_HELPERS_CONFIG,
+              );
               const tileX = Math.floor(resolvedTarget.x / meadowMap.tileSize);
               const tileY = Math.floor(resolvedTarget.y / meadowMap.tileSize);
               let previewIndex = 0;
@@ -7359,6 +7026,30 @@ export function GameCanvas({
               targetingCursor.setPosition(pointerWorld.x, pointerWorld.y);
               targetingCursor.setText('+');
               targetingCursor.setColor(resolvedTarget.clamped ? '#ff9a7a' : '#ffd18a');
+              targetingCursor.setVisible(true);
+            } else if (activeSkillTargetingRef.current?.type === 'consumable') {
+              const pointer = this.input.activePointer;
+              const pointerWorld = camera.getWorldPoint(pointer.x, pointer.y);
+              const tileX = Math.floor(pointerWorld.x / meadowMap.tileSize);
+              const tileY = Math.floor(pointerWorld.y / meadowMap.tileSize);
+              let previewIndex = 0;
+
+              for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+                for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+                  const previewTile = targetingPreviewTiles[previewIndex];
+                  const previewX = (tileX + offsetX) * meadowMap.tileSize + meadowMap.tileSize / 2;
+                  const previewY = (tileY + offsetY) * meadowMap.tileSize + meadowMap.tileSize / 2;
+                  previewTile.setPosition(previewX, previewY);
+                  previewTile.setFillStyle(0x7ddf8a, 0.16);
+                  previewTile.setStrokeStyle(1, 0xc8ffd1, 0.5);
+                  previewTile.setVisible(true);
+                  previewIndex += 1;
+                }
+              }
+
+              targetingCursor.setPosition(pointerWorld.x, pointerWorld.y);
+              targetingCursor.setText('!');
+              targetingCursor.setColor('#c8ffd1');
               targetingCursor.setVisible(true);
             } else {
               if (lastWorldHoverTileRef.current !== null) {
@@ -7389,11 +7080,103 @@ export function GameCanvas({
             if (!isRaidScene) {
               worldMobVisuals.forEach((mobVisual) => {
                 const renderState = resolveMobRenderState(mobVisual.kind, this.time.now);
+                const mobDepth = getEntitySortDepth(getMobFootY({ sprite: mobVisual.sprite }), mapHeight);
                 mobVisual.sprite.setTexture(renderState.textureKey, renderState.frame);
                 mobVisual.sprite.setScale(renderState.renderScale);
                 mobVisual.sprite.setOrigin(0.5, renderState.anchorY);
                 mobVisual.shadow.setPosition(mobVisual.sprite.x, mobVisual.sprite.y + 15);
+                mobVisual.shadow.setDepth(mobDepth - ENTITY_SORT_SHADOW_OFFSET);
+                mobVisual.sprite.setDepth(mobDepth);
                 mobVisual.nameplate.setPosition(mobVisual.sprite.x, mobVisual.sprite.y - 24);
+                mobVisual.nameplate.setDepth(mobDepth + ENTITY_SORT_LABEL_OFFSET);
+              });
+            }
+
+            if (!isRaidScene) {
+              worldTraderVisuals.forEach((traderVisual) => {
+                const traderDepth = getEntitySortDepth(
+                  getWorldTraderFootY(traderVisual, tileSize),
+                  mapHeight,
+                );
+                traderVisual.shadow.setDepth(traderDepth - ENTITY_SORT_SHADOW_OFFSET);
+                traderVisual.container.setDepth(traderDepth);
+                traderVisual.nameplate.setDepth(traderDepth + ENTITY_SORT_LABEL_OFFSET);
+                traderVisual.questMarker.setDepth(traderDepth + ENTITY_SORT_LABEL_OFFSET + 0.02);
+              });
+            }
+
+            collisionDebugGraphics.clear();
+            if (debugCollisionEnabledRef.current) {
+              const tileBounds = {
+                minX: Math.max(0, Math.floor(camera.worldView.x / tileSize) - 1),
+                maxX: Math.min(
+                  (isRaidScene ? raidCollisionWidth : meadowMap.width) - 1,
+                  Math.ceil((camera.worldView.right ?? (camera.worldView.x + camera.worldView.width)) / tileSize) + 1,
+                ),
+                minY: Math.max(0, Math.floor(camera.worldView.y / tileSize) - 1),
+                maxY: Math.min(
+                  (isRaidScene ? raidCollisionHeight : meadowMap.height) - 1,
+                  Math.ceil((camera.worldView.bottom ?? (camera.worldView.y + camera.worldView.height)) / tileSize) + 1,
+                ),
+              };
+
+              for (let tileY = tileBounds.minY; tileY <= tileBounds.maxY; tileY += 1) {
+                for (let tileX = tileBounds.minX; tileX <= tileBounds.maxX; tileX += 1) {
+                  const tileLeft = tileX * tileSize;
+                  const tileTop = tileY * tileSize;
+                  if (isRaidScene) {
+                    const tileIndex = tileY * raidCollisionWidth + tileX;
+                    const isBlocked = raidBlockedTiles[tileIndex] === 1;
+                    const isChestBlocked = raidChestBlockedTiles[tileIndex] === 1;
+                    if (isBlocked || isChestBlocked) {
+                      const color = isChestBlocked ? DEBUG_COLLISION_CHEST_TILE_COLOR : DEBUG_COLLISION_TILE_COLOR;
+                      collisionDebugGraphics.fillStyle(color, isChestBlocked ? 0.22 : 0.16);
+                      collisionDebugGraphics.fillRect(tileLeft, tileTop, tileSize, tileSize);
+                      collisionDebugGraphics.lineStyle(1, color, 0.9);
+                      collisionDebugGraphics.strokeRect(tileLeft + 0.5, tileTop + 0.5, tileSize - 1, tileSize - 1);
+                    }
+                    continue;
+                  }
+
+                  if (isBlockedMeadowTile(meadowDecorations, meadowStamps, tileX, tileY)) {
+                    collisionDebugGraphics.fillStyle(DEBUG_COLLISION_TILE_COLOR, 0.16);
+                    collisionDebugGraphics.fillRect(tileLeft, tileTop, tileSize, tileSize);
+                    collisionDebugGraphics.lineStyle(1, DEBUG_COLLISION_TILE_COLOR, 0.9);
+                    collisionDebugGraphics.strokeRect(tileLeft + 0.5, tileTop + 0.5, tileSize - 1, tileSize - 1);
+                  }
+                }
+              }
+
+              characters.forEach((character, sessionId) => {
+                if (character.isDead || character.isVisible === false) {
+                  return;
+                }
+
+                const color =
+                  sessionId === localSessionId
+                    ? DEBUG_COLLISION_PLAYER_COLOR
+                    : DEBUG_COLLISION_REMOTE_PLAYER_COLOR;
+                collisionDebugGraphics.lineStyle(2, color, 0.95);
+                collisionDebugGraphics.strokeEllipse(
+                  character.container.x,
+                  getPlayerMobCollisionCenterY(character.container.y),
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth * 2,
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight * 2,
+                );
+              });
+
+              mobs.forEach((mob) => {
+                if (mob.isDead || mob.isVisible === false) {
+                  return;
+                }
+
+                collisionDebugGraphics.lineStyle(2, DEBUG_COLLISION_MOB_COLOR, 0.95);
+                collisionDebugGraphics.strokeEllipse(
+                  mob.sprite.x,
+                  getPlayerMobCollisionCenterY(mob.sprite.y),
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth * 2,
+                  WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight * 2,
+                );
               });
             }
 
@@ -7415,6 +7198,13 @@ export function GameCanvas({
                 if (trader) {
                   traderInteractRef.current?.(trader);
                 }
+              } else if (!isRaidScene && canInteractWithWorkbench && interactableWorkbenchId) {
+                const [, tileX, tileY] = interactableWorkbenchId.split(':');
+                workbenchInteractRef.current?.({
+                  id: interactableWorkbenchId,
+                  x: Number(tileX) * tileSize + tileSize / 2,
+                  y: Number(tileY) * tileSize + tileSize / 2,
+                });
               }
             }
           });
@@ -7472,9 +7262,11 @@ export function GameCanvas({
             worldEditSpawnPreview.destroy();
             worldEditTraderShadow.destroy();
             worldEditTraderContainer.destroy();
+            collisionDebugGraphics.destroy();
             room?.leave();
             roomRef.current = null;
             playerVisualRef.current = null;
+            beforePlayerRespawnRef.current = undefined;
             characters.forEach((_character, sessionId) => {
               destroyCharacter(sessionId);
             });
@@ -7482,11 +7274,15 @@ export function GameCanvas({
         }
       }
 
+      containerRef.current.replaceChildren();
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: containerRef.current,
         backgroundColor: '#6fbe4a',
         pixelArt: true,
+        audio: {
+          noAudio: true,
+        },
         scale: {
           mode: Phaser.Scale.RESIZE,
           autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -7511,10 +7307,11 @@ export function GameCanvas({
       roomRef.current?.leave();
       roomRef.current = null;
       playerVisualRef.current = null;
+      beforePlayerRespawnRef.current = undefined;
       estimatedOneWayLatencyMsRef.current = 0;
       game?.destroy(true);
     };
-  }, [activeRoomName, JSON.stringify(activeRoomOptions), playerName, JSON.stringify(skillEffectOverrides)]);
+  }, [activeRoomName, JSON.stringify(activeRoomOptions), playerName, contentVersion, JSON.stringify(skillEffectOverrides)]);
 
   return (
     <div

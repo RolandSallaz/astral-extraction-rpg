@@ -22,6 +22,7 @@ coverage/
 **/.next/
 next-env.d.ts
 *.tsbuildinfo
+**/.tsbuild/
 
 # Logs
 logs/

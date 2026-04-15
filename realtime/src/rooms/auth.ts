@@ -6,7 +6,8 @@
  * must originate from the backend - never from client options.
  */
 
-import { canonicalizeItemId } from "@mmorpg/shared";
+import { INVENTORY_SIZE, canonicalizeItemId } from "@mmorpg/shared";
+import { normalizeRoomInventorySlots } from "./roomItems.js";
 
 const BACKEND_BASE_URL =
   process.env.BACKEND_URL ?? process.env.BACKEND_API_URL ?? "http://localhost:3000";
@@ -100,6 +101,13 @@ export async function verifySessionToken(
  * Apply verified player data to a Colyseus player state schema.
  * Works for both PlayerState (world) and RaidPlayerState (raid).
  */
+type InventoryTarget = {
+  inventory?: {
+    clear(): void;
+    push(value: string): unknown;
+  };
+};
+
 export function applyVerifiedProfile(
   player: {
     name: string;
@@ -123,7 +131,7 @@ export function applyVerifiedProfile(
     weaponGemItem1: string;
     weaponGemItem2: string;
     weaponGemItem3: string;
-  },
+  } & InventoryTarget,
   verified: VerifiedPlayer,
 ) {
   const canonicalBodyItem = canonicalizeItemId(verified.equipment.body) ?? "";
@@ -150,4 +158,12 @@ export function applyVerifiedProfile(
   player.weaponGemItem1 = verified.equipment["weapon-gem-1"] ?? "";
   player.weaponGemItem2 = verified.equipment["weapon-gem-2"] ?? "";
   player.weaponGemItem3 = verified.equipment["weapon-gem-3"] ?? "";
+
+  if (player.inventory) {
+    const normalizedInventory = normalizeRoomInventorySlots(verified.inventory ?? [], INVENTORY_SIZE);
+    player.inventory.clear();
+    normalizedInventory.forEach((value) => {
+      player.inventory?.push(value);
+    });
+  }
 }

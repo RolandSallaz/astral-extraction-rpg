@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
+import { isSameEquipmentItemFamily } from '@mmorpg/shared';
 import {
   DEFAULT_ITEM_BALANCE_CONFIG,
   getResolvedItemTooltipStats,
@@ -135,7 +136,9 @@ function isSameDragSource(left: DragSource, right: DragSource): boolean {
 type HudPanel = 'inventory' | 'equipment';
 
 const EQUIP_SLOTS: Array<{ id: EquipSlotId; label: string }> = [
+  { id: 'head', label: 'Head' },
   { id: 'amulet', label: 'Amulet' },
+  { id: 'body', label: 'Body' },
   { id: 'weapon', label: 'Weapon' },
   { id: 'offhand', label: 'Offhand' },
   { id: 'ring-1', label: 'Ring I' },
@@ -180,6 +183,10 @@ const ACTION_BAR_SLOTS: Array<{ key: ActionSlotKey; code?: string }> = [
 
 type SkillCooldownState = Partial<Record<SkillId, number>>;
 type ConsumableCooldownState = Partial<Record<'healing_potion' | 'teleport_scroll', number>>;
+type ActiveTargetingState =
+  | { type: 'skill'; skillId: 'fireball' | 'fireField' }
+  | { type: 'consumable'; itemId: 'healing_potion' }
+  | null;
 const CONSUMABLE_COOLDOWN_MS: Partial<Record<ConsumableItemId, number>> = {
   healing_potion: 20000,
 };
@@ -369,8 +376,30 @@ function formatGoldValue(value: number) {
   return `${Math.max(0, Math.floor(value))}g`;
 }
 
-function getItemTooltipLines(itemId: string, itemBalanceConfig: ItemBalanceConfig = DEFAULT_ITEM_BALANCE_CONFIG) {
-  const item = EQUIPMENT_ITEMS[itemId as keyof typeof EQUIPMENT_ITEMS];
+function getDisplayItemName(itemValue: string) {
+  const parsed = parseInventoryItem(itemValue);
+  if (!parsed) {
+    return 'Unknown Item';
+  }
+
+  return parsed.raidUnidentified ? 'Unidentified Potion' : EQUIPMENT_ITEMS[parsed.itemId].name;
+}
+
+function getDisplayItemTooltipLines(itemValue: string, itemBalanceConfig: ItemBalanceConfig = DEFAULT_ITEM_BALANCE_CONFIG) {
+  const parsed = parseInventoryItem(itemValue);
+  if (!parsed) {
+    return ['Unknown item'];
+  }
+
+  if (parsed.raidUnidentified) {
+    return [
+      'Raid potion',
+      'Effect is unknown until identified',
+      'Identify by finding another of the same type or by extracting',
+    ];
+  }
+
+  const item = EQUIPMENT_ITEMS[parsed.itemId as keyof typeof EQUIPMENT_ITEMS];
   if (!item) {
     return ['Unknown item'];
   }
@@ -379,6 +408,10 @@ function getItemTooltipLines(itemId: string, itemBalanceConfig: ItemBalanceConfi
     ...getResolvedItemTooltipStats(item.id, itemBalanceConfig),
     `Value: ${formatGoldValue(getResolvedItemValue(item.id, itemBalanceConfig))}`,
   ];
+}
+
+function getItemTooltipLines(itemId: string, itemBalanceConfig: ItemBalanceConfig = DEFAULT_ITEM_BALANCE_CONFIG) {
+  return getDisplayItemTooltipLines(itemId, itemBalanceConfig);
 }
 
 function HudTabIcon({ panel }: { panel: HudPanel }) {
@@ -604,7 +637,11 @@ function canSocketGemIntoSlot(itemId: GemItemId, slot: BaseEquipmentSlot, equipm
     return false;
   }
 
-  if (!gemItem.socketableInto?.includes(equippedItem.id as EquipmentItemId)) {
+  if (
+    !gemItem.socketableInto?.some((supportedItemId) =>
+      isSameEquipmentItemFamily(equippedItem.id, supportedItemId),
+    )
+  ) {
     return false;
   }
 
@@ -636,19 +673,15 @@ function canSwapIntoEquipment(itemValue: string | null, slot: EquipmentSlot) {
 function getAvailableSkills(equipment: EquipmentState): SkillId[] {
   const availableSkills: SkillId[] = [];
 
-  if (equipment.weapon === 'wood_staff') {
+  if (isSameEquipmentItemFamily(equipment.weapon, 'wood_staff')) {
     availableSkills.push('woodStaffStrike');
   }
 
   return availableSkills;
 }
 
-function getDefaultActionBarBindings(equipment: EquipmentState): Partial<Record<ActionSlotKey, ActionBarBinding | null>> {
+function getDefaultActionBarBindings(): Partial<Record<ActionSlotKey, ActionBarBinding | null>> {
   const nextBindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {};
-
-  if (equipment.weapon === 'wood_staff') {
-    nextBindings.LMB = { kind: 'skill', skillId: 'woodStaffStrike' };
-  }
 
   return nextBindings;
 }
@@ -732,7 +765,7 @@ function getResolvedActionBarBindings(
 ) {
   const availableSkills = getAvailableSkills(equipment);
   const merged: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {
-    ...getDefaultActionBarBindings(equipment),
+    ...getDefaultActionBarBindings(),
     ...bindings,
   };
 
@@ -761,6 +794,7 @@ export function GameHud({
   skillCooldowns,
   consumableCooldowns,
   onSkillTrigger,
+  onActionBarConsumableTrigger,
   onMouseSkillBindingsChange,
   onEquipmentChange,
   onInventoryChange,
@@ -779,10 +813,11 @@ export function GameHud({
   playerStrength: number;
   playerAgility: number;
   playerIntellect: number;
-  activeSkillTargeting: 'fireball' | 'fireField' | null;
+  activeSkillTargeting: ActiveTargetingState;
   skillCooldowns: SkillCooldownState;
   consumableCooldowns: ConsumableCooldownState;
   onSkillTrigger: (skillId: SkillId) => void;
+  onActionBarConsumableTrigger: (itemId: 'healing_potion') => void;
   onMouseSkillBindingsChange?: (bindings: MouseSkillBindings) => void;
   onEquipmentChange: (equipment: EquipmentState) => void;
   onInventoryChange: (inventory: InventoryState) => void;
@@ -799,6 +834,7 @@ export function GameHud({
   const [cooldownNow, setCooldownNow] = useState(() => Date.now());
   const [dragState, setDragState] = useState<DragState | null>(null);
   const actionBarDragHandledRef = useRef(false);
+  const autoAssignedSkillsRef = useRef<Set<SkillId>>(new Set());
   const [hoveredItem, setHoveredItem] = useState<HoveredItemState | null>(null);
   const [hoveredSkill, setHoveredSkill] = useState<HoveredSkillState | null>(null);
   const [itemContextMenu, setItemContextMenu] = useState<ItemContextMenuState | null>(null);
@@ -806,11 +842,11 @@ export function GameHud({
   const [skillsDrawerOpen, setSkillsDrawerOpen] = useState(false);
   const [actionBarBindings, setActionBarBindings] = useState<Partial<Record<ActionSlotKey, ActionBarBinding | null>>>(() => {
     if (typeof window === 'undefined') {
-      return getDefaultActionBarBindings(equipment);
+      return getDefaultActionBarBindings();
     }
 
     return parseStoredActionBarBindings(window.localStorage.getItem(ACTION_BAR_STORAGE_KEY))
-      ?? getDefaultActionBarBindings(equipment);
+      ?? getDefaultActionBarBindings();
   });
   const clearHoveredItemScope = (scope: HoveredItemState['scope']) => {
     setHoveredItem((current) => (current?.scope === scope ? null : current));
@@ -896,6 +932,60 @@ export function GameHud({
     onMouseSkillBindingsChange?.(getMouseSkillBindingsFromActionBar(resolvedBindings));
   }, [actionBarBindings, equipment, onMouseSkillBindingsChange]);
 
+  useEffect(() => {
+    setActionBarBindings((current) => {
+      const resolved = getResolvedActionBarBindings(current, equipment);
+      const next: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = { ...resolved };
+      let changed = false;
+      const boundSkills = new Set<SkillId>();
+
+      ACTION_BAR_SLOTS.forEach(({ key }) => {
+        const binding = resolved[key];
+        if (binding?.kind === 'skill') {
+          boundSkills.add(binding.skillId);
+        }
+      });
+
+      autoAssignedSkillsRef.current.forEach((skillId) => {
+        if (!availableSkills.includes(skillId)) {
+          autoAssignedSkillsRef.current.delete(skillId);
+        }
+      });
+
+      const findEmptySlot = () => {
+        for (const { key } of MOUSE_ACTION_SLOTS) {
+          if (!next[key]) {
+            return key;
+          }
+        }
+        for (const { key } of KEYBOARD_ACTION_SLOTS) {
+          if (!next[key]) {
+            return key;
+          }
+        }
+        return null;
+      };
+
+      availableSkills.forEach((skillId) => {
+        if (boundSkills.has(skillId) || autoAssignedSkillsRef.current.has(skillId)) {
+          return;
+        }
+
+        const emptySlot = findEmptySlot();
+        if (!emptySlot) {
+          return;
+        }
+
+        next[emptySlot] = { kind: 'skill', skillId };
+        boundSkills.add(skillId);
+        autoAssignedSkillsRef.current.add(skillId);
+        changed = true;
+      });
+
+      return changed ? next : current;
+    });
+  }, [availableSkills, equipment]);
+
   const updateActionBarBindings = (
     updater: (
       current: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
@@ -963,6 +1053,11 @@ export function GameHud({
     const cooldownDuration = CONSUMABLE_COOLDOWN_MS[binding.itemId] ?? 0;
     const cooldownEndsAt = consumableCooldowns[binding.itemId] ?? 0;
     if (cooldownDuration > 0 && cooldownEndsAt > Date.now()) {
+      return;
+    }
+
+    if (binding.itemId === 'healing_potion') {
+      onActionBarConsumableTrigger('healing_potion');
       return;
     }
 
@@ -1482,7 +1577,7 @@ export function GameHud({
       event.preventDefault();
       event.stopPropagation();
 
-      if (event.ctrlKey) {
+      if (event.altKey) {
         handleEquipFromSource(source, itemValue);
         return;
       }
@@ -1534,6 +1629,11 @@ export function GameHud({
       } else if (source.type === 'container' && container) {
         onInventoryUse({ type: 'container', containerId: container.id, slotIndex: source.index });
       }
+      setItemContextMenu(null);
+      return;
+    }
+
+    if (itemDefinition.type !== 'equipment' && itemDefinition.type !== 'gem') {
       setItemContextMenu(null);
       return;
     }
@@ -1677,6 +1777,11 @@ export function GameHud({
         event.preventDefault();
         return;
       }
+      if (event.altKey) {
+        event.preventDefault();
+        handleEquipFromSource({ type: 'inventory', index }, itemId);
+        return;
+      }
 
       event.preventDefault();
       setDragState({
@@ -1714,6 +1819,11 @@ export function GameHud({
 
       if (event.ctrlKey && quickTransferItem({ type: 'container', index })) {
         event.preventDefault();
+        return;
+      }
+      if (event.altKey) {
+        event.preventDefault();
+        handleEquipFromSource({ type: 'container', index }, itemId);
         return;
       }
 
@@ -2333,7 +2443,12 @@ export function GameHud({
             ? 'border-[#f4b36b]/40 bg-[linear-gradient(180deg,rgba(89,49,20,0.92),rgba(39,21,10,0.96))]'
             : ''
         } ${
-          activeSkillTargeting === skillId && skillId
+          ((skillId &&
+            activeSkillTargeting?.type === 'skill' &&
+            activeSkillTargeting.skillId === skillId) ||
+            (itemId === 'healing_potion' &&
+              activeSkillTargeting?.type === 'consumable' &&
+              activeSkillTargeting.itemId === itemId))
             ? 'ring-2 ring-[#ffd18a]/70 ring-offset-2 ring-offset-transparent'
             : ''
         } ${binding && !isBindingAvailable ? 'opacity-55' : ''} ${isCoolingDown ? 'opacity-90' : ''}`}
@@ -2708,7 +2823,20 @@ export function GameHud({
           >
             {(() => {
               const itemId = getInventoryItemId(visibleItemContextMenu.itemValue);
-              return itemId && EQUIPMENT_ITEMS[itemId].type === 'consumable' ? 'Use' : 'Equip';
+              if (!itemId) {
+                return 'Equip';
+              }
+
+              const itemType = EQUIPMENT_ITEMS[itemId].type;
+              if (itemType === 'consumable') {
+                return 'Use';
+              }
+
+              if (itemType === 'equipment' || itemType === 'gem') {
+                return 'Equip';
+              }
+
+              return 'Store';
             })()}
           </button>
           <button
@@ -2775,7 +2903,7 @@ export function GameHud({
                         className="font-serif text-lg font-bold"
                         style={{ color: getItemTierStyle(item.id)?.textColor ?? '#f6ffea' }}
                       >
-                        {item.name}
+                        {getDisplayItemName(visibleInspectItem.itemValue)}
                       </div>
                       <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-[#bfd8a4]">
                         {item.slot ?? item.type}
@@ -2783,7 +2911,7 @@ export function GameHud({
                     </div>
                   </div>
           <div className="mt-3 space-y-1 text-sm leading-5 text-[#dceec9]">
-            {getItemTooltipLines(parsed.itemId, itemBalanceConfig).map((line) => (
+            {getDisplayItemTooltipLines(visibleInspectItem.itemValue, itemBalanceConfig).map((line) => (
               <div key={line}>{line}</div>
             ))}
           </div>
@@ -2891,8 +3019,7 @@ export function GameHud({
             }}
           >
             {(() => {
-              const itemId = getInventoryItemId(visibleHoveredItem.itemId);
-              return itemId ? EQUIPMENT_ITEMS[itemId].name : 'Unknown Item';
+              return getDisplayItemName(visibleHoveredItem.itemId);
             })()}
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-[#bfd8a4]">
@@ -2903,8 +3030,7 @@ export function GameHud({
           </div>
           <div className="mt-2 space-y-1 text-sm leading-5 text-[#dceec9]">
             {(() => {
-              const itemId = getInventoryItemId(visibleHoveredItem.itemId);
-              return (itemId ? getItemTooltipLines(itemId, itemBalanceConfig) : ['Unknown item']).map((line) => (
+              return getDisplayItemTooltipLines(visibleHoveredItem.itemId, itemBalanceConfig).map((line) => (
                 <div key={line}>{line}</div>
               ));
             })()}

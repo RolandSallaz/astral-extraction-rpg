@@ -1,12 +1,9 @@
 import { type ChestState } from "../schema/ChestState.js";
 import {
-  EMPTY_ITEM_SLOT,
   HEALING_POTION_ID,
   TELEPORT_SCROLL_ID,
   consumeRoomInventoryEntry,
   normalizeRoomInventorySlots,
-  parseRoomInventoryEntry,
-  serializeRoomInventoryEntry,
 } from "../roomItems.js";
 
 type RoomStringSlotTarget = {
@@ -31,19 +28,6 @@ export function syncRoomChestSlots(
   const nextSlots = normalizeRoomInventorySlots(slots, chest.columns * chest.rows);
   replaceRoomStringSlots(chest.slots, nextSlots);
   return nextSlots;
-}
-
-export function serializeRoomProfileInventoryEntries(
-  values: Array<string | null | undefined> | null | undefined,
-) {
-  return (values ?? []).map((value) => {
-    const parsed = parseRoomInventoryEntry(value);
-    if (!parsed) {
-      return EMPTY_ITEM_SLOT;
-    }
-
-    return serializeRoomInventoryEntry(parsed.code, parsed.quantity, parsed.socketedGemIds);
-  });
 }
 
 export function consumeSupportedRoomConsumable(

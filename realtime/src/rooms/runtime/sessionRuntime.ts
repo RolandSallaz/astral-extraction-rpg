@@ -87,8 +87,6 @@ export function transferRoomOwnedReferences(options: {
   mobs?: Iterable<AggroReference>;
   projectiles?: Iterable<OwnedReference>;
   groundEffects?: Iterable<OwnedReference>;
-  pendingBurstSpawns?: Iterable<OwnedReference>;
-  pendingAftershocks?: Iterable<OwnedReference>;
 }) {
   const { fromId, toId } = options;
   if (fromId === toId) {
@@ -108,18 +106,6 @@ export function transferRoomOwnedReferences(options: {
   }
 
   for (const ownedReference of options.groundEffects ?? []) {
-    if (ownedReference.ownerId === fromId) {
-      ownedReference.ownerId = toId;
-    }
-  }
-
-  for (const ownedReference of options.pendingBurstSpawns ?? []) {
-    if (ownedReference.ownerId === fromId) {
-      ownedReference.ownerId = toId;
-    }
-  }
-
-  for (const ownedReference of options.pendingAftershocks ?? []) {
     if (ownedReference.ownerId === fromId) {
       ownedReference.ownerId = toId;
     }

@@ -1,12 +1,11 @@
 import { getArmorGemConfig, type ArmorGemCarrier } from "./armorGems.js";
 import {
-  FIREBALL_SHARD_SKILL_ID,
   FIREBALL_SPLIT_SKILL_ID,
   getFireballCastTimeMs,
   type ProjectileGemConfig,
   type WeaponGemCarrier,
 } from "./fireballGems.js";
-import { getFireDamageTakenMultiplier } from "./itemBalance.js";
+import { getFireDamageTakenMultiplier } from "@mmorpg/shared";
 
 export type DamageType = "physical" | "fire" | "ice" | "lightning";
 

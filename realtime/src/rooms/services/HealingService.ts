@@ -9,6 +9,8 @@ import { applyHealingMultiplier } from "../projectileSkills.js";
 import { type ArmorGemCarrier } from "../armorGems.js";
 
 export type HealablePlayer = ArmorGemCarrier & {
+  x: number;
+  y: number;
   health: number;
   maxHealth: number;
   dead: boolean;
@@ -45,8 +47,9 @@ export class HealingService {
     tickMs: number;
     healPerTick: number;
     getPlayer: (id: string) => HealablePlayer | undefined;
+    onHeal?: (playerId: string, player: HealablePlayer, amount: number) => void;
   }) {
-    const { now, tickMs, healPerTick, getPlayer } = options;
+    const { now, tickMs, healPerTick, getPlayer, onHeal } = options;
 
     for (const [playerId, entry] of this.entries.entries()) {
       const player = getPlayer(playerId);
@@ -64,8 +67,13 @@ export class HealingService {
         continue;
       }
 
+      const previousHealth = player.health;
       const healedAmount = applyHealingMultiplier(healPerTick, player);
       player.health = Math.min(player.maxHealth, player.health + healedAmount);
+      const restoredHealth = Math.max(0, player.health - previousHealth);
+      if (restoredHealth > 0) {
+        onHeal?.(playerId, player, restoredHealth);
+      }
       entry.ticksRemaining -= 1;
 
       if (entry.ticksRemaining <= 0) {

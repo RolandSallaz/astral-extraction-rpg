@@ -45,6 +45,7 @@ export type RaidMobGenerationDefinition = {
   minSpawnCount: number;
   maxSpawnCount: number;
   spawnRatio: number;
+  skeletonSpawnChance: number;
   batMinRoomHeight: number;
   batMinRoomWidth: number;
   batRandomThreshold: number;
@@ -91,6 +92,7 @@ const DEFAULT_MOB_GENERATION: RaidMobGenerationDefinition = {
   minSpawnCount: 6,
   maxSpawnCount: 18,
   spawnRatio: 0.75,
+  skeletonSpawnChance: 0.18,
   batMinRoomHeight: 8,
   batMinRoomWidth: 8,
   batRandomThreshold: 0.45,
@@ -218,6 +220,7 @@ function normalizeMobGeneration(value: unknown): RaidMobGenerationDefinition {
     minSpawnCount: normalizeInteger(candidate.minSpawnCount, DEFAULT_MOB_GENERATION.minSpawnCount, 0),
     maxSpawnCount: normalizeInteger(candidate.maxSpawnCount, DEFAULT_MOB_GENERATION.maxSpawnCount, 0),
     spawnRatio: normalizeNumber(candidate.spawnRatio, DEFAULT_MOB_GENERATION.spawnRatio, 0),
+    skeletonSpawnChance: normalizeNumber(candidate.skeletonSpawnChance, DEFAULT_MOB_GENERATION.skeletonSpawnChance, 0),
     batMinRoomHeight: normalizeInteger(candidate.batMinRoomHeight, DEFAULT_MOB_GENERATION.batMinRoomHeight, 0),
     batMinRoomWidth: normalizeInteger(candidate.batMinRoomWidth, DEFAULT_MOB_GENERATION.batMinRoomWidth, 0),
     batRandomThreshold: normalizeNumber(candidate.batRandomThreshold, DEFAULT_MOB_GENERATION.batRandomThreshold, 0),

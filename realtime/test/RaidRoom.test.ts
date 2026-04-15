@@ -2,7 +2,13 @@ import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { createAppConfig } from "../src/app.config.js";
 import { RaidRoomState } from "../src/rooms/schema/RaidRoomState.js";
-import { RaidRoom } from "../src/rooms/RaidRoom.js";
+import { KafkaPublisherService } from "../src/services/KafkaPublisher.js";
+import {
+  createRealtimeServices,
+  setRealtimeServices,
+  type RealtimeServices,
+} from "../src/services/runtimeServices.js";
+import { connectToRoom } from "./helpers/realtimeJoin.js";
 
 async function waitForNextSimulation(room: { waitForNextPatch: () => Promise<unknown> }, ms = 280) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -11,11 +17,19 @@ async function waitForNextSimulation(room: { waitForNextPatch: () => Promise<unk
 
 describe("raid room", () => {
   let colyseus: ColyseusTestServer<ReturnType<typeof createAppConfig>>;
+  let previousRealtimeServices: RealtimeServices;
 
-  before(async () => (colyseus = await boot(createAppConfig())));
+  before(async () => {
+    const kafkaPublisher = new KafkaPublisherService();
+    kafkaPublisher.publish = async () => {};
+    kafkaPublisher.shutdown = async () => {};
+    previousRealtimeServices = setRealtimeServices(createRealtimeServices({ kafkaPublisher }));
+    colyseus = await boot(createAppConfig());
+  });
   after(async () => {
     await colyseus.cleanup();
     await colyseus.shutdown();
+    setRealtimeServices(previousRealtimeServices);
   });
   beforeEach(async () => await colyseus.cleanup());
 
@@ -28,7 +42,7 @@ describe("raid room", () => {
       height: 24,
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Expiry Raider",
       raidRunId: "raid-expiry-test",
       weaponItem: "wood_staff",
@@ -41,8 +55,12 @@ describe("raid room", () => {
       client.onMessage("raidExpired", (payload) => resolve(payload as Record<string, unknown>));
     });
 
-    (room as unknown as RaidRoom & { raidExpiresAt: number }).raidExpiresAt = Date.now() - 1;
-    (room as unknown as RaidRoom & { updateRaidExpiration: () => void }).updateRaidExpiration();
+    const internalRoom = room as unknown as {
+      raidExpiresAt: number;
+      updateRaidExpiration(): void;
+    };
+    internalRoom.raidExpiresAt = Date.now() - 1;
+    internalRoom.updateRaidExpiration();
 
     const payload = await Promise.race([
       payloadPromise,
@@ -70,7 +88,7 @@ describe("raid room", () => {
       height: 24,
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Sequence Raider",
       raidRunId: "raid-move-sequence",
       weaponItem: "wood_staff",
@@ -102,7 +120,7 @@ describe("raid room", () => {
       height: 24,
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Extract Raider",
       raidRunId: "raid-extract-test",
       weaponItem: "wood_staff",
@@ -156,7 +174,7 @@ describe("raid room", () => {
       templateCode: "crypt_small",
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Tutorial Raider",
       raidRunId: "raid-crypt-small-test",
     });
@@ -167,6 +185,11 @@ describe("raid room", () => {
     assert.strictEqual(room.state.width, 32);
     assert.strictEqual(room.state.height, 16);
     assert.deepStrictEqual(Array.from(room.state.exitPoints), ["27:7"]);
+    const tileAt = (x: number, y: number) => room.state.tiles[y * room.state.width + x];
+    assert.notStrictEqual(tileAt(8, 7), "wall");
+    assert.notStrictEqual(tileAt(8, 8), "wall");
+    assert.notStrictEqual(tileAt(9, 7), "wall");
+    assert.notStrictEqual(tileAt(9, 8), "wall");
 
     const tutorialChest = room.state.chests.get("raid-chest-0-13-7");
     assert.ok(tutorialChest);
@@ -196,6 +219,22 @@ describe("raid room", () => {
     await client.leave();
   });
 
+  it("spawns a mixed mob roster in the non-tutorial crypt", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-crypt-mixed-mobs",
+      seed: "crypt-mixed-mobs-seed",
+      templateCode: "crypt",
+      width: 128,
+      height: 128,
+    });
+
+    const mobKinds = new Set(Array.from(room.state.mobs.values(), (mob) => mob.kind));
+
+    assert.ok(room.state.mobs.size > 0);
+    assert.ok(mobKinds.has("bat"));
+    assert.ok(Array.from(mobKinds).some((kind) => kind !== "bat"));
+  });
+
   it("keeps the player alive in the crypt_small tutorial", async () => {
     const room = await colyseus.createRoom<RaidRoomState>("raid", {
       raidRunId: "raid-crypt-small-safety",
@@ -203,7 +242,7 @@ describe("raid room", () => {
       templateCode: "crypt_small",
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Safe Raider",
       raidRunId: "raid-crypt-small-safety",
     });
@@ -234,7 +273,7 @@ describe("raid room", () => {
       height: 24,
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Unarmed Raider",
       raidRunId: "raid-no-weapon",
     });
@@ -270,7 +309,7 @@ describe("raid room", () => {
       height: 24,
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Nova Raider",
       raidRunId: "raid-fire-nova",
       weaponItem: "wood_staff",
@@ -298,7 +337,7 @@ describe("raid room", () => {
       templateCode: "crypt_small",
     });
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Field Raider",
       raidRunId: "raid-fire-field",
       weaponItem: "wood_staff",
@@ -327,3 +366,4 @@ describe("raid room", () => {
     await client.leave();
   });
 });
+

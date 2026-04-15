@@ -1,3 +1,5 @@
+import { isSameEquipmentItemFamily } from "../items/catalog";
+
 /**
  * Skill system interface.
  *
@@ -77,5 +79,5 @@ export function canCastSkill(
   const skill = getSkillDefinition(skillId);
   if (!skill) return false;
   if (!skill.requiredWeapon) return true;
-  return weaponItem === skill.requiredWeapon;
+  return weaponItem === skill.requiredWeapon || isSameEquipmentItemFamily(weaponItem, skill.requiredWeapon);
 }

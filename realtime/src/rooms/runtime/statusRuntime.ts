@@ -1,5 +1,5 @@
 import { type BurnableEntity } from "../sharedGameplay.js";
-import { type SkillBalanceConfig } from "../skillBalance.js";
+import { type SkillBalanceConfig } from "@mmorpg/shared";
 import { BurnService } from "../services/BurnService.js";
 import { HealingService, type HealablePlayer } from "../services/HealingService.js";
 import { getRoomSkillBurnDamage } from "./skillRuntime.js";
@@ -59,11 +59,15 @@ export function updateRoomHealingTargets<TPlayer extends HealablePlayer>(options
   tickMs: number;
   healPerTick: number;
   getPlayer: (playerId: string) => TPlayer | undefined;
+  onHeal?: (playerId: string, player: TPlayer, amount: number) => void;
 }) {
   options.service.update({
     now: options.now,
     tickMs: options.tickMs,
     healPerTick: options.healPerTick,
     getPlayer: options.getPlayer,
+    onHeal: options.onHeal
+      ? (playerId, player, amount) => options.onHeal?.(playerId, player as TPlayer, amount)
+      : undefined,
   });
 }

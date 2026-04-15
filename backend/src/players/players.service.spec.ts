@@ -25,13 +25,13 @@ describe('Player inventory and serialization helpers', () => {
     };
   }
 
-  it('serializes and parses stacked inventory entries with socketed gems', () => {
-    const serialized = serializeInventoryItem('wood_staff', 2, ['fire_trail_gem', 'critical_gem']);
+  it('serializes and parses multi-socket equipment entries', () => {
+    const serialized = serializeInventoryItem('wood_staff_t2', 1, ['fire_trail_gem', 'critical_gem']);
     const parsed = parseInventoryItem(serialized);
 
-    expect(serialized).toBe('wood_staff@@fire_trail_gem,critical_gem');
+    expect(serialized).toBe('wood_staff_t2@@fire_trail_gem,critical_gem');
     expect(parsed).toEqual(expect.objectContaining({
-      itemId: 'wood_staff',
+      itemId: 'wood_staff_t2',
       quantity: 1,
       socketedGemCodes: ['fire_trail_gem', 'critical_gem'],
     }));

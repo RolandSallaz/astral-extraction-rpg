@@ -10,10 +10,10 @@ import {
 } from '../../players/player-quest.types';
 import { StartRaidDto } from '../dto/start-raid.dto';
 import { RaidRunEntity } from '../entities/raid-run.entity';
-import { generateRaidLayoutForTemplate } from '../raid-procgen';
 import { RaidTemplateFiles } from '../raid-template-files';
 
 const RECENT_RAID_REUSE_WINDOW_MS = 60_000;
+const NON_TUTORIAL_RAID_SIZE_SCALE = 2;
 
 @Injectable()
 export class StartRaidUseCase {
@@ -26,6 +26,7 @@ export class StartRaidUseCase {
 
   async execute(player: PlayerEntity, input: StartRaidDto) {
     const template = await this.requireActiveTemplate(input.templateCode);
+    const scaledTemplate = this.scaleTemplateBounds(template);
 
     if (template.code === 'crypt_small') {
       const introductionQuest = getIntroductionQuestProgress(player.quests);
@@ -45,38 +46,44 @@ export class StartRaidUseCase {
       throw new BadRequestException('Party size does not match raid template.');
     }
 
-    const reusedRun = await this.findRecentJoinableRun(template, playerCount);
+    const reusedRun = await this.findRecentJoinableRun(scaledTemplate, playerCount);
     if (reusedRun) {
       reusedRun.playerCount += playerCount;
       const savedRun = await this.raidRunsRepository.save(reusedRun);
+      const realtimeRoom = this.createRealtimeRoom(savedRun);
+
+      if (party) {
+        await this.partiesService.markPendingRaidForParty(party.id, {
+          raidRunId: savedRun.id,
+          startedAt: savedRun.startedAt?.toISOString() ?? null,
+          realtimeRoom,
+        });
+      }
+
       return {
         ...this.serializeRun(savedRun),
         joinedExisting: true,
-        realtimeRoom: this.createRealtimeRoom(savedRun),
+        realtimeRoom,
       };
     }
 
     const seed = `${template.code}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    const layout = generateRaidLayoutForTemplate(
-      template.code,
-      seed,
-      template.width,
-      template.height,
-    );
     const run = this.raidRunsRepository.create({
       seed,
       status: 'ready',
       playerCount,
-      generatedLayout: layout,
+      generatedLayout: null,
+      runtimeState: null,
+      runtimeStateUpdatedAt: null,
       startedAt: new Date(),
       finishedAt: null,
-      templateCode: template.code,
-      templateName: template.name,
-      biome: template.biome,
-      minPlayers: template.minPlayers,
-      maxPlayers: template.maxPlayers,
-      width: template.width,
-      height: template.height,
+      templateCode: scaledTemplate.code,
+      templateName: scaledTemplate.name,
+      biome: scaledTemplate.biome,
+      minPlayers: scaledTemplate.minPlayers,
+      maxPlayers: scaledTemplate.maxPlayers,
+      width: scaledTemplate.width,
+      height: scaledTemplate.height,
       party: party ?? null,
     });
 
@@ -126,6 +133,18 @@ export class StartRaidUseCase {
     };
   }
 
+  private scaleTemplateBounds(template: RaidTemplateDefinition): RaidTemplateDefinition {
+    if (template.code === 'crypt_small') {
+      return template;
+    }
+
+    return {
+      ...template,
+      width: template.width * NON_TUTORIAL_RAID_SIZE_SCALE,
+      height: template.height * NON_TUTORIAL_RAID_SIZE_SCALE,
+    };
+  }
+
   private serializeRun(run: RaidRunEntity) {
     return {
       id: run.id,
@@ -144,7 +163,8 @@ export class StartRaidUseCase {
         isActive: true,
       }),
       partyId: run.party?.id ?? null,
-      generatedLayout: run.generatedLayout,
+      generatedLayout: null,
+      runtimeState: run.runtimeState ?? null,
       startedAt: run.startedAt?.toISOString() ?? null,
       finishedAt: run.finishedAt?.toISOString() ?? null,
       createdAt: run.createdAt.toISOString(),
@@ -178,7 +198,7 @@ export class StartRaidUseCase {
       .createQueryBuilder('run')
       .leftJoinAndSelect('run.party', 'party')
       .where('run.templateCode = :templateCode', { templateCode: template.code })
-      .andWhere('run.status = :status', { status: 'ready' })
+      .andWhere('run.status IN (:...statuses)', { statuses: ['ready', 'forming', 'active', 'empty'] })
       .andWhere('run.finishedAt IS NULL')
       .andWhere('run.startedAt IS NOT NULL')
       .andWhere('run.startedAt >= :cutoff', { cutoff })

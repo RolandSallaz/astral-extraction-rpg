@@ -1,31 +1,260 @@
 {
-  "wood_staff": { "value": 90, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_trail_gem": { "value": 55, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_shatter_gem": { "value": 70, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_return_gem": { "value": 50, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_bounce_gem": { "value": 45, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_longshot_gem": { "value": 65, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_split_gem": { "value": 60, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_range_gem": { "value": 50, "tooltipStats": [], "fireResistancePercent": 0 },
-  "cast_speed_gem": { "value": 70, "tooltipStats": [], "fireResistancePercent": 0 },
-  "pierce_gem": { "value": 65, "tooltipStats": [], "fireResistancePercent": 0 },
-  "chain_gem": { "value": 75, "tooltipStats": [], "fireResistancePercent": 0 },
-  "homing_gem": { "value": 70, "tooltipStats": [], "fireResistancePercent": 0 },
-  "area_gem": { "value": 55, "tooltipStats": [], "fireResistancePercent": 0 },
-  "duration_gem": { "value": 50, "tooltipStats": [], "fireResistancePercent": 0 },
-  "knockback_gem": { "value": 45, "tooltipStats": [], "fireResistancePercent": 0 },
-  "lifesteal_gem": { "value": 90, "tooltipStats": [], "fireResistancePercent": 0 },
-  "execution_gem": { "value": 80, "tooltipStats": [], "fireResistancePercent": 0 },
-  "critical_gem": { "value": 85, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_spread_gem": { "value": 65, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_burst_gem": { "value": 60, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_nova_impact_gem": { "value": 75, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_spiral_gem": { "value": 55, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_fork_gem": { "value": 70, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_orbit_gem": { "value": 60, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_aftershock_gem": { "value": 70, "tooltipStats": [], "fireResistancePercent": 0 },
-  "fire_clone_gem": { "value": 80, "tooltipStats": [], "fireResistancePercent": 0 },
-  "healing_potion": { "value": 12, "tooltipStats": [], "fireResistancePercent": 0 },
-  "teleport_scroll": { "value": 32, "tooltipStats": [], "fireResistancePercent": 0 },
-  "sealed_relic": { "value": 0, "tooltipStats": [], "fireResistancePercent": 0 }
+  "wood_staff": {
+    "value": 10,
+    "tooltipStats": [
+      "Melee weapon",
+      "Astral catalyst",
+      "1 gem socket"
+    ],
+    "fireResistancePercent": 0
+  },
+  "wood_staff_t2": {
+    "value": 10,
+    "tooltipStats": [
+      "Melee weapon",
+      "Astral catalyst",
+      "2 gem sockets",
+      "Rare chest drop"
+    ],
+    "fireResistancePercent": 0
+  },
+  "wood_staff_t3": {
+    "value": 10,
+    "tooltipStats": [
+      "Melee weapon",
+      "Astral catalyst",
+      "3 gem sockets",
+      "Very rare chest drop"
+    ],
+    "fireResistancePercent": 0
+  },
+  "fire_robe": {
+    "value": 120,
+    "tooltipStats": [
+      "Body armor",
+      "1 gem socket"
+    ],
+    "fireResistancePercent": 15
+  },
+  "fire_robe_t2": {
+    "value": 120,
+    "tooltipStats": [
+      "Body armor",
+      "2 gem sockets",
+      "Rare chest drop"
+    ],
+    "fireResistancePercent": 15
+  },
+  "fire_robe_t3": {
+    "value": 120,
+    "tooltipStats": [
+      "Body armor",
+      "3 gem sockets",
+      "Very rare chest drop"
+    ],
+    "fireResistancePercent": 15
+  },
+  "fire_trail_gem": {
+    "value": 55,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_shatter_gem": {
+    "value": 70,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_return_gem": {
+    "value": 50,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_bounce_gem": {
+    "value": 45,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_longshot_gem": {
+    "value": 65,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_split_gem": {
+    "value": 60,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_range_gem": {
+    "value": 50,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "cast_speed_gem": {
+    "value": 70,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "pierce_gem": {
+    "value": 65,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "chain_gem": {
+    "value": 75,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "homing_gem": {
+    "value": 70,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "area_gem": {
+    "value": 55,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "duration_gem": {
+    "value": 50,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "knockback_gem": {
+    "value": 45,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "lifesteal_gem": {
+    "value": 90,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "execution_gem": {
+    "value": 80,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "critical_gem": {
+    "value": 85,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_spread_gem": {
+    "value": 65,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_burst_gem": {
+    "value": 60,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_nova_impact_gem": {
+    "value": 75,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_spiral_gem": {
+    "value": 55,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_fork_gem": {
+    "value": 70,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_orbit_gem": {
+    "value": 60,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_aftershock_gem": {
+    "value": 70,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "fire_clone_gem": {
+    "value": 80,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "healing_potion": {
+    "value": 12,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "teleport_scroll": {
+    "value": 32,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  },
+  "wood": {
+    "value": 2,
+    "tooltipStats": [
+      "Common loot item",
+      "Can be found in chests",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "stone": {
+    "value": 2,
+    "tooltipStats": [
+      "Common loot item",
+      "Solid crafting material",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "fire_essence": {
+    "value": 6,
+    "tooltipStats": [
+      "Elemental crafting reagent",
+      "Warm to the touch",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "lightning_essence": {
+    "value": 6,
+    "tooltipStats": [
+      "Elemental crafting reagent",
+      "Crackles with static",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "ice_essence": {
+    "value": 6,
+    "tooltipStats": [
+      "Elemental crafting reagent",
+      "Cold and pristine",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "darkness_essence": {
+    "value": 6,
+    "tooltipStats": [
+      "Elemental crafting reagent",
+      "Swallows nearby light",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "void_essence": {
+    "value": 6,
+    "tooltipStats": [
+      "Elemental crafting reagent",
+      "Hums with empty space",
+      "Stacks to 99"
+    ],
+    "fireResistancePercent": 0
+  },
+  "sealed_relic": {
+    "value": 0,
+    "tooltipStats": [],
+    "fireResistancePercent": 0
+  }
 }

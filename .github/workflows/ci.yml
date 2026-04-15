@@ -33,8 +33,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: TypeScript build graph
+        run: npm run typecheck:build
+
       - name: Build shared
         run: npm --workspace @mmorpg/shared run build
+
+      - name: Verify item balance file
+        run: npm run verify:item-balance
 
       - name: Build backend
         run: npm --workspace backend run build

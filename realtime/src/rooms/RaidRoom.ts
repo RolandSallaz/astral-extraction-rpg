@@ -21,6 +21,14 @@ import {
   type RoomGameplayProfile,
 } from "./sharedGameplay.js";
 import {
+  INVENTORY_SIZE,
+  identifyAllRaidUnidentifiedInventoryEntries,
+  isGemItemId,
+  resolveEquipmentItemTierVariant,
+  serializeRaidUnidentifiedInventoryItem,
+  type ItemId,
+} from "@mmorpg/shared";
+import {
   getMobDefinition,
   type MobKind,
 } from "@mmorpg/shared/mobs/catalog";
@@ -31,6 +39,7 @@ import {
 import { generateRaidLayoutForTemplate } from "./procgen/generateRaidLayout.js";
 import { createSeededRandom } from "./procgen/seededRandom.js";
 import {
+  normalizeRoomInventorySlots,
   parseRoomInventoryEntry,
 } from "./roomItems.js";
 import {
@@ -38,7 +47,6 @@ import {
 } from "./auth.js";
 import {
   replaceRoomStringSlots,
-  serializeRoomProfileInventoryEntries,
 } from "./runtime/inventoryRuntime.js";
 import {
   applyRoomProfilePatch,
@@ -53,22 +61,40 @@ import {
   sendRoomBalanceSnapshots,
   transferRoomOwnedReferences,
 } from "./runtime/sessionRuntime.js";
+import {
+  normalizeMoveMessage,
+  normalizeUseExitMessage,
+  normalizeUseConsumableMessage,
+} from "./runtime/messageValidation.js";
+import {
+  restoreRaidRuntimeState,
+  serializeRaidRuntimeState,
+} from "./runtime/raidPersistenceRuntime.js";
 import type { BasePlayerState } from "./schema/BasePlayerState.js";
 import {
   loadRaidContent,
   resolveRaidTemplateContent,
 } from "./raidContent.js";
-import type { RaidTemplateContentDefinition } from "@mmorpg/shared/raids/content";
 
 const TILE_SIZE = RAID_GAMEPLAY_PROFILE.tileSize;
 const RAID_PLAYER_SPEED = RAID_GAMEPLAY_PROFILE.playerMoveSpeed;
 const PLAYER_COLLISION_FOOT_OFFSET_Y = 12;
-const PLAYER_MOB_COLLISION_RADIUS = 22;
+const PLAYER_MOB_COLLISION_HALF_WIDTH = RAID_GAMEPLAY_PROFILE.playerMobCollisionHalfWidth;
+const PLAYER_MOB_COLLISION_HALF_HEIGHT = RAID_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight;
+const PLAYER_MOB_COLLISION_OFFSET_Y = RAID_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
 const OFFLINE_PLAYER_GRACE_MS = 60_000;
 const RAID_DURATION_MS = 15 * 60_000;
 const RAT_PACK_JOIN_DISTANCE = TILE_SIZE * 3.5;
 const RAT_PACK_ROAM_INTERVAL_MS = 5000;
 const RAT_PACK_TARGET_REACHED_DISTANCE = TILE_SIZE * 0.75;
+const RAID_INITIAL_MOB_MIN_SPAWN_DISTANCE_PX = TILE_SIZE * 10;
+const RAID_CHEST_GEM_ROLL_CHANCE = 0.05;
+const RAID_CHEST_LOOT_REDUCTION_FACTOR = 10;
+const RAID_CHEST_ITEM_TIER_2_CHANCE = 0.14;
+const RAID_CHEST_ITEM_TIER_3_CHANCE = 0.03;
+const RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS = new Set(["healing_potion"]);
+const RAID_RUNTIME_PERSIST_INTERVAL_MS = 1000;
+const ALLOW_GUEST_EQUIPMENT_SYNC = process.env.NODE_ENV !== "production";
 
 export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   maxClients = 8;
@@ -83,6 +109,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   private disposeTimeout: ReturnType<typeof setTimeout> | null = null;
   private raidExpiresAt = 0;
   private raidClosed = false;
+  private lastPersistedRaidRuntimeKey = "";
+  private lastPersistedRaidRuntimeAt = 0;
 
   // ── Abstract method implementations ─────────────────────────────
 
@@ -237,11 +265,30 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.chestBlockedTiles[chest.y * layout.width + chest.x] = 1;
     });
     this.createRaidMobs(seed, layout.rooms);
+    if (options.runtimeState) {
+      restoreRaidRuntimeState({
+        runtimeState: options.runtimeState,
+        mobs: this.state.mobs,
+        chests: this.state.chests,
+        groundEffects: this.state.groundEffects,
+        chestBlockedTiles: this.chestBlockedTiles,
+        width: layout.width,
+      });
+      this.state.status = options.runtimeState.status || this.state.status;
+      this.raidExpiresAt = options.runtimeState.expiresAt || this.raidExpiresAt;
+      this.raidClosed = this.state.status === "expired";
+    }
 
     this.onMessage("move", (client, message: MoveMessage) => {
-      const moveX = Number.isFinite(message?.x) ? message.x : 0;
-      const moveY = Number.isFinite(message?.y) ? message.y : 0;
-      const sequence = Number.isFinite(message?.sequence) ? Math.max(0, Math.floor(message.sequence!)) : 0;
+      const normalizedMessage = normalizeMoveMessage(message);
+      if (!normalizedMessage) {
+        return;
+      }
+
+      const { x: moveX, y: moveY, sequence, clientEstimatedLatencyMs } = normalizedMessage;
+      if (clientEstimatedLatencyMs !== undefined) {
+        this.playerLatencyMs.set(client.sessionId, clientEstimatedLatencyMs);
+      }
       const length = Math.hypot(moveX, moveY);
       const player = this.state.players.get(client.sessionId);
 
@@ -279,35 +326,41 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           verifiedPlayers: this.verifiedPlayers,
           player,
         });
-        return;
+      } else {
+        this.applyProfileToPlayer(player, message, {
+          allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+        });
+        if (
+          applyRoomZeroHealthState(player, {
+            clearCastState: () => {
+              this.pendingMovement.delete(client.sessionId);
+              this.clearPlayerCastState(player);
+            },
+          })
+        ) {
+          this.statusEffects.deletePlayerEffects(player.id);
+        }
       }
 
-      this.applyProfileToPlayer(player, message);
-      if (
-        applyRoomZeroHealthState(player, {
-          clearCastState: () => {
-            this.pendingMovement.delete(client.sessionId);
-            this.clearPlayerCastState(player);
-          },
-        })
-      ) {
-        this.playerBurns.delete(player.id);
-        this.playerHealing.delete(player.id);
-      }
     });
 
     this.onMessage("useExit", (client, message: UseExitMessage) => {
-      const player = this.state.players.get(client.sessionId);
-      if (!player || typeof message?.exitId !== "string") {
+      const normalizedMessage = normalizeUseExitMessage(message);
+      if (!normalizedMessage) {
         return;
       }
 
-      const [tileX, tileY] = message.exitId.split(":").map((value) => Number.parseInt(value, 10));
+      const player = this.state.players.get(client.sessionId);
+      if (!player || typeof normalizedMessage.exitId !== "string") {
+        return;
+      }
+
+      const [tileX, tileY] = normalizedMessage.exitId.split(":").map((value) => Number.parseInt(value, 10));
       if (!Number.isFinite(tileX) || !Number.isFinite(tileY)) {
         return;
       }
 
-      const exitExists = this.state.exitPoints.includes(message.exitId);
+      const exitExists = this.state.exitPoints.includes(normalizedMessage.exitId);
       if (!exitExists) {
         return;
       }
@@ -320,9 +373,16 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       }
 
       const payload = this.handleSuccessfulRaidExit(player);
+      this.publishPlayerProfileSnapshot({
+        sessionId: client.sessionId,
+        equipment: payload.equipment ?? createEquipmentStateSnapshot({}),
+        inventory: payload.inventory ?? [],
+        source: "raid",
+        force: true,
+      });
       this.send(client, "raidExited", {
         raidRunId: this.state.raidRunId,
-        exitId: message.exitId,
+        exitId: normalizedMessage.exitId,
         reason: "extracted",
         ...payload,
       });
@@ -334,14 +394,19 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         return;
       }
 
-      const slotIndex = typeof message?.slotIndex === "number" ? Math.floor(message.slotIndex) : -1;
-      const source = message?.source === "container" ? "container" : "inventory";
+      const normalizedMessage = normalizeUseConsumableMessage(message);
+      if (!normalizedMessage) {
+        return;
+      }
+
+      const slotIndex = normalizedMessage.slotIndex ?? -1;
+      const source = normalizedMessage.source === "container" ? "container" : "inventory";
       let sourceSlots: string[] | null = null;
 
       if (source === "inventory") {
         sourceSlots = Array.from(player.inventory);
-      } else if (typeof message?.containerId === "string") {
-        const chest = this.state.chests.get(message.containerId);
+      } else if (normalizedMessage.containerId) {
+        const chest = this.state.chests.get(normalizedMessage.containerId);
         if (chest) {
           sourceSlots = Array.from(chest.slots);
         }
@@ -362,12 +427,18 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
             client.send("inventoryUpdate", {
               inventory: nextSlots.map((item) => item || ""),
             });
-          } else if (typeof message?.containerId === "string") {
-            const chest = this.state.chests.get(message.containerId);
+          } else if (normalizedMessage.containerId) {
+            const chest = this.state.chests.get(normalizedMessage.containerId);
             if (chest) {
               replaceRoomStringSlots(chest.slots, nextSlots);
+              this.removeChestIfEmptyLootBag(chest.id);
             }
           }
+        },
+        {
+          mode: normalizedMessage.mode,
+          targetX: normalizedMessage.targetX,
+          targetY: normalizedMessage.targetY,
         },
       );
     });
@@ -377,16 +448,62 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.updateRaidExpiration();
       this.removeExpiredOfflinePlayers();
       const deltaSeconds = deltaTime / 1000;
-      this.rebuildMobSpatialGrid();
+      this.ensureMobSpatialGrid();
       this.updatePlayers(deltaSeconds);
       this.recordPlayerPositionHistory(tickNow);
       this.updateMobs(deltaSeconds, tickNow);
-      this.sharedRaidCombatTickSystem.update(deltaSeconds, tickNow);
+      this.updateCombatSystems(deltaSeconds, tickNow, { includeMobBurns: true });
+      this.publishRaidRuntimeStateIfNeeded(tickNow);
     }, this.simulationIntervalMs);
   }
 
-  onDispose() {
+  async onDispose() {
+    await this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
+    await this.waitForPendingPublishes();
     this.disposeShared();
+  }
+
+  private buildRaidRuntimeState() {
+    return serializeRaidRuntimeState({
+      status: this.state.status,
+      expiresAt: this.raidExpiresAt,
+      mobs: this.state.mobs.values(),
+      chests: this.state.chests.values(),
+      groundEffects: this.state.groundEffects.values(),
+    });
+  }
+
+  private publishRaidRuntimeStateIfNeeded(now: number, force = false) {
+    if (!this.state.raidRunId) {
+      return null;
+    }
+
+    if (!force && now - this.lastPersistedRaidRuntimeAt < RAID_RUNTIME_PERSIST_INTERVAL_MS) {
+      return null;
+    }
+
+    const runtimeState = this.buildRaidRuntimeState();
+    const snapshotKey = JSON.stringify({
+      status: runtimeState.status,
+      expiresAt: runtimeState.expiresAt,
+      mobs: runtimeState.mobs,
+      chests: runtimeState.chests,
+      groundEffects: runtimeState.groundEffects,
+    });
+
+    this.lastPersistedRaidRuntimeAt = now;
+    if (!force && snapshotKey === this.lastPersistedRaidRuntimeKey) {
+      return null;
+    }
+
+    this.lastPersistedRaidRuntimeKey = snapshotKey;
+    return this.trackPendingPublish(
+      this.kafkaPublisher.publish("raid.run.updated", {
+        raidRunId: this.state.raidRunId,
+        runtimeState,
+        updatedAt: runtimeState.updatedAt,
+      }),
+    );
   }
 
   onJoin(client: Client, options: RaidRoomJoinOptions = {}, authResult?: VerifiedPlayer | boolean | null) {
@@ -416,7 +533,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       applyVerifiedProfile(player, verified);
     } else {
       player.name = "Raider";
-      this.applyProfileToPlayer(player, options);
+      this.applyProfileToPlayer(player, options, {
+        allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+      });
     }
     initializeRoomPlayerTransientState(player);
     if (
@@ -428,8 +547,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         },
       })
     ) {
-      this.playerBurns.delete(player.id);
-      this.playerHealing.delete(player.id);
+      this.statusEffects.deletePlayerEffects(player.id);
     }
 
     this.state.players.set(client.sessionId, player);
@@ -443,21 +561,21 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   onLeave(client: Client) {
     this.pendingMovement.delete(client.sessionId);
-    this.pendingSkillCasts.delete(client.sessionId);
+    this.skillCastSystem.clearPlayer(client.sessionId);
     const player = this.state.players.get(client.sessionId);
     if (player) {
       this.clearPlayerCastState(player);
     }
     if (this.raidClosed) {
       this.state.players.delete(client.sessionId);
+      this.statusEffects.deletePlayerEffects(client.sessionId);
+      this.projectileSystem.clearOwnerData(client.sessionId);
       clearRoomSessionCollections(
         client.sessionId,
         this.offlineExpiresAt,
-        this.playerBurns,
-        this.playerHealing,
         this.consumableCooldownEndsAt,
+        this.playerLatencyMs,
         this.verifiedPlayers,
-        this.pendingTeleportScrollCasts,
       );
       return;
     }
@@ -503,6 +621,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   }
 
   private canMoveTo(x: number, y: number, player?: RaidPlayerState) {
+    this.ensureMobSpatialGrid();
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.state.width * TILE_SIZE - TILE_SIZE / 2, x));
     const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.state.height * TILE_SIZE - TILE_SIZE / 2, y));
     const clampedFootY = Math.max(
@@ -522,16 +641,27 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       return false;
     }
 
-    const nearbyMobs = this.mobSpatialGrid.queryRadius(clampedX, clampedY, PLAYER_MOB_COLLISION_RADIUS);
+    const nearbyMobs = this.mobSpatialGrid.queryRadius(
+      clampedX,
+      clampedY,
+      Math.max(PLAYER_MOB_COLLISION_HALF_WIDTH, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+    );
     if (nearbyMobs.length > 0) {
       for (const mob of nearbyMobs) {
         if (!player) {
           return false;
         }
 
-        const currentDistance = Math.hypot(player.x - mob.x, player.y - mob.y);
-        const nextDistance = Math.hypot(clampedX - mob.x, clampedY - mob.y);
-        const isAlreadyOverlapping = currentDistance < PLAYER_MOB_COLLISION_RADIUS;
+        const collisionCenterY = mob.y + PLAYER_MOB_COLLISION_OFFSET_Y;
+        const currentDistance = Math.hypot(
+          (player.x - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
+          (player.y - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+        );
+        const nextDistance = Math.hypot(
+          (clampedX - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
+          (clampedY - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
+        );
+        const isAlreadyOverlapping = currentDistance < 1;
         const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
 
         if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
@@ -774,6 +904,30 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     return this.mobBalance[kind];
   }
 
+  private resolveProceduralMobKind(
+    room: { width: number; height: number },
+    centerY: number,
+    random: () => number,
+  ): MobKind {
+    const mobGeneration = this.activeRaidContent.mobGeneration;
+    const batRoomEligible =
+      room.height >= mobGeneration.batMinRoomHeight &&
+      room.width >= mobGeneration.batMinRoomWidth;
+    const batRollThreshold = centerY < this.state.height / 2
+      ? Math.max(0, mobGeneration.batRandomThreshold - 0.12)
+      : mobGeneration.batRandomThreshold;
+
+    if (batRoomEligible && random() > batRollThreshold) {
+      return "bat";
+    }
+
+    if (random() < mobGeneration.skeletonSpawnChance) {
+      return "skeleton";
+    }
+
+    return "rat";
+  }
+
   // ── Raid mob creation ───────────────────────────────────────────
 
   private createRaidMobs(seed: string, rooms: Array<{ x: number; y: number; width: number; height: number }>) {
@@ -810,7 +964,40 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       ...this.state.exitPoints,
       ...Array.from(this.state.chests.values(), (chest) => `${chest.x}:${chest.y}`),
     ]);
-    const candidates = rooms
+    const playerSpawnWorldPoints = this.state.spawnPoints
+      .map((value) => {
+        const [spawnX, spawnY] = value.split(":").map((part) => Number.parseInt(part, 10));
+        if (!Number.isFinite(spawnX) || !Number.isFinite(spawnY)) {
+          return null;
+        }
+        return {
+          x: spawnX * TILE_SIZE + TILE_SIZE / 2,
+          y: spawnY * TILE_SIZE + TILE_SIZE / 2,
+        };
+      })
+      .filter((point): point is { x: number; y: number } => point !== null);
+    const allCandidates = rooms
+      .map((room) => {
+        const centerX = room.x + Math.floor(room.width / 2);
+        const centerY = room.y + Math.floor(room.height / 2);
+        return {
+          room,
+          centerX,
+          centerY,
+        };
+      })
+      .filter(({ centerX, centerY }) => {
+        if (reservedPoints.has(`${centerX}:${centerY}`)) {
+          return false;
+        }
+
+        const centerWorldX = centerX * TILE_SIZE + TILE_SIZE / 2;
+        const centerWorldY = centerY * TILE_SIZE + TILE_SIZE / 2;
+        return playerSpawnWorldPoints.every((spawnPoint) =>
+          Math.hypot(centerWorldX - spawnPoint.x, centerWorldY - spawnPoint.y) >= RAID_INITIAL_MOB_MIN_SPAWN_DISTANCE_PX,
+        );
+      });
+    const candidates = allCandidates.length > 0 ? allCandidates : rooms
       .map((room) => {
         const centerX = room.x + Math.floor(room.width / 2);
         const centerY = room.y + Math.floor(room.height / 2);
@@ -835,16 +1022,16 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       .slice(0, spawnCount);
 
     selectedRooms.forEach(({ room, centerX, centerY }, index) => {
-      const isBat =
-        room.height >= mobGeneration.batMinRoomHeight &&
-        (room.width >= mobGeneration.batMinRoomWidth ||
-          centerY < this.state.height / 2 ||
-          random() > mobGeneration.batRandomThreshold);
-      const kind: MobKind = isBat ? "bat" : "rat";
+      const kind = this.resolveProceduralMobKind(room, centerY, random);
       const balance = this.getMobBalanceByKind(kind);
       const definition = getMobDefinition(kind);
       const mob = new MobState();
-      mob.id = `${kind === "bat" ? "raid-bat" : "raid-rat"}-${index}`;
+      mob.id =
+        kind === "bat"
+          ? `raid-bat-${index}`
+          : kind === "skeleton"
+            ? `raid-skeleton-${index}`
+            : `raid-rat-${index}`;
       mob.kind = kind;
       mob.name = definition.name;
       mob.texture = definition.texture;
@@ -853,7 +1040,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       mob.patrolMinX = (room.x + 1) * TILE_SIZE + TILE_SIZE / 2;
       mob.patrolMaxX = (room.x + room.width - 2) * TILE_SIZE + TILE_SIZE / 2;
       mob.patrolY = mob.spawnY;
-      mob.patrolRadiusY = isBat
+      mob.patrolRadiusY = kind === "bat"
         ? Math.max(
             mobGeneration.batPatrolRadiusMin,
             (room.height - mobGeneration.batPatrolRadiusRoomHeightOffset) *
@@ -901,10 +1088,15 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     const normalizedDistanceToCenter = Math.min(1, Math.hypot(x - centerX, y - centerY) / maxCenterDistance);
     const centerBias = 1 - normalizedDistanceToCenter;
     const lootBand = chestContent.lootBands.find((band) => centerBias >= band.minCenterBias);
-    const itemCount = lootBand?.itemCount ?? 0;
+    const baseItemCount = lootBand?.itemCount ?? 0;
+    const itemCount =
+      baseItemCount > 0
+        ? Math.max(1, Math.floor(baseItemCount / RAID_CHEST_LOOT_REDUCTION_FACTOR))
+        : 0;
     const slots = new Array<string>(chest.columns * chest.rows).fill("");
     const itemPool = (lootBand?.pools ?? []).flatMap((poolId) => chestContent.lootPools[poolId] ?? []);
     const usedItems = new Set<string>();
+    const nonGemItemPool = itemPool.filter((itemId) => !isGemItemId(itemId));
 
     for (let itemIndex = 0; itemIndex < itemCount; itemIndex += 1) {
       if (itemPool.length === 0) {
@@ -920,8 +1112,24 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         itemId = itemPool[Math.floor(random() * itemPool.length)];
         guard += 1;
       }
+      if (
+        isGemItemId(itemId) &&
+        nonGemItemPool.length > 0 &&
+        random() > RAID_CHEST_GEM_ROLL_CHANCE
+      ) {
+        itemId = nonGemItemPool[Math.floor(random() * nonGemItemPool.length)] ?? itemId;
+      }
+      const rarityRoll = random();
+      if (rarityRoll < RAID_CHEST_ITEM_TIER_3_CHANCE) {
+        itemId = resolveEquipmentItemTierVariant(itemId, 3) ?? itemId;
+      } else if (rarityRoll < RAID_CHEST_ITEM_TIER_3_CHANCE + RAID_CHEST_ITEM_TIER_2_CHANCE) {
+        itemId = resolveEquipmentItemTierVariant(itemId, 2) ?? itemId;
+      }
       usedItems.add(itemId);
-      slots[slotIndex] = itemId;
+      const resolvedItemId = itemId as ItemId;
+      slots[slotIndex] = RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS.has(resolvedItemId)
+        ? serializeRaidUnidentifiedInventoryItem(resolvedItemId)
+        : resolvedItemId;
     }
 
     slots.forEach((itemId) => chest.slots.push(itemId));
@@ -971,12 +1179,11 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     }
 
     this.pendingMovement.clear();
-    this.pendingSkillCasts.clear();
-    this.playerBurns.clear();
-    this.mobBurns.clear();
-    this.playerHealing.clear();
+    this.skillCastSystem.clearAll();
+    this.statusEffects.clearAll();
     this.consumableCooldownEndsAt.clear();
     this.offlineExpiresAt.clear();
+    this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
     this.clearDisposeTimeout();
     setTimeout(() => {
       this.state.players.clear();
@@ -1001,7 +1208,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   }
 
   private createRaidExitPayload(player: RaidPlayerState): RaidExitStateMessage {
-    const inventory = Array.from({ length: 24 }, (_, index) => player.inventory[index] || null);
+    const inventory = identifyAllRaidUnidentifiedInventoryEntries(
+      Array.from({ length: INVENTORY_SIZE }, (_, index) => player.inventory[index] || null),
+    ).map((entry) => entry || null);
     const equipment = createEquipmentStateSnapshot({
       headItem: player.headItem,
       bodyItem: player.bodyItem,
@@ -1029,10 +1238,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   private removePlayerFromRaidState(playerId: string) {
     this.pendingMovement.delete(playerId);
-    this.pendingSkillCasts.delete(playerId);
+    this.skillCastSystem.clearPlayer(playerId);
     this.offlineExpiresAt.delete(playerId);
-    this.playerBurns.delete(playerId);
-    this.playerHealing.delete(playerId);
+    this.statusEffects.deletePlayerEffects(playerId);
     this.consumableCooldownEndsAt.delete(playerId);
     this.state.players.delete(playerId);
   }
@@ -1049,6 +1257,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.woodStaffStrikeCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
     this.removePlayerFromRaidState(player.id);
+    this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
     return payload;
   }
 
@@ -1057,7 +1266,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     const preservedMaxHealth = player.maxHealth;
     const preservedLevel = player.level;
     const preservedExperience = player.experience;
-    const inventory = Array.from({ length: 24 }, () => null as string | null);
+    const inventory = Array.from({ length: INVENTORY_SIZE }, () => null as string | null);
     const equipment = {
       head: "",
       body: "",
@@ -1098,10 +1307,11 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.weaponGemItem3 = "";
     player.inventory.clear();
     this.pendingMovement.delete(player.id);
+    this.skillCastSystem.clearPlayer(player.id);
     this.offlineExpiresAt.delete(player.id);
-    this.playerBurns.delete(player.id);
-    this.playerHealing.delete(player.id);
+    this.statusEffects.deletePlayerEffects(player.id);
     this.consumableCooldownEndsAt.delete(player.id);
+    this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
 
     return {
       health: preservedHealth,
@@ -1174,17 +1384,20 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         previousSessionId,
         this.offlineExpiresAt,
         this.pendingMovement,
-        this.pendingSkillCasts,
-        this.pendingTeleportScrollCasts,
       );
+      this.skillCastSystem.clearPlayer(previousSessionId);
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
+      moveRoomMapValue(this.playerLatencyMs, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
-      this.playerBurns.move(previousSessionId, client.sessionId);
-      this.playerHealing.move(previousSessionId, client.sessionId);
+      this.statusEffects.movePlayerEffects(previousSessionId, client.sessionId);
       player.id = client.sessionId;
       this.state.players.set(client.sessionId, player);
       this.clearPlayerCastState(player);
-      this.applyProfileToPlayer(player, options);
+      if (!this.verifiedPlayers.has(client.sessionId)) {
+        this.applyProfileToPlayer(player, options, {
+          allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+        });
+      }
       if (
         applyRoomZeroHealthState(player, {
           clearCastState: () => {
@@ -1193,8 +1406,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           },
         })
       ) {
-        this.playerBurns.delete(player.id);
-        this.playerHealing.delete(player.id);
+        this.statusEffects.deletePlayerEffects(player.id);
       } else {
         player.dead = false;
       }
@@ -1204,9 +1416,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         mobs: this.state.mobs.values(),
         projectiles: this.state.projectiles.values(),
         groundEffects: this.state.groundEffects.values(),
-        pendingBurstSpawns: this.pendingBurstSpawns,
-        pendingAftershocks: this.pendingAftershocks,
       });
+      this.projectileSystem.transferOwnerReferences(previousSessionId, client.sessionId);
       sendRoomBalanceSnapshots(
         client,
         this.serializeSkillBalanceConfig(),
@@ -1226,17 +1437,17 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         continue;
       }
 
+      this.statusEffects.deletePlayerEffects(sessionId);
+      this.projectileSystem.clearOwnerData(sessionId);
       clearRoomSessionCollections(
         sessionId,
         this.offlineExpiresAt,
         this.pendingMovement,
-        this.playerBurns,
-        this.playerHealing,
-        this.pendingSkillCasts,
-        this.pendingTeleportScrollCasts,
         this.consumableCooldownEndsAt,
+        this.playerLatencyMs,
         this.verifiedPlayers,
       );
+      this.skillCastSystem.clearPlayer(sessionId);
       this.state.players.delete(sessionId);
     }
 
@@ -1262,13 +1473,19 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   // ── Profile ─────────────────────────────────────────────────────
 
-  private applyProfileToPlayer(player: RaidPlayerState, profile: RaidProfileMessage | RaidRoomJoinOptions) {
+  private applyProfileToPlayer(
+    player: RaidPlayerState,
+    profile: RaidProfileMessage | RaidRoomJoinOptions,
+    options: { allowEquipmentSync?: boolean } = {},
+  ) {
     applyRoomProfilePatch(player, profile, {
       defaultName: "Raider",
+      allowEquipmentSync: options.allowEquipmentSync,
+      defaultWeaponItem: "wood_staff",
     });
     replaceRoomStringSlots(
       player.inventory,
-      serializeRoomProfileInventoryEntries(profile.inventory),
+      normalizeRoomInventorySlots(profile.inventory ?? [], INVENTORY_SIZE),
     );
   }
 }

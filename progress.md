@@ -31,3 +31,10 @@ Notes:
 - Verification: `npx mocha -r tsx test/MyRoom.test.ts --exit --timeout 20000` and `npx mocha -r tsx test/SpreadSplitCombo.test.ts --exit --timeout 20000` pass (ran sequentially to avoid port conflicts).
 - Wood staff now exposes a single skill in the HUD (`woodStaffStrike`), with default LMB binding and cooldown wiring from the server.
 - Added a short post-cast lock (180ms) for `woodStaffStrike` to drive a visible swing window and wired a client-side hand/weapon swing animation during that cast window.
+- Fixed missing chest/loot bag visuals on the client: added `frontend/public/sprites/decor/chest-8x8.png` and routed dynamic room containers to `loot-bag-8x8` when `subtitle === "Dropped Loot"`, otherwise `chest-8x8`.
+- Verification for the container sprite fix: `npm --workspace frontend run build` passes.
+- Playwright/browser verification is still blocked locally: `npx playwright --version` fails with `EPERM` writing under `C:\Users\Roland\AppData\Local\npm-cache`, so this fix is asset/code/build-verified but not browser-verified through the skill runner.
+- Raid crypt mob mix fix: `RaidRoom` no longer treats every room above the bat size threshold as an unconditional bat spawn. Bat rooms now still roll probabilistically, which restores `rat`/`skeleton` spawns in non-tutorial crypts.
+- Verification for the raid mob mix fix: `npx mocha -r tsx test/RaidRoom.test.ts --exit --timeout 20000` and `npx tsc -p realtime/tsconfig.json --noEmit` pass.
+- Backend raid reuse fix: when a party leader joins an existing raid run within the 60s reuse window, `StartRaidUseCase` now also calls `markPendingRaidForParty(...)` for the reused run, so the rest of the party gets the same `raidRunId` instead of waiting for a newly created run.
+- Verification for the backend raid reuse fix: `npm test -- --runInBand raids.service.spec.ts` and `npx tsc -p backend/tsconfig.spec.json --noEmit --noUnusedLocals --noUnusedParameters` pass.

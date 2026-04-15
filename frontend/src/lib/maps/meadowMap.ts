@@ -107,14 +107,50 @@ export type MeadowMobAsset = {
   };
 };
 
+export const WORLD_WORKBENCH_TEXTURE_PATH = '/items/equipment/workbench-16x16.png';
+export const WORLD_WORKBENCH_DEFAULT_STAMP: MeadowStampAsset = {
+  x: 20,
+  y: 18,
+  texturePath: WORLD_WORKBENCH_TEXTURE_PATH,
+  rotation: 0,
+  flipX: false,
+  scale: 1.25,
+};
+
+export function isBlockingMeadowStamp(stamp: MeadowStampAsset) {
+  return stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH;
+}
+
+export function ensureWorldWorkbenchStamp(asset: MeadowMapAsset): MeadowMapAsset {
+  const workbenchStamps = (asset.stamps ?? []).filter((stamp) => stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH);
+  if (workbenchStamps.length > 0) {
+    return {
+      ...asset,
+      stamps: (asset.stamps ?? []).map((stamp) =>
+        stamp.texturePath === WORLD_WORKBENCH_TEXTURE_PATH
+          ? { ...WORLD_WORKBENCH_DEFAULT_STAMP }
+          : stamp,
+      ),
+    };
+  }
+
+  return {
+    ...asset,
+    stamps: [...(asset.stamps ?? []), { ...WORLD_WORKBENCH_DEFAULT_STAMP }],
+  };
+}
+
 export function isBlockedMeadowTile(
-  map: MeadowMap,
   decorations: MeadowDecoration[],
+  stamps: MeadowStampAsset[],
   x: number,
   y: number,
 ) {
-  return decorations.some(
-    (decoration) => decoration.blocked && decoration.x === x && decoration.y === y,
+  return (
+    decorations.some(
+      (decoration) => decoration.blocked && decoration.x === x && decoration.y === y,
+    ) ||
+    stamps.some((stamp) => isBlockingMeadowStamp(stamp) && stamp.x === x && stamp.y === y)
   );
 }
 

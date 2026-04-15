@@ -25,11 +25,15 @@ export type RoomGameplayProfile = {
   fireballBurnTickMs: number;
   playerHitRadius: number;
   mobHitRadius: number;
-  playerMobCollisionRadius: number;
+  playerMobCollisionHalfWidth: number;
+  playerMobCollisionHalfHeight: number;
+  playerMobCollisionOffsetY: number;
   meleeStrikeDamage: number;
   meleeStrikeRange: number;
   meleeStrikeCooldownMs: number;
   meleeStrikeArcHalfAngleRad: number;
+  meleeStrikeOriginOffsetY: number;
+  meleeStrikeMobCenterOffsetY: number;
   fireballCooldownMs: number;
   fireNovaProjectileCount: number;
   fireNovaCooldownMs: number;
@@ -77,11 +81,15 @@ const COMMON_GAMEPLAY: Omit<
   fireballBurnTickMs: 1000,
   playerHitRadius: 18,
   mobHitRadius: 18,
-  playerMobCollisionRadius: 22,
-  meleeStrikeDamage: 2,
+  playerMobCollisionHalfWidth: 16,
+  playerMobCollisionHalfHeight: 12,
+  playerMobCollisionOffsetY: -2,
+  meleeStrikeDamage: 5,
   meleeStrikeRange: 46,
   meleeStrikeCooldownMs: 450,
   meleeStrikeArcHalfAngleRad: Math.PI * 0.5,
+  meleeStrikeOriginOffsetY: 16,
+  meleeStrikeMobCenterOffsetY: -8,
   fireballCooldownMs: 1000,
   fireNovaProjectileCount: 12,
   fireNovaCooldownMs: 10000,

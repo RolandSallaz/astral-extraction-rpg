@@ -4,6 +4,7 @@
     "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "composite": true,
     "strict": true,
     "allowJs": true,
     "strictNullChecks": false,
@@ -11,10 +12,16 @@
     "experimentalDecorators": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "useDefineForClassFields": false
+    "useDefineForClassFields": false,
+    "types": ["node", "mocha"]
   },
   "include": [
     "src",
     "test"
+  ],
+  "references": [
+    {
+      "path": "../shared"
+    }
   ]
 }

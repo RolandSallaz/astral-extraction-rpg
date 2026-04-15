@@ -1,19 +1,22 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { RaidTemplateDefinition, RaidTemplateFiles } from './raid-template-files';
+import type { RaidTemplateDefinition } from '@mmorpg/shared/raids/templates';
+import { RaidTemplateFiles } from './raid-template-files';
 import type { RaidRunEntity } from './entities/raid-run.entity';
 import type { PlayerEntity } from '../players/entities/player.entity';
 import { StartRaidUseCase } from './use-cases/start-raid.use-case';
 
-type MockRepository<T> = {
+type MockRepository = {
   findOne: jest.Mock;
   create: jest.Mock;
   save: jest.Mock;
   createQueryBuilder: jest.Mock;
 };
 
-function createMockRepository<T>(): MockRepository<T> {
+const NON_TUTORIAL_RAID_SIZE_SCALE = 2;
+
+function createMockRepository(): MockRepository {
   return {
     findOne: jest.fn(),
     create: jest.fn(),
@@ -37,33 +40,48 @@ function createTemplate(overrides: Partial<RaidTemplateDefinition> = {}): RaidTe
   };
 }
 
+function scaleTemplate(template: RaidTemplateDefinition): RaidTemplateDefinition {
+  if (template.code === 'crypt_small') {
+    return template;
+  }
+
+  return {
+    ...template,
+    width: template.width * NON_TUTORIAL_RAID_SIZE_SCALE,
+    height: template.height * NON_TUTORIAL_RAID_SIZE_SCALE,
+  };
+}
+
 function createRun(
   template: RaidTemplateDefinition,
   overrides: Partial<RaidRunEntity> = {},
 ): RaidRunEntity {
   const now = new Date();
+  const scaledTemplate = scaleTemplate(template);
   return {
     id: 'run-1',
     seed: 'shared-seed',
     status: 'ready',
     playerCount: 2,
     generatedLayout: {
-      width: template.width,
-      height: template.height,
+      width: scaledTemplate.width,
+      height: scaledTemplate.height,
       rooms: [],
       spawnPoints: [],
       chests: [],
       exitPoints: [],
     },
+    runtimeState: null,
+    runtimeStateUpdatedAt: null,
     startedAt: now,
     finishedAt: null,
-    templateCode: template.code,
-    templateName: template.name,
-    biome: template.biome,
-    minPlayers: template.minPlayers,
-    maxPlayers: template.maxPlayers,
-    width: template.width,
-    height: template.height,
+    templateCode: scaledTemplate.code,
+    templateName: scaledTemplate.name,
+    biome: scaledTemplate.biome,
+    minPlayers: scaledTemplate.minPlayers,
+    maxPlayers: scaledTemplate.maxPlayers,
+    width: scaledTemplate.width,
+    height: scaledTemplate.height,
     party: null,
     createdAt: now,
     updatedAt: now,
@@ -73,7 +91,7 @@ function createRun(
 
 describe('StartRaidUseCase', () => {
   let tempDir: string;
-  let raidRunsRepository: MockRepository<RaidRunEntity>;
+  let raidRunsRepository: MockRepository;
   let partiesService: {
     requirePartyLeader: jest.Mock;
     markPendingRaidForParty: jest.Mock;
@@ -90,7 +108,7 @@ describe('StartRaidUseCase', () => {
       'utf8',
     );
 
-    raidRunsRepository = createMockRepository<RaidRunEntity>();
+    raidRunsRepository = createMockRepository();
     partiesService = {
       requirePartyLeader: jest.fn(),
       markPendingRaidForParty: jest.fn(),
@@ -122,7 +140,7 @@ describe('StartRaidUseCase', () => {
     };
 
     raidRunsRepository.createQueryBuilder.mockReturnValue(queryBuilder);
-    raidRunsRepository.save.mockImplementation(async (run) => ({
+    raidRunsRepository.save.mockImplementation(async (run: Partial<RaidRunEntity>) => ({
       ...recentRun,
       ...run,
       updatedAt: new Date(),
@@ -142,9 +160,106 @@ describe('StartRaidUseCase', () => {
     expect(result.joinedExisting).toBe(true);
     expect(result.playerCount).toBe(3);
     expect(result.template.code).toBe(template.code);
+    expect(result.generatedLayout).toBeNull();
     expect(result.realtimeRoom.options.raidRunId).toBe('recent-run');
     expect(result.realtimeRoom.options.seed).toBe(recentRun.seed);
     expect(raidRunsRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('reuses an active raid started less than a minute ago', async () => {
+    const activeRun = createRun(template, {
+      id: 'active-run',
+      status: 'active',
+      playerCount: 1,
+      startedAt: new Date(Date.now() - 35_000),
+    });
+    const queryBuilder = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(activeRun),
+    };
+
+    raidRunsRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    raidRunsRepository.save.mockImplementation(async (run: Partial<RaidRunEntity>) => ({
+      ...activeRun,
+      ...run,
+      updatedAt: new Date(),
+    }));
+    partiesService.requirePartyLeader.mockRejectedValue(new Error('Party not found.'));
+
+    const result = await startRaidUseCase.execute(
+      {
+        quests: {
+          znakomstvo: { status: 'completed' },
+        },
+      } as unknown as PlayerEntity,
+      { templateCode: template.code },
+    );
+
+    expect(result.id).toBe('active-run');
+    expect(result.joinedExisting).toBe(true);
+    expect(result.playerCount).toBe(2);
+    expect(result.realtimeRoom.options.raidRunId).toBe('active-run');
+    expect(raidRunsRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('marks the whole party with the reused raid when joining an existing run', async () => {
+    const recentRun = createRun(template, {
+      id: 'party-reused-run',
+      status: 'active',
+      playerCount: 1,
+      startedAt: new Date(Date.now() - 20_000),
+    });
+    const party = {
+      id: 'party-1',
+      members: [{ id: 'leader' }, { id: 'member-2' }],
+    };
+    const queryBuilder = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(recentRun),
+    };
+
+    raidRunsRepository.createQueryBuilder.mockReturnValue(queryBuilder);
+    raidRunsRepository.save.mockImplementation(async (run: Partial<RaidRunEntity>) => ({
+      ...recentRun,
+      ...run,
+      updatedAt: new Date(),
+    }));
+    partiesService.requirePartyLeader.mockResolvedValue(party);
+
+    const result = await startRaidUseCase.execute(
+      {
+        quests: {
+          znakomstvo: { status: 'completed' },
+        },
+      } as unknown as PlayerEntity,
+      { templateCode: template.code },
+    );
+
+    expect(result.id).toBe('party-reused-run');
+    expect(result.joinedExisting).toBe(true);
+    expect(result.playerCount).toBe(3);
+    expect(partiesService.markPendingRaidForParty).toHaveBeenCalledTimes(1);
+    expect(partiesService.markPendingRaidForParty).toHaveBeenCalledWith(
+      'party-1',
+      expect.objectContaining({
+        raidRunId: 'party-reused-run',
+        startedAt: recentRun.startedAt?.toISOString() ?? null,
+        realtimeRoom: expect.objectContaining({
+          roomName: 'raid',
+          options: expect.objectContaining({
+            raidRunId: 'party-reused-run',
+            templateCode: template.code,
+            seed: recentRun.seed,
+          }),
+        }),
+      }),
+    );
   });
 
   it('creates a new raid when no recent solo run can be reused', async () => {
@@ -154,6 +269,7 @@ describe('StartRaidUseCase', () => {
       seed: 'new-seed',
       startedAt: new Date(),
     });
+    const scaledTemplate = scaleTemplate(template);
     const queryBuilder = {
       leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
@@ -163,8 +279,8 @@ describe('StartRaidUseCase', () => {
     };
 
     raidRunsRepository.createQueryBuilder.mockReturnValue(queryBuilder);
-    raidRunsRepository.create.mockImplementation((input) => input);
-    raidRunsRepository.save.mockImplementation(async (run) => ({
+    raidRunsRepository.create.mockImplementation((input: Partial<RaidRunEntity>) => input);
+    raidRunsRepository.save.mockImplementation(async (run: Partial<RaidRunEntity>) => ({
       ...createdRun,
       ...run,
       createdAt: createdRun.createdAt,
@@ -185,17 +301,19 @@ describe('StartRaidUseCase', () => {
     expect(result.joinedExisting).toBe(false);
     expect(result.playerCount).toBe(1);
     expect(result.template.code).toBe(template.code);
+    expect(result.generatedLayout).toBeNull();
     expect(result.realtimeRoom.options.raidRunId).toBe('new-run');
     expect(raidRunsRepository.create).toHaveBeenCalledTimes(1);
     expect(raidRunsRepository.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        templateCode: template.code,
-        templateName: template.name,
-        biome: template.biome,
-        minPlayers: template.minPlayers,
-        maxPlayers: template.maxPlayers,
-        width: template.width,
-        height: template.height,
+        generatedLayout: null,
+        templateCode: scaledTemplate.code,
+        templateName: scaledTemplate.name,
+        biome: scaledTemplate.biome,
+        minPlayers: scaledTemplate.minPlayers,
+        maxPlayers: scaledTemplate.maxPlayers,
+        width: scaledTemplate.width,
+        height: scaledTemplate.height,
       }),
     );
   });

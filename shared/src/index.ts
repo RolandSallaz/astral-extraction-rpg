@@ -25,4 +25,5 @@ export * from "./visuals/equipmentVisuals";
 export * from "./loot/tables";
 export * from "./raids/templates";
 export * from "./raids/content";
+export * from "./raids/runtime";
 export * from "./worlds/definition";
