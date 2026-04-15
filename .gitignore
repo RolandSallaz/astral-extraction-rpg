@@ -37,6 +37,7 @@ pnpm-debug.log*
 .env.*
 !.env.example
 !.env.development.example
+!.env.production.example
 
 # Docker/local runtime data
 .npm-cache/
