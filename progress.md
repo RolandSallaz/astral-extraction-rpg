@@ -25,9 +25,8 @@ Notes:
 - Verification after movement sync fixes: `npm --workspace frontend run build`, `npm --workspace frontend run lint`, and full `npm --workspace realtime test` pass (`56 passing`). Lint still reports only existing warnings.
 - Browser interaction verification remains blocked locally: `npx playwright --version` still fails with `EPERM` writing npm cache temp files under `C:\Users\Roland\AppData\Local\npm-cache`.
 - Wood staff strike is now a dedicated skill id (`woodStaffStrike`) with its own cooldown field (`woodStaffStrikeCooldownEndsAt`).
-- Fireball no longer requires `wood_staff`; it now requires a placeholder `fire_staff` so the wood staff cannot cast it.
-- Removed fireball from HUD defaults and mouse-slot binding parsing; LMB now falls back to wood staff strike unless another skill is bound.
-- Updated realtime fireball tests to use `weaponItem: "fire_staff"` and adjusted the cast-range clamp test to use two casters.
+- Removed the temporary `fire_staff` placeholder and restored `fireball` to `wood_staff` while the staff redesign is deferred.
+- Reverted fireball tests back to `weaponItem: "wood_staff"` so CI and item balance stay aligned with the current item catalog.
 - Verification: `npx mocha -r tsx test/MyRoom.test.ts --exit --timeout 20000` and `npx mocha -r tsx test/SpreadSplitCombo.test.ts --exit --timeout 20000` pass (ran sequentially to avoid port conflicts).
 - Wood staff now exposes a single skill in the HUD (`woodStaffStrike`), with default LMB binding and cooldown wiring from the server.
 - Added a short post-cast lock (180ms) for `woodStaffStrike` to drive a visible swing window and wired a client-side hand/weapon swing animation during that cast window.

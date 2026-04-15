@@ -38,7 +38,7 @@ export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
     id: "fireball",
     category: "projectile",
     name: "Fireball",
-    requiredWeapon: "fire_staff",
+    requiredWeapon: "wood_staff",
     baseCooldownMs: 1000,
     spawnsProjectile: true,
   },
