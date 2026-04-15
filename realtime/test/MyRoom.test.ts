@@ -396,7 +396,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const attacker = await connectToRoom(colyseus, room, {
       name: "Mage Hunter",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -528,7 +528,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Mage Aim",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -570,7 +570,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const fireballCaster = await connectToRoom(colyseus, room, {
       name: "Range Mage",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
     const fireFieldCaster = await connectToRoom(colyseus, room, {
       name: "Field Ranger",
@@ -625,7 +625,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Burn Mage",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
     const target = await connectToRoom(colyseus, room, {
       name: "Burn Target",
@@ -665,7 +665,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Burn Mage",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -723,7 +723,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "XP Mage",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
 
     await room.waitForNextPatch();
@@ -838,7 +838,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Reconnect Burner",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
     const target = await connectToRoom(colyseus, room, {
       name: "Burn Survivor",
@@ -1104,7 +1104,7 @@ describe("world room", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Priority Mage",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
     });
     const target = await connectToRoom(colyseus, room, {
       name: "Priority Target",

@@ -18,7 +18,7 @@ describe("spread + split combo", () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Combo Mage",
-      weaponItem: "fire_staff",
+      weaponItem: "wood_staff",
       weaponGemItem1: "fire_spread_gem",
       weaponGemItem2: "fire_split_gem",
     });
