@@ -1,5 +1,6 @@
 import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import { PartyEntity } from '../../parties/entities/party.entity';
+import type { RaidRuntimeState } from '@mmorpg/shared';
 
 @Entity('raid_runs')
 export class RaidRunEntity {
@@ -24,6 +25,12 @@ export class RaidRunEntity {
     chests: Array<{ x: number; y: number }>;
     exitPoints: Array<{ x: number; y: number }>;
   } | null;
+
+  @Column({ type: 'simple-json', nullable: true })
+  runtimeState: RaidRuntimeState | null;
+
+  @Column({ type: 'timestamp', nullable: true })
+  runtimeStateUpdatedAt: Date | null;
 
   @Column({ type: 'timestamp', nullable: true })
   startedAt: Date | null;

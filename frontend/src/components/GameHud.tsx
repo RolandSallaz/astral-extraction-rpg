@@ -765,7 +765,7 @@ function getResolvedActionBarBindings(
 ) {
   const availableSkills = getAvailableSkills(equipment);
   const merged: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {
-    ...getDefaultActionBarBindings(equipment),
+    ...getDefaultActionBarBindings(),
     ...bindings,
   };
 
@@ -842,11 +842,11 @@ export function GameHud({
   const [skillsDrawerOpen, setSkillsDrawerOpen] = useState(false);
   const [actionBarBindings, setActionBarBindings] = useState<Partial<Record<ActionSlotKey, ActionBarBinding | null>>>(() => {
     if (typeof window === 'undefined') {
-      return getDefaultActionBarBindings(equipment);
+      return getDefaultActionBarBindings();
     }
 
     return parseStoredActionBarBindings(window.localStorage.getItem(ACTION_BAR_STORAGE_KEY))
-      ?? getDefaultActionBarBindings(equipment);
+      ?? getDefaultActionBarBindings();
   });
   const clearHoveredItemScope = (scope: HoveredItemState['scope']) => {
     setHoveredItem((current) => (current?.scope === scope ? null : current));

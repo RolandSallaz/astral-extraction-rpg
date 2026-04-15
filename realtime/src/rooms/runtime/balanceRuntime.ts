@@ -1,21 +1,15 @@
 import {
+  applyItemBalanceUpdate,
+  cloneMobBalanceConfig,
+  cloneSkillBalanceConfig,
   isMobKind,
   MOB_KINDS,
-  type MobKind,
-} from "@mmorpg/shared/mobs/catalog";
-import {
-  applyItemBalanceUpdate,
   type ItemBalanceConfig,
-} from "../itemBalance.js";
-import {
-  cloneSkillBalanceConfig,
-  type SkillBalanceConfig,
-} from "../skillBalance.js";
-import {
-  cloneMobBalanceConfig,
   type MobBalanceConfig,
   type MobBalanceSection,
-} from "../mobBalance.js";
+  type MobKind,
+  type SkillBalanceConfig,
+} from "@mmorpg/shared";
 import { type MobState } from "../schema/MobState.js";
 
 export function serializeSkillBalanceConfig(

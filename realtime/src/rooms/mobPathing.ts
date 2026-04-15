@@ -39,24 +39,6 @@ const CARDINAL_DIRECTIONS: readonly GridPoint[] = [
 const DEFAULT_RECOMPUTE_INTERVAL_MS = 350;
 const DEFAULT_FAILURE_RETRY_MS = 500;
 
-/**
- * Returns a longer recompute interval for mobs that are far from
- * any player, avoiding expensive BFS for non-threatening mobs.
- */
-export function getAdaptiveRecomputeInterval(
-  mob: { x: number; y: number },
-  nearestPlayerDistance: number | null,
-  baseIntervalMs = DEFAULT_RECOMPUTE_INTERVAL_MS,
-): number {
-  if (nearestPlayerDistance === null || nearestPlayerDistance > 600) {
-    return baseIntervalMs * 3; // ~1050ms for distant mobs
-  }
-  if (nearestPlayerDistance > 300) {
-    return baseIntervalMs * 2; // ~700ms for mid-range mobs
-  }
-  return baseIntervalMs; // default for close mobs
-}
-
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }

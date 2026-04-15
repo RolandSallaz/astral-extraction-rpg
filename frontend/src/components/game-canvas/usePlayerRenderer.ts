@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, type MutableRefObject } from 'react';
-import type { Room } from '@colyseus/sdk';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { EquipmentItemId } from '@mmorpg/shared/items/catalog';
 
@@ -46,7 +45,9 @@ type RealtimeRoomState = {
   }>;
 };
 
-type RealtimeRoom = Room<RealtimeRoomState>;
+type RealtimeRoom = {
+  state: RealtimeRoomState;
+};
 
 type StatusIconVisual = {
   back: Phaser.GameObjects.Rectangle;
@@ -60,7 +61,20 @@ type CharacterVisual = {
   burnAura: Phaser.GameObjects.Ellipse;
   container: Phaser.GameObjects.Container;
   deathEffect: Phaser.GameObjects.Image;
+  burnEffect: Phaser.GameObjects.Image;
+  head: Phaser.GameObjects.Image;
+  leftEye: Phaser.GameObjects.Rectangle;
+  rightEye: Phaser.GameObjects.Rectangle;
+  leftHand: Phaser.GameObjects.Image;
+  rightHand: Phaser.GameObjects.Image;
   weaponItem: Phaser.GameObjects.Image;
+  weaponEffects: Array<{
+    image: Phaser.GameObjects.Image;
+    aura: Phaser.GameObjects.Ellipse;
+    baseX: number;
+    baseY: number;
+    baseAlpha: number;
+  }>;
   nameplate: Phaser.GameObjects.Text;
   burnStatusIcon: StatusIconVisual;
   healingStatusIcon: StatusIconVisual;
@@ -80,11 +94,19 @@ type CharacterVisual = {
   currentMaxHealth: number;
   currentBurnTicksRemaining: number;
   currentBurnEndsAt: number;
+  currentBurnStartedAt: number;
+  currentBurnDurationMs: number;
   currentHealingTicksRemaining: number;
   currentHealingEndsAt: number;
+  currentHealingStartedAt: number;
+  currentHealingDurationMs: number;
   currentCastingSkillId: string;
   currentCastStartedAt: number;
   currentCastEndsAt: number;
+  currentBodyItem?: EquipmentItemId;
+  currentWeaponItem?: EquipmentItemId;
+  currentWeaponOffsetX: number;
+  currentWeaponOffsetY: number;
   isFollowTarget: boolean;
   interpPrevX: number;
   interpPrevY: number;
@@ -98,6 +120,7 @@ type CharacterVisual = {
   simY: number;
   simErrorX: number;
   simErrorY: number;
+  deathStartedAt: number;
   isDead: boolean;
   isVisible?: boolean;
 };
@@ -129,6 +152,7 @@ type UsePlayerRendererParams = {
   completedDeadPlayerIds: Set<string>;
   localSessionId: string | null;
   isRaidScene: boolean;
+  expectedServerTickMs: number;
   raidWidth: number;
   raidHeight: number;
   getLastRaidTilesWidth: () => number;
@@ -143,12 +167,12 @@ type UsePlayerRendererParams = {
     equipment: EquipmentState,
   ) => CharacterVisual;
   destroyCharacter: (sessionId: string) => void;
-  syncDeathState: (character: CharacterVisual, dead: boolean, now: number) => void;
-  applyCharacterHealthToVisual: (character: CharacterVisual, health: number, maxHealth: number) => void;
-  applyBurningToCharacterVisual: (character: CharacterVisual, ticks: number, endsAt: number) => void;
-  applyHealingToCharacterVisual: (character: CharacterVisual, ticks: number, endsAt: number) => void;
-  applyCastingToCharacterVisual: (character: CharacterVisual, skillId: string, startedAt: number, endsAt: number) => void;
-  applyEquipmentToVisual: (scene: Phaser.Scene, tileSize: number, character: CharacterVisual, equipment: EquipmentState) => void;
+  syncDeathState: (character: any, dead: boolean, now: number) => void;
+  applyCharacterHealthToVisual: (character: any, health: number, maxHealth: number) => void;
+  applyBurningToCharacterVisual: (character: any, ticks: number, endsAt: number) => void;
+  applyHealingToCharacterVisual: (character: any, ticks: number, endsAt: number) => void;
+  applyCastingToCharacterVisual: (character: any, skillId: string, startedAt: number, endsAt: number) => void;
+  applyEquipmentToVisual: (scene: Phaser.Scene, tileSize: number, character: any, equipment: EquipmentState) => void;
   toEquipmentItemId: (value: string) => EquipmentItemId | undefined;
   playerVisualRef: MutableRefObject<PlayerVisualRefs | null>;
   playerVitalsChangeRef: MutableRefObject<((payload: { health: number; maxHealth: number }) => void) | undefined>;
@@ -170,14 +194,14 @@ type UsePlayerRendererParams = {
   positionSyncState: PositionSyncAccessors;
   camera: Phaser.Cameras.Scene2D.Camera;
   reconcileRaidLocalCharacter: (
-    character: CharacterVisual,
+    character: any,
     authoritativeX: number,
     authoritativeY: number,
     width: number,
     height: number,
   ) => void;
   reconcileWorldLocalCharacter: (
-    character: CharacterVisual,
+    character: any,
     authoritativeX: number,
     authoritativeY: number,
   ) => void;
@@ -252,6 +276,7 @@ export function usePlayerRenderer() {
         completedDeadPlayerIds,
         localSessionId,
         isRaidScene,
+        expectedServerTickMs,
         raidWidth,
         raidHeight,
         getLastRaidTilesWidth,
@@ -364,7 +389,8 @@ export function usePlayerRenderer() {
             character.interpPrevAt = character.interpNextAt;
             character.interpNextX = character.targetX;
             character.interpNextY = character.targetY;
-            character.interpNextAt = now;
+            character.interpNextAt =
+              Math.max(character.interpPrevAt, now) + expectedServerTickMs;
           }
         }
         if (character.currentName !== networkPlayer.name) {

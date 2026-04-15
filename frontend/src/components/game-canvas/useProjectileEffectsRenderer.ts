@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
-import type { Room } from '@colyseus/sdk';
-import type { SkillEffectConfig } from '@/lib/skillEffects';
+import type { SkillEffectOverrides } from '@/lib/skillEffects';
 import { getSpriteSheetAnimationFrame, type SpriteSheetAnimation } from '@/lib/animations/runtime';
 
 type RealtimeRoomState = {
@@ -21,7 +20,9 @@ type RealtimeRoomState = {
   }>;
 };
 
-type RealtimeRoom = Room<RealtimeRoomState>;
+type RealtimeRoom = {
+  state: RealtimeRoomState;
+};
 
 type ProjectileVisual = {
   aura: Phaser.GameObjects.Ellipse;
@@ -45,16 +46,16 @@ type ProjectileRendererParams = {
   room: RealtimeRoom | null;
   projectileSprites: Map<string, ProjectileVisual>;
   projectileAnimations: Record<string, SpriteSheetAnimation>;
-  resolvedSkillEffects: SkillEffectConfig;
-  getProjectileAnimation: (skillId: string, animations: Record<string, SpriteSheetAnimation>) => SpriteSheetAnimation;
-  getProjectileDisplaySize: (skillId: string, effects: SkillEffectConfig) => number;
+  resolvedSkillEffects: SkillEffectOverrides;
+  getProjectileAnimation: (skillId: string, animations: any) => SpriteSheetAnimation;
+  getProjectileDisplaySize: (skillId: string, effects: any) => number;
 };
 
 type GroundEffectRendererParams = {
   scene: Phaser.Scene;
   room: RealtimeRoom | null;
   groundEffects: Map<string, GroundEffectVisual>;
-  resolvedSkillEffects: SkillEffectConfig;
+  resolvedSkillEffects: SkillEffectOverrides;
   groundAnimation: SpriteSheetAnimation;
   meadowMap: { tileSize: number };
 };

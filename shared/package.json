@@ -41,6 +41,9 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "zod": "^4.1.12"
+  },
   "devDependencies": {
     "typescript": "^6.0.2"
   }

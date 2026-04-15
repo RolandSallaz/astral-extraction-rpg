@@ -4,6 +4,7 @@
     "module": "CommonJS",
     "moduleResolution": "Node",
     "ignoreDeprecations": "6.0",
+    "composite": true,
     "declaration": true,
     "strict": true,
     "esModuleInterop": true,

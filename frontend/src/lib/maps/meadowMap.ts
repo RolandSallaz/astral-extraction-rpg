@@ -141,7 +141,6 @@ export function ensureWorldWorkbenchStamp(asset: MeadowMapAsset): MeadowMapAsset
 }
 
 export function isBlockedMeadowTile(
-  map: MeadowMap,
   decorations: MeadowDecoration[],
   stamps: MeadowStampAsset[],
   x: number,

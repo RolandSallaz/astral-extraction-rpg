@@ -11,6 +11,14 @@ import { listen } from "@colyseus/tools";
 
 // Import Colyseus config
 import app from "./app.config.js";
+import { shutdownRealtimeServices } from "./services/runtimeServices.js";
 
 // Create and listen on 2567 (or PORT environment variable.)
 listen(app);
+
+const shutdownRealtimeAppServices = () => {
+  void shutdownRealtimeServices();
+};
+
+process.once("SIGINT", shutdownRealtimeAppServices);
+process.once("SIGTERM", shutdownRealtimeAppServices);

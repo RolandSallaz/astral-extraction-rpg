@@ -3,7 +3,13 @@
 import { useEffect, useRef } from 'react';
 import type { Room } from '@colyseus/sdk';
 import type { MouseActionSlotKey, MouseSkillBindings, SkillId } from '@/components/GameHud';
-import { COMMON_DEATH_ANIMATION } from '@mmorpg/shared';
+import {
+  COMMON_DEATH_ANIMATION,
+  DEFAULT_MOB_BALANCE_CONFIG,
+  DEFAULT_SKILL_BALANCE_CONFIG,
+  type MobBalanceConfig,
+  type SkillBalanceConfig,
+} from '@mmorpg/shared';
 import {
   RAID_GAMEPLAY_PROFILE,
   WORLD_GAMEPLAY_PROFILE,
@@ -36,7 +42,6 @@ import {
   createDefaultMeadowMapAsset,
   createMeadowDecorations,
   createMeadowDecorationsFromAsset,
-  createMeadowMap,
   createMeadowMapFromAsset,
   createMeadowMobsFromAsset,
   createMeadowStampsFromAsset,
@@ -72,18 +77,14 @@ import {
   type SkillEffectOverrides,
 } from '@/lib/skillEffects';
 import {
-  DEFAULT_SKILL_BALANCE_CONFIG,
-  type SkillBalanceConfig,
-} from '@/lib/skillBalance';
+  getStoredSessionToken,
+  loadRaidRun,
+} from '@/lib/playerStorage';
 
 type ActiveTargetingState =
   | { type: 'skill'; skillId: 'fireball' | 'fireField' }
   | { type: 'consumable'; itemId: 'healing_potion' }
   | null;
-import {
-  DEFAULT_MOB_BALANCE_CONFIG,
-  type MobBalanceConfig,
-} from '@/lib/mobBalance';
 import {
   createDefaultMobVisualConfig,
   type MobAnimationState,
@@ -124,11 +125,7 @@ import {
   getMobVisualKind,
   toRuntimeAnimationFromMobClip,
 } from '@/components/game-canvas/mobRenderHelpers';
-import { useRoomOutboundSync } from '@/components/game-canvas/useRoomOutboundSync';
-import { useRoomInboundSync } from '@/components/game-canvas/useRoomInboundSync';
-import { useProjectileEffectsRenderer } from '@/components/game-canvas/useProjectileEffectsRenderer';
-import { useMobRenderer } from '@/components/game-canvas/useMobRenderer';
-import { usePlayerRenderer } from '@/components/game-canvas/usePlayerRenderer';
+import { useGameCanvasRoomSync } from '@/components/game-canvas/useGameCanvasRoomSync';
 import { createMinimapEmitter, type MinimapSnapshot } from '@/components/game-canvas/minimapEmitter';
 
 type PhaserGame = import('phaser').Game;
@@ -185,7 +182,7 @@ const PLAYER_ANIMATIONS: Partial<Record<PlayerAnimationState, PlayerSheetAnimati
     ]),
   ) as Partial<Record<PlayerAnimationState, PlayerSheetAnimation>>;
 const PLAYER_EYE_COLOR = Number.parseInt(DEFAULT_PLAYER_VISUALS.eyes.color.replace('#', ''), 16);
-const PLAYER_FIRE_EYE_COLOR = 0xff9a36;
+const PLAYER_FIRE_EYE_COLOR = 0xff4d4d;
 const PLAYER_HAND_ANIMATION_OFFSETS: Partial<Record<PlayerAnimationState, HandAnimationOffsets>> = {
   idle: {
     leftX: [0, 0, -1, 0],
@@ -257,20 +254,7 @@ export type TraderQuestMarker = {
   state: 'available' | 'active' | 'ready';
 } | null;
 
-type CharacterEquipment = {
-  body?: EquipmentItemId;
-  head?: EquipmentItemId;
-  weapon?: EquipmentItemId;
-  'head-gem-1'?: EquippableItemId;
-  'head-gem-2'?: EquippableItemId;
-  'head-gem-3'?: EquippableItemId;
-  'body-gem-1'?: EquippableItemId;
-  'body-gem-2'?: EquippableItemId;
-  'body-gem-3'?: EquippableItemId;
-  'weapon-gem-1'?: EquippableItemId;
-  'weapon-gem-2'?: EquippableItemId;
-  'weapon-gem-3'?: EquippableItemId;
-};
+type CharacterEquipment = EquipmentState;
 
 const ELEMENTAL_EQUIPMENT_KEYS = [
   'head',
@@ -424,6 +408,10 @@ type NetworkChestState = {
   y: number;
   slots: string[];
 };
+
+function getChestTextureKey(chest: Pick<NetworkChestState, 'subtitle'>) {
+  return chest.subtitle === 'Dropped Loot' ? 'loot-bag-8x8' : 'chest-8x8';
+}
 
 type NetworkMobState = {
   id: string;
@@ -739,6 +727,10 @@ type CharacterVisual = {
 
 type PlayerVisualRefs = {
   weaponItem: PhaserImage;
+  currentBodyItem?: EquipmentItemId;
+  currentWeaponItem?: EquipmentItemId;
+  currentWeaponOffsetX?: number;
+  currentWeaponOffsetY?: number;
 };
 
 type WorldRoom = Room<{
@@ -804,6 +796,7 @@ type RaidRoom = Room<{
   spawnPoints: string[];
   exitPoints: string[];
   players: Map<string, RaidNetworkPlayerState>;
+  mobs: Map<string, NetworkMobState>;
   chests: Map<string, NetworkChestState>;
   groundEffects: Map<string, NetworkGroundEffectState>;
   projectiles: Map<string, NetworkProjectileState>;
@@ -1177,7 +1170,6 @@ function canMoveToWorldPosition(
   tileSize: number,
   mapWidth: number,
   mapHeight: number,
-  meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
   meadowStamps: ReturnType<typeof createMeadowStampsFromAsset>,
   mobBlockers: MovementBlocker[] = [],
@@ -1189,7 +1181,7 @@ function canMoveToWorldPosition(
   const tileX = Math.floor(clampedX / tileSize);
   const tileY = Math.floor(clampedY / tileSize);
 
-  if (isBlockedMeadowTile(meadowMap, meadowDecorations, meadowStamps, tileX, tileY)) {
+  if (isBlockedMeadowTile(meadowDecorations, meadowStamps, tileX, tileY)) {
     return false;
   }
 
@@ -1271,7 +1263,6 @@ function applyWorldPredictedMovement(
   tileSize: number,
   mapWidth: number,
   mapHeight: number,
-  meadowMap: ReturnType<typeof createMeadowMap>,
   meadowDecorations: ReturnType<typeof createMeadowDecorations>,
   meadowStamps: ReturnType<typeof createMeadowStampsFromAsset>,
   speed: number,
@@ -1296,7 +1287,6 @@ function applyWorldPredictedMovement(
       tileSize,
       mapWidth,
       mapHeight,
-      meadowMap,
       meadowDecorations,
       meadowStamps,
       mobBlockers,
@@ -1548,6 +1538,7 @@ function applyEquipmentToVisual(
       baseAlpha: number;
       animation?: SheetAnimation;
     }>;
+    currentBodyItem?: EquipmentItemId;
     currentWeaponItem?: EquipmentItemId;
     currentWeaponOffsetX: number;
     currentWeaponOffsetY: number;
@@ -1558,9 +1549,10 @@ function applyEquipmentToVisual(
     return;
   }
 
-  const weaponItemId = equipment.weapon;
+  const bodyItemId = toEquipmentItemId(equipment.body);
+  const weaponItemId = toEquipmentItemId(equipment.weapon);
   const weaponItem = weaponItemId ? EQUIPMENT_ITEMS[weaponItemId] : undefined;
-  visual.currentBodyItem = equipment.body;
+  visual.currentBodyItem = bodyItemId;
   const eyeColor = hasDominantFireEquipment(equipment) ? PLAYER_FIRE_EYE_COLOR : PLAYER_EYE_COLOR;
 
   visual.leftEye.setFillStyle(eyeColor, 1);
@@ -2050,6 +2042,7 @@ export function GameCanvas({
   keyboardInputEnabled = true,
   activeRoomName = 'world',
   activeRoomOptions,
+  contentVersion = '',
   worldMapAssetOverride = null,
   worldEditorEnabled = false,
   worldEditorMode = 'tile',
@@ -2110,7 +2103,7 @@ export function GameCanvas({
   onRaidExit?: (payload: RaidExitStateMessage) => void;
   onRoomConnected?: (payload: {
     roomName: 'world' | 'raid';
-    options?: Record<string, string | number>;
+    options?: Record<string, unknown>;
   }) => void;
   respawnRequestNonce: number;
   fireNovaCastNonce: number;
@@ -2137,7 +2130,8 @@ export function GameCanvas({
   mobVisualConfig?: MobVisualConfig;
   keyboardInputEnabled?: boolean;
   activeRoomName?: 'world' | 'raid';
-  activeRoomOptions?: Record<string, string | number>;
+  activeRoomOptions?: Record<string, unknown>;
+  contentVersion?: string;
   worldMapAssetOverride?: MeadowMapAsset | null;
   worldEditorEnabled?: boolean;
   worldEditorMode?: 'tile' | 'sprite' | 'mob' | 'spawn' | 'trader';
@@ -2241,6 +2235,8 @@ export function GameCanvas({
   const lastKnownSkillBalanceSerializedRef = useRef(JSON.stringify(skillBalanceConfig));
   const hasReceivedMobBalanceRef = useRef(false);
   const lastKnownMobBalanceSerializedRef = useRef(JSON.stringify(mobBalanceConfig));
+  const sessionTokenRef = useRef(getStoredSessionToken());
+  const contentVersionRef = useRef(contentVersion);
   const pendingRespawnNonceRef = useRef(0);
   const lastSentRespawnNonceRef = useRef(0);
   const latestProfileRef = useRef({
@@ -2254,6 +2250,8 @@ export function GameCanvas({
     playerStrength,
     playerAgility,
     playerIntellect,
+    playerGold,
+    playerQuests,
     playerRole,
     playerInventory,
   });
@@ -2442,6 +2440,14 @@ export function GameCanvas({
   }, [mobVisualConfig]);
 
   useEffect(() => {
+    sessionTokenRef.current = getStoredSessionToken();
+  }, [playerName]);
+
+  useEffect(() => {
+    contentVersionRef.current = contentVersion;
+  }, [contentVersion]);
+
+  useEffect(() => {
     skillBalanceConfigChangeRef.current = onSkillBalanceConfigChange;
   }, [onSkillBalanceConfigChange]);
 
@@ -2483,74 +2489,73 @@ export function GameCanvas({
     playerQuests,
   ]);
 
-  const { attachRoomInboundHandlers } = useRoomInboundSync({
-    chatHistoryRef,
-    chatMessageRef,
-    hasReceivedSkillBalanceRef,
-    lastKnownSkillBalanceSerializedRef,
-    skillBalanceConfigChangeRef,
-    hasReceivedMobBalanceRef,
-    lastKnownMobBalanceSerializedRef,
-    mobBalanceConfigChangeRef,
-    playerDeathRef,
-    beforePlayerRespawnRef,
-    playerRespawnRef,
-    playerInventoryChangeRef,
-    consumableCooldownChangeRef,
-    raidExitRef,
-  });
   const {
+    attachRoomInboundHandlers,
     syncProjectilesFromRoom: syncProjectilesFromRoomShared,
     syncGroundEffectsFromRoom: syncGroundEffectsFromRoomShared,
-  } = useProjectileEffectsRenderer();
-  const {
     syncMobsFromRoom: syncMobsFromRoomShared,
     setMobVisibility: setMobVisibilityShared,
-  } = useMobRenderer();
-  const {
     syncPlayersFromRoom: syncPlayersFromRoomShared,
     setCharacterVisibility: setCharacterVisibilityShared,
-  } = usePlayerRenderer();
-
-  useRoomOutboundSync({
-    activeRoomName,
-    playerRole,
-    playerProfile: {
-      playerName,
-      playerRole,
-      playerPosition,
-      playerHealth,
-      playerMaxHealth,
-      playerLevel,
-      playerExperience,
-      playerStrength,
-      playerAgility,
-      playerIntellect,
-      playerGold,
-      playerQuests,
-      playerInventory,
-      playerEquipment,
+  } = useGameCanvasRoomSync({
+    inbound: {
+      chatHistoryRef,
+      chatMessageRef,
+      hasReceivedSkillBalanceRef,
+      lastKnownSkillBalanceSerializedRef,
+      skillBalanceConfigChangeRef,
+      hasReceivedMobBalanceRef,
+      lastKnownMobBalanceSerializedRef,
+      mobBalanceConfigChangeRef,
+      playerDeathRef,
+      beforePlayerRespawnRef,
+      playerRespawnRef,
+      playerInventoryChangeRef,
+      consumableCooldownChangeRef,
+      raidExitRef,
     },
-    roomRef,
-    skillBalanceConfig,
-    mobBalanceConfig,
-    hasReceivedSkillBalanceRef,
-    lastKnownSkillBalanceSerializedRef,
-    hasReceivedMobBalanceRef,
-    lastKnownMobBalanceSerializedRef,
-    useConsumableRequest,
-    containerStates,
-    serverContainersRef,
-    respawnRequestNonce,
-    pendingRespawnNonceRef,
-    lastSentRespawnNonceRef,
-    fireNovaCastNonce,
-    woodStaffStrikeCastNonce,
-    estimatedOneWayLatencyMsRef,
-    lastPointerWorldRef,
-    skillCooldownsRef,
-    createWorldProfileMessage,
-    createTimedCastSkillMessage,
+    outbound: {
+      activeRoomName,
+      playerRole,
+      playerProfile: {
+        playerName,
+        playerRole,
+        playerPosition,
+        playerHealth,
+        playerMaxHealth,
+        playerLevel,
+        playerExperience,
+        playerStrength,
+        playerAgility,
+        playerIntellect,
+        playerGold,
+        playerQuests,
+        playerInventory,
+        playerEquipment,
+      },
+      roomRef,
+      skillBalanceConfig,
+      mobBalanceConfig,
+      hasReceivedSkillBalanceRef,
+      lastKnownSkillBalanceSerializedRef,
+      hasReceivedMobBalanceRef,
+      lastKnownMobBalanceSerializedRef,
+      useConsumableRequest,
+      containerStates,
+      serverContainersRef,
+      respawnRequestNonce,
+      pendingRespawnNonceRef,
+      lastSentRespawnNonceRef,
+      fireNovaCastNonce,
+      woodStaffStrikeCastNonce,
+      sessionTokenRef,
+      contentVersionRef,
+      estimatedOneWayLatencyMsRef,
+      lastPointerWorldRef,
+      skillCooldownsRef,
+      createWorldProfileMessage,
+      createTimedCastSkillMessage,
+    },
   });
 
   useEffect(() => {
@@ -2787,7 +2792,7 @@ export function GameCanvas({
           let lastRaidVisibilityRenderKey = '';
           let lastRaidVisibilityUpdateAt = 0;
           let lastRaidObjectVisibilityUpdateAt = 0;
-          let latencyPingIntervalId: ReturnType<typeof window.setInterval> | null = null;
+          let latencyPingIntervalId: number | null = null;
           let nextRaidInputSequence = 1;
           let lastProcessedRaidInput = 0;
           let pendingRaidInputs: PendingRaidInputSample[] = [];
@@ -3048,7 +3053,7 @@ export function GameCanvas({
           const mapHeight = (isRaidScene ? raidHeight : meadowMap.height) * tileSize;
           const meadowMinimapTiles = meadowMap.tiles.flatMap((row, y) =>
             row.map((tile, x) => {
-              if (isBlockedMeadowTile(meadowMap, meadowDecorations, meadowStamps, x, y)) {
+              if (isBlockedMeadowTile(meadowDecorations, meadowStamps, x, y)) {
                 return 'blocked';
               }
 
@@ -4292,7 +4297,6 @@ export function GameCanvas({
               } else if (swingProgress < strikeCutoff) {
                 const t = Math.sin(((swingProgress - windupCutoff) / (strikeCutoff - windupCutoff)) * Math.PI * 0.5);
                 const forwardBlend = 1 - Math.min(1, Math.abs(dirY) / 0.35);
-                const coneSpan = Phaser.Math.Linear(coneHalfAngle * 0.5, coneHalfAngle, 1 - forwardBlend);
                 const handConeSpan = Phaser.Math.Linear(handConeHalfAngle * 0.5, handConeHalfAngle, 1 - forwardBlend);
                 const handAngleRad = aimAngleRad + Phaser.Math.Linear(-handConeSpan, handConeSpan, t) * (Math.PI / 180);
                 const handRadius = Phaser.Math.Linear(windupDist, strikeDistY, t);
@@ -4409,7 +4413,6 @@ export function GameCanvas({
                 );
                 const fade = Math.sin(phaseT * Math.PI);
                 const sweepAngle = Phaser.Math.Linear(startAngle, endAngle, phaseT);
-                const sweepHalfWidth = Math.max(0.06, profile.meleeStrikeArcHalfAngleRad * 0.2);
 
                 trailPoints.length = 0;
                 swingTrail.clear();
@@ -4480,6 +4483,8 @@ export function GameCanvas({
             } else {
               character.body.clearTint();
               character.head.clearTint();
+              character.leftHand.clearTint();
+              character.rightHand.clearTint();
             }
             character.head.x = DEFAULT_PLAYER_VISUALS.head.offsetX;
             character.head.y = DEFAULT_PLAYER_VISUALS.head.offsetY + headAnimationOffsetY;
@@ -4740,6 +4745,9 @@ export function GameCanvas({
               completedDeadPlayerIds,
               localSessionId,
               isRaidScene,
+              expectedServerTickMs: isRaidScene
+                ? RAID_CLIENT_SIMULATION_STEP_MS
+                : WORLD_CLIENT_SIMULATION_STEP_MS,
               raidWidth,
               raidHeight,
               getLastRaidTilesWidth: () => lastRaidTilesWidth,
@@ -4923,7 +4931,6 @@ export function GameCanvas({
                 tileSize,
                 meadowMap.width * tileSize,
                 meadowMap.height * tileSize,
-                meadowMap,
                 meadowDecorations,
                 currentWorldAsset.stamps,
                 CLIENT_PLAYER_SPEED,
@@ -5243,7 +5250,7 @@ export function GameCanvas({
               const chestX = networkChest.x * meadowMap.tileSize + meadowMap.tileSize / 2;
               const chestY = networkChest.y * meadowMap.tileSize + meadowMap.tileSize / 2;
 
-              const chestTexture = 'chest-8x8';
+              const chestTexture = getChestTextureKey(networkChest);
 
               if (!chestSprite) {
                 chestSprite = this.add
@@ -5419,23 +5426,52 @@ export function GameCanvas({
             playerStrength: latestProfileRef.current.playerStrength,
             playerAgility: latestProfileRef.current.playerAgility,
             playerIntellect: latestProfileRef.current.playerIntellect,
+            playerGold: latestProfileRef.current.playerGold,
+            playerQuests: latestProfileRef.current.playerQuests,
             playerInventory: latestProfileRef.current.playerInventory,
             playerEquipment: latestProfileRef.current.playerEquipment,
           };
-          const joinOptions: WorldRoomJoinOptions | RaidRoomJoinOptions = activeRoomName === 'world'
-            ? {
-              ...(activeRoomOptions ?? {}),
-              ...createWorldProfileMessage(latestProfileSnapshot),
-              worldOwner: latestProfileSnapshot.playerName,
-            }
-            : {
-              ...(activeRoomOptions ?? {}),
-              ...createBaseProfileMessage(latestProfileSnapshot),
-            };
+          void (async () => {
+            try {
+              const sessionToken = sessionTokenRef.current ?? undefined;
+              const resolvedContentVersion = contentVersionRef.current;
+              if (!resolvedContentVersion) {
+                if (sceneActive && statusText.active) {
+                  statusText.setText('Syncing content snapshot...');
+                }
+                chatSenderReadyRef.current?.(null);
+                return;
+              }
 
-          void networkClient
-            .joinOrCreate(activeRoomName, joinOptions)
-            .then((joinedRoom) => {
+              let resolvedRoomOptions = { ...(activeRoomOptions ?? {}) } as Record<string, unknown>;
+              if (isRaidScene && typeof resolvedRoomOptions.raidRunId === 'string') {
+                const latestRaidRun = await loadRaidRun(resolvedRoomOptions.raidRunId);
+                resolvedRoomOptions = {
+                  ...resolvedRoomOptions,
+                  ...(latestRaidRun.realtimeRoom.options ?? {}),
+                  runtimeState:
+                    latestRaidRun.runtimeState ??
+                    latestRaidRun.realtimeRoom.options?.runtimeState ??
+                    null,
+                };
+              }
+
+              const joinOptions: WorldRoomJoinOptions | RaidRoomJoinOptions = activeRoomName === 'world'
+                ? {
+                  ...resolvedRoomOptions,
+                  ...createWorldProfileMessage(latestProfileSnapshot),
+                  worldOwner: latestProfileSnapshot.playerName,
+                  sessionToken,
+                  contentVersion: resolvedContentVersion,
+                }
+                : {
+                  ...resolvedRoomOptions,
+                  ...createBaseProfileMessage(latestProfileSnapshot),
+                  sessionToken,
+                  contentVersion: resolvedContentVersion,
+                };
+
+              const joinedRoom = await networkClient.joinOrCreate(activeRoomName, joinOptions);
               room = joinedRoom as RealtimeRoom;
               roomRef.current = room;
               localSessionId = room.sessionId;
@@ -5445,11 +5481,13 @@ export function GameCanvas({
               }
               roomConnectedRef.current?.({
                 roomName: activeRoomName,
-                options: activeRoomOptions,
+                options: resolvedRoomOptions,
               });
 
               if (!isRaidScene) {
                 const profileMessage = createWorldProfileMessage(latestProfileSnapshot);
+                profileMessage.sessionToken = sessionToken;
+                profileMessage.contentVersion = resolvedContentVersion;
                 room.send('profile', profileMessage);
                 chatSenderReadyRef.current?.((text: string) => {
                   const chatInputMessage: ChatInputMessage = { text };
@@ -5502,13 +5540,17 @@ export function GameCanvas({
                 },
                 true,
               );
-            })
-            .catch(() => {
+            } catch (error) {
               if (sceneActive && statusText.active) {
-                statusText.setText('Realtime server offline. Start realtime on :2567');
+                const message =
+                  error instanceof Error && error.message
+                    ? error.message
+                    : 'Realtime server offline. Start realtime on :2567';
+                statusText.setText(message);
               }
               chatSenderReadyRef.current?.(null);
-            });
+            }
+          })();
 
           this.add
             .text(24, 24, isRaidScene ? String(activeRoomOptions?.templateName ?? 'Raid Instance') : 'Personal World', {
@@ -5618,6 +5660,7 @@ export function GameCanvas({
                     x: normalizedX,
                     y: normalizedY,
                     sequence,
+                    clientEstimatedLatencyMs: estimatedOneWayLatencyMsRef.current,
                   };
                   room.send('move', moveMessage);
 
@@ -5638,6 +5681,7 @@ export function GameCanvas({
                     x: normalizedX,
                     y: normalizedY,
                     sequence,
+                    clientEstimatedLatencyMs: estimatedOneWayLatencyMsRef.current,
                   };
                   room.send('move', moveMessage);
 
@@ -5689,7 +5733,6 @@ export function GameCanvas({
                   tileSize,
                   mapWidth,
                   mapHeight,
-                  meadowMap,
                   meadowDecorations,
                   currentWorldAsset.stamps,
                   CLIENT_PLAYER_SPEED,
@@ -7095,7 +7138,7 @@ export function GameCanvas({
                     continue;
                   }
 
-                  if (isBlockedMeadowTile(meadowMap, meadowDecorations, worldStamps, tileX, tileY)) {
+                  if (isBlockedMeadowTile(meadowDecorations, meadowStamps, tileX, tileY)) {
                     collisionDebugGraphics.fillStyle(DEBUG_COLLISION_TILE_COLOR, 0.16);
                     collisionDebugGraphics.fillRect(tileLeft, tileTop, tileSize, tileSize);
                     collisionDebugGraphics.lineStyle(1, DEBUG_COLLISION_TILE_COLOR, 0.9);
@@ -7231,11 +7274,15 @@ export function GameCanvas({
         }
       }
 
+      containerRef.current.replaceChildren();
       game = new Phaser.Game({
         type: Phaser.AUTO,
         parent: containerRef.current,
         backgroundColor: '#6fbe4a',
         pixelArt: true,
+        audio: {
+          noAudio: true,
+        },
         scale: {
           mode: Phaser.Scale.RESIZE,
           autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -7264,7 +7311,7 @@ export function GameCanvas({
       estimatedOneWayLatencyMsRef.current = 0;
       game?.destroy(true);
     };
-  }, [activeRoomName, JSON.stringify(activeRoomOptions), playerName, JSON.stringify(skillEffectOverrides)]);
+  }, [activeRoomName, JSON.stringify(activeRoomOptions), playerName, contentVersion, JSON.stringify(skillEffectOverrides)]);
 
   return (
     <div

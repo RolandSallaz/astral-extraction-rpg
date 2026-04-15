@@ -61,12 +61,20 @@ import {
   sendRoomBalanceSnapshots,
   transferRoomOwnedReferences,
 } from "./runtime/sessionRuntime.js";
+import {
+  normalizeMoveMessage,
+  normalizeUseExitMessage,
+  normalizeUseConsumableMessage,
+} from "./runtime/messageValidation.js";
+import {
+  restoreRaidRuntimeState,
+  serializeRaidRuntimeState,
+} from "./runtime/raidPersistenceRuntime.js";
 import type { BasePlayerState } from "./schema/BasePlayerState.js";
 import {
   loadRaidContent,
   resolveRaidTemplateContent,
 } from "./raidContent.js";
-import type { RaidTemplateContentDefinition } from "@mmorpg/shared/raids/content";
 
 const TILE_SIZE = RAID_GAMEPLAY_PROFILE.tileSize;
 const RAID_PLAYER_SPEED = RAID_GAMEPLAY_PROFILE.playerMoveSpeed;
@@ -85,6 +93,8 @@ const RAID_CHEST_LOOT_REDUCTION_FACTOR = 10;
 const RAID_CHEST_ITEM_TIER_2_CHANCE = 0.14;
 const RAID_CHEST_ITEM_TIER_3_CHANCE = 0.03;
 const RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS = new Set(["healing_potion"]);
+const RAID_RUNTIME_PERSIST_INTERVAL_MS = 1000;
+const ALLOW_GUEST_EQUIPMENT_SYNC = process.env.NODE_ENV !== "production";
 
 export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   maxClients = 8;
@@ -99,6 +109,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   private disposeTimeout: ReturnType<typeof setTimeout> | null = null;
   private raidExpiresAt = 0;
   private raidClosed = false;
+  private lastPersistedRaidRuntimeKey = "";
+  private lastPersistedRaidRuntimeAt = 0;
 
   // ── Abstract method implementations ─────────────────────────────
 
@@ -253,11 +265,30 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.chestBlockedTiles[chest.y * layout.width + chest.x] = 1;
     });
     this.createRaidMobs(seed, layout.rooms);
+    if (options.runtimeState) {
+      restoreRaidRuntimeState({
+        runtimeState: options.runtimeState,
+        mobs: this.state.mobs,
+        chests: this.state.chests,
+        groundEffects: this.state.groundEffects,
+        chestBlockedTiles: this.chestBlockedTiles,
+        width: layout.width,
+      });
+      this.state.status = options.runtimeState.status || this.state.status;
+      this.raidExpiresAt = options.runtimeState.expiresAt || this.raidExpiresAt;
+      this.raidClosed = this.state.status === "expired";
+    }
 
     this.onMessage("move", (client, message: MoveMessage) => {
-      const moveX = Number.isFinite(message?.x) ? message.x : 0;
-      const moveY = Number.isFinite(message?.y) ? message.y : 0;
-      const sequence = Number.isFinite(message?.sequence) ? Math.max(0, Math.floor(message.sequence!)) : 0;
+      const normalizedMessage = normalizeMoveMessage(message);
+      if (!normalizedMessage) {
+        return;
+      }
+
+      const { x: moveX, y: moveY, sequence, clientEstimatedLatencyMs } = normalizedMessage;
+      if (clientEstimatedLatencyMs !== undefined) {
+        this.playerLatencyMs.set(client.sessionId, clientEstimatedLatencyMs);
+      }
       const length = Math.hypot(moveX, moveY);
       const player = this.state.players.get(client.sessionId);
 
@@ -296,7 +327,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           player,
         });
       } else {
-        this.applyProfileToPlayer(player, message);
+        this.applyProfileToPlayer(player, message, {
+          allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+        });
         if (
           applyRoomZeroHealthState(player, {
             clearCastState: () => {
@@ -309,46 +342,25 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         }
       }
 
-      const equipment = createEquipmentStateSnapshot({
-        bodyItem: message?.bodyItem,
-        headItem: message?.headItem,
-        weaponItem: message?.weaponItem,
-        headGemItem1: message?.headGemItem1,
-        headGemItem2: message?.headGemItem2,
-        headGemItem3: message?.headGemItem3,
-        bodyGemItem1: message?.bodyGemItem1,
-        bodyGemItem2: message?.bodyGemItem2,
-        bodyGemItem3: message?.bodyGemItem3,
-        weaponGemItem1: message?.weaponGemItem1,
-        weaponGemItem2: message?.weaponGemItem2,
-        weaponGemItem3: message?.weaponGemItem3,
-      });
-      const inventory = Array.isArray(message?.inventory)
-        ? normalizeRoomInventorySlots(message.inventory, INVENTORY_SIZE)
-        : Array.from(player.inventory);
-
-      this.publishPlayerProfileSnapshot({
-        sessionId: client.sessionId,
-        equipment,
-        inventory,
-        gold: typeof message?.gold === "number" ? message.gold : undefined,
-        quests: message?.quests,
-        source: "raid",
-      });
     });
 
     this.onMessage("useExit", (client, message: UseExitMessage) => {
-      const player = this.state.players.get(client.sessionId);
-      if (!player || typeof message?.exitId !== "string") {
+      const normalizedMessage = normalizeUseExitMessage(message);
+      if (!normalizedMessage) {
         return;
       }
 
-      const [tileX, tileY] = message.exitId.split(":").map((value) => Number.parseInt(value, 10));
+      const player = this.state.players.get(client.sessionId);
+      if (!player || typeof normalizedMessage.exitId !== "string") {
+        return;
+      }
+
+      const [tileX, tileY] = normalizedMessage.exitId.split(":").map((value) => Number.parseInt(value, 10));
       if (!Number.isFinite(tileX) || !Number.isFinite(tileY)) {
         return;
       }
 
-      const exitExists = this.state.exitPoints.includes(message.exitId);
+      const exitExists = this.state.exitPoints.includes(normalizedMessage.exitId);
       if (!exitExists) {
         return;
       }
@@ -370,7 +382,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       });
       this.send(client, "raidExited", {
         raidRunId: this.state.raidRunId,
-        exitId: message.exitId,
+        exitId: normalizedMessage.exitId,
         reason: "extracted",
         ...payload,
       });
@@ -382,14 +394,19 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         return;
       }
 
-      const slotIndex = typeof message?.slotIndex === "number" ? Math.floor(message.slotIndex) : -1;
-      const source = message?.source === "container" ? "container" : "inventory";
+      const normalizedMessage = normalizeUseConsumableMessage(message);
+      if (!normalizedMessage) {
+        return;
+      }
+
+      const slotIndex = normalizedMessage.slotIndex ?? -1;
+      const source = normalizedMessage.source === "container" ? "container" : "inventory";
       let sourceSlots: string[] | null = null;
 
       if (source === "inventory") {
         sourceSlots = Array.from(player.inventory);
-      } else if (typeof message?.containerId === "string") {
-        const chest = this.state.chests.get(message.containerId);
+      } else if (normalizedMessage.containerId) {
+        const chest = this.state.chests.get(normalizedMessage.containerId);
         if (chest) {
           sourceSlots = Array.from(chest.slots);
         }
@@ -410,8 +427,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
             client.send("inventoryUpdate", {
               inventory: nextSlots.map((item) => item || ""),
             });
-          } else if (typeof message?.containerId === "string") {
-            const chest = this.state.chests.get(message.containerId);
+          } else if (normalizedMessage.containerId) {
+            const chest = this.state.chests.get(normalizedMessage.containerId);
             if (chest) {
               replaceRoomStringSlots(chest.slots, nextSlots);
               this.removeChestIfEmptyLootBag(chest.id);
@@ -419,9 +436,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           }
         },
         {
-          mode: message?.mode,
-          targetX: message?.targetX,
-          targetY: message?.targetY,
+          mode: normalizedMessage.mode,
+          targetX: normalizedMessage.targetX,
+          targetY: normalizedMessage.targetY,
         },
       );
     });
@@ -431,16 +448,62 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.updateRaidExpiration();
       this.removeExpiredOfflinePlayers();
       const deltaSeconds = deltaTime / 1000;
-      this.rebuildMobSpatialGrid();
+      this.ensureMobSpatialGrid();
       this.updatePlayers(deltaSeconds);
       this.recordPlayerPositionHistory(tickNow);
       this.updateMobs(deltaSeconds, tickNow);
       this.updateCombatSystems(deltaSeconds, tickNow, { includeMobBurns: true });
+      this.publishRaidRuntimeStateIfNeeded(tickNow);
     }, this.simulationIntervalMs);
   }
 
-  onDispose() {
+  async onDispose() {
+    await this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
+    await this.waitForPendingPublishes();
     this.disposeShared();
+  }
+
+  private buildRaidRuntimeState() {
+    return serializeRaidRuntimeState({
+      status: this.state.status,
+      expiresAt: this.raidExpiresAt,
+      mobs: this.state.mobs.values(),
+      chests: this.state.chests.values(),
+      groundEffects: this.state.groundEffects.values(),
+    });
+  }
+
+  private publishRaidRuntimeStateIfNeeded(now: number, force = false) {
+    if (!this.state.raidRunId) {
+      return null;
+    }
+
+    if (!force && now - this.lastPersistedRaidRuntimeAt < RAID_RUNTIME_PERSIST_INTERVAL_MS) {
+      return null;
+    }
+
+    const runtimeState = this.buildRaidRuntimeState();
+    const snapshotKey = JSON.stringify({
+      status: runtimeState.status,
+      expiresAt: runtimeState.expiresAt,
+      mobs: runtimeState.mobs,
+      chests: runtimeState.chests,
+      groundEffects: runtimeState.groundEffects,
+    });
+
+    this.lastPersistedRaidRuntimeAt = now;
+    if (!force && snapshotKey === this.lastPersistedRaidRuntimeKey) {
+      return null;
+    }
+
+    this.lastPersistedRaidRuntimeKey = snapshotKey;
+    return this.trackPendingPublish(
+      this.kafkaPublisher.publish("raid.run.updated", {
+        raidRunId: this.state.raidRunId,
+        runtimeState,
+        updatedAt: runtimeState.updatedAt,
+      }),
+    );
   }
 
   onJoin(client: Client, options: RaidRoomJoinOptions = {}, authResult?: VerifiedPlayer | boolean | null) {
@@ -470,7 +533,9 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       applyVerifiedProfile(player, verified);
     } else {
       player.name = "Raider";
-      this.applyProfileToPlayer(player, options);
+      this.applyProfileToPlayer(player, options, {
+        allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+      });
     }
     initializeRoomPlayerTransientState(player);
     if (
@@ -509,6 +574,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         client.sessionId,
         this.offlineExpiresAt,
         this.consumableCooldownEndsAt,
+        this.playerLatencyMs,
         this.verifiedPlayers,
       );
       return;
@@ -555,6 +621,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   }
 
   private canMoveTo(x: number, y: number, player?: RaidPlayerState) {
+    this.ensureMobSpatialGrid();
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.state.width * TILE_SIZE - TILE_SIZE / 2, x));
     const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.state.height * TILE_SIZE - TILE_SIZE / 2, y));
     const clampedFootY = Math.max(
@@ -837,6 +904,30 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     return this.mobBalance[kind];
   }
 
+  private resolveProceduralMobKind(
+    room: { width: number; height: number },
+    centerY: number,
+    random: () => number,
+  ): MobKind {
+    const mobGeneration = this.activeRaidContent.mobGeneration;
+    const batRoomEligible =
+      room.height >= mobGeneration.batMinRoomHeight &&
+      room.width >= mobGeneration.batMinRoomWidth;
+    const batRollThreshold = centerY < this.state.height / 2
+      ? Math.max(0, mobGeneration.batRandomThreshold - 0.12)
+      : mobGeneration.batRandomThreshold;
+
+    if (batRoomEligible && random() > batRollThreshold) {
+      return "bat";
+    }
+
+    if (random() < mobGeneration.skeletonSpawnChance) {
+      return "skeleton";
+    }
+
+    return "rat";
+  }
+
   // ── Raid mob creation ───────────────────────────────────────────
 
   private createRaidMobs(seed: string, rooms: Array<{ x: number; y: number; width: number; height: number }>) {
@@ -931,13 +1022,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       .slice(0, spawnCount);
 
     selectedRooms.forEach(({ room, centerX, centerY }, index) => {
-      const isBat =
-        room.height >= mobGeneration.batMinRoomHeight &&
-        (room.width >= mobGeneration.batMinRoomWidth ||
-          centerY < this.state.height / 2 ||
-          random() > mobGeneration.batRandomThreshold);
-      const isSkeleton = !isBat && random() < mobGeneration.skeletonSpawnChance;
-      const kind: MobKind = isBat ? "bat" : isSkeleton ? "skeleton" : "rat";
+      const kind = this.resolveProceduralMobKind(room, centerY, random);
       const balance = this.getMobBalanceByKind(kind);
       const definition = getMobDefinition(kind);
       const mob = new MobState();
@@ -955,7 +1040,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       mob.patrolMinX = (room.x + 1) * TILE_SIZE + TILE_SIZE / 2;
       mob.patrolMaxX = (room.x + room.width - 2) * TILE_SIZE + TILE_SIZE / 2;
       mob.patrolY = mob.spawnY;
-      mob.patrolRadiusY = isBat
+      mob.patrolRadiusY = kind === "bat"
         ? Math.max(
             mobGeneration.batPatrolRadiusMin,
             (room.height - mobGeneration.batPatrolRadiusRoomHeightOffset) *
@@ -1098,6 +1183,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     this.statusEffects.clearAll();
     this.consumableCooldownEndsAt.clear();
     this.offlineExpiresAt.clear();
+    this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
     this.clearDisposeTimeout();
     setTimeout(() => {
       this.state.players.clear();
@@ -1124,7 +1210,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   private createRaidExitPayload(player: RaidPlayerState): RaidExitStateMessage {
     const inventory = identifyAllRaidUnidentifiedInventoryEntries(
       Array.from({ length: INVENTORY_SIZE }, (_, index) => player.inventory[index] || null),
-    );
+    ).map((entry) => entry || null);
     const equipment = createEquipmentStateSnapshot({
       headItem: player.headItem,
       bodyItem: player.bodyItem,
@@ -1171,6 +1257,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.woodStaffStrikeCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
     this.removePlayerFromRaidState(player.id);
+    this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
     return payload;
   }
 
@@ -1224,6 +1311,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     this.offlineExpiresAt.delete(player.id);
     this.statusEffects.deletePlayerEffects(player.id);
     this.consumableCooldownEndsAt.delete(player.id);
+    this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
 
     return {
       health: preservedHealth,
@@ -1299,12 +1387,17 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       );
       this.skillCastSystem.clearPlayer(previousSessionId);
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
+      moveRoomMapValue(this.playerLatencyMs, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
       this.statusEffects.movePlayerEffects(previousSessionId, client.sessionId);
       player.id = client.sessionId;
       this.state.players.set(client.sessionId, player);
       this.clearPlayerCastState(player);
-      this.applyProfileToPlayer(player, options);
+      if (!this.verifiedPlayers.has(client.sessionId)) {
+        this.applyProfileToPlayer(player, options, {
+          allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+        });
+      }
       if (
         applyRoomZeroHealthState(player, {
           clearCastState: () => {
@@ -1351,6 +1444,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         this.offlineExpiresAt,
         this.pendingMovement,
         this.consumableCooldownEndsAt,
+        this.playerLatencyMs,
         this.verifiedPlayers,
       );
       this.skillCastSystem.clearPlayer(sessionId);
@@ -1379,9 +1473,15 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
   // ── Profile ─────────────────────────────────────────────────────
 
-  private applyProfileToPlayer(player: RaidPlayerState, profile: RaidProfileMessage | RaidRoomJoinOptions) {
+  private applyProfileToPlayer(
+    player: RaidPlayerState,
+    profile: RaidProfileMessage | RaidRoomJoinOptions,
+    options: { allowEquipmentSync?: boolean } = {},
+  ) {
     applyRoomProfilePatch(player, profile, {
       defaultName: "Raider",
+      allowEquipmentSync: options.allowEquipmentSync,
+      defaultWeaponItem: "wood_staff",
     });
     replaceRoomStringSlots(
       player.inventory,

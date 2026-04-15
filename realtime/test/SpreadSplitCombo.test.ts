@@ -2,6 +2,7 @@ import assert from "assert";
 import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
+import { connectToRoom } from "./helpers/realtimeJoin.js";
 
 describe("spread + split combo", () => {
   let colyseus: ColyseusTestServer<ReturnType<typeof createAppConfig>>;
@@ -15,7 +16,7 @@ describe("spread + split combo", () => {
 
   it("spawns six projectiles for a fireball cast with spread and split gems", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Combo Mage",
       weaponItem: "fire_staff",
       weaponGemItem1: "fire_spread_gem",
@@ -43,3 +44,4 @@ describe("spread + split combo", () => {
     assert.strictEqual(room.state.projectiles.size, 6);
   });
 });
+

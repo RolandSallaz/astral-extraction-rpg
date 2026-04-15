@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, type MutableRefObject } from 'react';
-import type { Room } from '@colyseus/sdk';
 import type {
   ConsumableCooldownMessage,
   DamageTextMessage,
@@ -11,10 +10,12 @@ import type {
   RealtimeChatMessage,
   RespawnedMessage,
 } from '@mmorpg/shared/realtime/contracts';
-import type { SkillBalanceConfig } from '@/lib/skillBalance';
-import type { MobBalanceConfig } from '@/lib/mobBalance';
+import type { MobBalanceConfig, SkillBalanceConfig } from '@mmorpg/shared';
 
-type RealtimeRoom = Room<unknown>;
+type RealtimeRoom = {
+  onStateChange: (handler: () => void) => void;
+  onMessage: (type: string, handler: (payload: any) => void) => void;
+};
 
 type RoomSyncHandlers = {
   syncRaidTilesFromRoom: () => void;

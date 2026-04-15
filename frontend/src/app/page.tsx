@@ -7,7 +7,13 @@ import { GameHud, type ContainerView, type MouseSkillBindings, type SkillId } fr
 import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
 import { WorkbenchWindow, type WorkbenchTab } from '@/components/WorkbenchWindow';
-import { isSameEquipmentItemFamily } from '@mmorpg/shared';
+import {
+  DEFAULT_MOB_BALANCE_CONFIG,
+  DEFAULT_SKILL_BALANCE_CONFIG,
+  isSameEquipmentItemFamily,
+  type MobBalanceConfig,
+  type SkillBalanceConfig,
+} from '@mmorpg/shared';
 import {
   ITEM_DEFINITIONS,
   identifyAllRaidUnidentifiedInventoryEntries,
@@ -69,12 +75,9 @@ import {
   joinParty,
   leaveParty,
   ackPendingRaidJoin,
+  loadContentSnapshot,
   loadMyParty,
   loadRaidTemplates,
-  loadItemBalanceConfig,
-  loadSkillBalanceConfig,
-  loadMobBalanceConfig,
-  loadMobVisualConfig,
   loadSessionPlayer,
   loginPlayer,
   logoutPlayer,
@@ -98,17 +101,9 @@ import {
   type SkillEffectOverrides,
 } from '@/lib/skillEffects';
 import {
-  DEFAULT_MOB_BALANCE_CONFIG,
-  type MobBalanceConfig,
-} from '@/lib/mobBalance';
-import {
   createDefaultMobVisualConfig,
   type MobVisualConfig,
 } from '@mmorpg/shared/mobs/visuals';
-import {
-  DEFAULT_SKILL_BALANCE_CONFIG,
-  type SkillBalanceConfig,
-} from '@/lib/skillBalance';
 
 type AuthMode = 'login' | 'register';
 type AuthStatus = 'loading' | 'guest' | 'ready';
@@ -123,7 +118,7 @@ type ConsumableCooldownState = Partial<Record<'healing_potion', number>>;
 type AdminTabId = 'skills' | 'balance' | 'mobs' | 'items' | 'world' | 'assets' | 'system';
 type ActiveRoomTarget = {
   name: 'world' | 'raid';
-  options?: Record<string, string | number>;
+  options?: Record<string, unknown>;
 };
 type WorldEditorMode = 'tile' | 'sprite' | 'mob' | 'spawn' | 'trader';
 type WorldOverlayBrush = {
@@ -930,37 +925,6 @@ function getInventoryItemCount(inventory: InventoryState, itemId: ItemId) {
   }, 0);
 }
 
-function removeInventoryItems(
-  inventory: InventoryState,
-  itemId: ItemId,
-  count: number,
-): InventoryState | null {
-  const nextInventory = [...inventory];
-  let remaining = Math.max(0, Math.floor(count));
-
-  if (remaining === 0) {
-    return nextInventory;
-  }
-
-  for (let index = 0; index < nextInventory.length && remaining > 0; index += 1) {
-    const parsed = parseInventoryItem(nextInventory[index]);
-    if (!parsed || parsed.itemId !== itemId) {
-      continue;
-    }
-
-    if (parsed.quantity > remaining) {
-      nextInventory[index] = serializeInventoryItem(itemId, parsed.quantity - remaining);
-      remaining = 0;
-      break;
-    }
-
-    remaining -= parsed.quantity;
-    nextInventory[index] = null;
-  }
-
-  return remaining > 0 ? null : nextInventory;
-}
-
 function getCombinedItemCount(
   inventory: InventoryState,
   storage: InventoryState,
@@ -1635,6 +1599,7 @@ export default function Home() {
   );
   const [adminItemBusyId, setAdminItemBusyId] = useState<string | null>(null);
   const [adminItemStatus, setAdminItemStatus] = useState('');
+  const [contentVersion, setContentVersion] = useState('');
   const [selectedAdminItemId, setSelectedAdminItemId] = useState<ItemId>(
     ADMIN_ITEM_DEFINITIONS[0]?.id ?? 'wood_staff',
   );
@@ -2124,54 +2089,56 @@ export default function Home() {
       return;
     }
 
+    let cancelled = false;
     void refreshLobbyState().catch((error) => {
       console.error('Failed to load world state', error);
     });
 
-    void loadSkillBalanceConfig()
-      .then((config) => {
-        skillBalanceLoadedRef.current = true;
-        skillBalancePersistedRef.current = JSON.stringify(config);
-        setSkillBalanceConfig(config);
-        setSkillBalanceDraft(config);
-      })
-      .catch((error) => {
-        console.error('Failed to load skill balance config', error);
-      });
+    const syncContentSnapshot = async () => {
+      const snapshot = await loadContentSnapshot();
+      if (cancelled) {
+        return;
+      }
 
-    void loadMobBalanceConfig()
-      .then((config) => {
-        mobBalanceLoadedRef.current = true;
-        mobBalancePersistedRef.current = JSON.stringify(config);
-        setMobBalanceConfig(config);
-        setMobBalanceDraft(config);
-      })
-      .catch((error) => {
-        console.error('Failed to load mob balance config', error);
-      });
+      const editableMobVisualConfig = ensureEditableMobVisualConfig(snapshot.mobVisuals);
+      setContentVersion(snapshot.version);
 
-    void loadMobVisualConfig()
-      .then((config) => {
-        const editableConfig = ensureEditableMobVisualConfig(config);
-        mobVisualLoadedRef.current = true;
-        mobVisualPersistedRef.current = JSON.stringify(editableConfig);
-        setMobVisualConfig(editableConfig);
-        setMobVisualDraft(editableConfig);
-      })
-      .catch((error) => {
-        console.error('Failed to load mob visual config', error);
-      });
+      skillBalanceLoadedRef.current = true;
+      skillBalancePersistedRef.current = JSON.stringify(snapshot.skillBalance);
+      setSkillBalanceConfig(snapshot.skillBalance);
+      setSkillBalanceDraft(snapshot.skillBalance);
 
-    void loadItemBalanceConfig()
-      .then((config) => {
-        itemBalanceLoadedRef.current = true;
-        itemBalancePersistedRef.current = JSON.stringify(config);
-        setItemBalanceConfig(config);
-        setItemBalanceDraft(config);
-      })
-      .catch((error) => {
-        console.error('Failed to load item balance config', error);
+      mobBalanceLoadedRef.current = true;
+      mobBalancePersistedRef.current = JSON.stringify(snapshot.mobBalance);
+      setMobBalanceConfig(snapshot.mobBalance);
+      setMobBalanceDraft(snapshot.mobBalance);
+
+      mobVisualLoadedRef.current = true;
+      mobVisualPersistedRef.current = JSON.stringify(editableMobVisualConfig);
+      setMobVisualConfig(editableMobVisualConfig);
+      setMobVisualDraft(editableMobVisualConfig);
+
+      const nextItemBalanceConfig = cloneItemBalanceConfig(snapshot.itemBalance as ItemBalanceConfig);
+      itemBalanceLoadedRef.current = true;
+      itemBalancePersistedRef.current = JSON.stringify(nextItemBalanceConfig);
+      setItemBalanceConfig(nextItemBalanceConfig);
+      setItemBalanceDraft(nextItemBalanceConfig);
+    };
+
+    void syncContentSnapshot().catch((error) => {
+      console.error('Failed to load content snapshot', error);
+    });
+
+    const intervalHandle = window.setInterval(() => {
+      void syncContentSnapshot().catch((error) => {
+        console.error('Failed to refresh content snapshot', error);
       });
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalHandle);
+    };
   }, [authStatus]);
 
   useEffect(() => {
@@ -2553,7 +2520,7 @@ export default function Home() {
 
   const handleRoomConnected = (payload: {
     roomName: 'world' | 'raid';
-    options?: Record<string, string | number>;
+    options?: Record<string, unknown>;
   }) => {
     if (payload.roomName !== 'raid') {
       return;
@@ -2755,6 +2722,10 @@ export default function Home() {
   };
 
   const handleActionBarConsumableTrigger = (itemId: 'healing_potion') => {
+    if (!character) {
+      return;
+    }
+
     const hasItem = character.inventory.some((entry) => parseInventoryItem(entry)?.itemId === itemId);
     if (!hasItem) {
       return;
@@ -2768,6 +2739,11 @@ export default function Home() {
   };
 
   const handleHeldConsumableUseSelf = (itemId: 'healing_potion') => {
+    if (!character) {
+      setActiveSkillTargeting(null);
+      return;
+    }
+
     const slotIndex = character.inventory.findIndex((entry) => parseInventoryItem(entry)?.itemId === itemId);
     if (slotIndex === -1) {
       setActiveSkillTargeting(null);
@@ -2784,6 +2760,11 @@ export default function Home() {
   };
 
   const handleHeldConsumableThrow = (itemId: 'healing_potion', x: number, y: number) => {
+    if (!character) {
+      setActiveSkillTargeting(null);
+      return;
+    }
+
     const slotIndex = character.inventory.findIndex((entry) => parseInventoryItem(entry)?.itemId === itemId);
     if (slotIndex === -1) {
       setActiveSkillTargeting(null);
@@ -4701,6 +4682,7 @@ export default function Home() {
         <GameCanvas
           activeRoomName={activeRoomTarget.name}
           activeRoomOptions={activeRoomTarget.options}
+          contentVersion={contentVersion}
           worldMapAssetOverride={playerRole === 'admin' ? worldMapDraft : null}
           worldEditorEnabled={playerRole === 'admin' && activeAdminTab === 'world'}
           worldEditorMode={worldEditorMode}

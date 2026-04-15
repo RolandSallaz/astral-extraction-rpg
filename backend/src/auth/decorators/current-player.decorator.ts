@@ -1,6 +1,4 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import type { Request } from 'express';
-import { PlayerEntity } from '../../players/entities/player.entity';
 import { AuthorizedRequest } from '../auth.types';
 
 export const CurrentPlayer = createParamDecorator(

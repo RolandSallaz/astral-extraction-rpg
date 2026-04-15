@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, type MutableRefObject } from 'react';
-import type { Room } from '@colyseus/sdk';
+import { useEffect, type MutableRefObject, type RefObject } from 'react';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { QuestLog } from '@mmorpg/shared/quests/core';
 import type {
@@ -12,10 +11,14 @@ import type {
   UseConsumableMessage,
   WorldProfileMessage,
 } from '@mmorpg/shared/realtime/contracts';
-import type { SkillBalanceConfig } from '@/lib/skillBalance';
-import type { MobBalanceConfig } from '@/lib/mobBalance';
+import type { MobBalanceConfig, SkillBalanceConfig } from '@mmorpg/shared';
 
-type RealtimeRoom = Room<unknown>;
+type RealtimeRoom = {
+  state: {
+    chests?: unknown;
+  };
+  send: (type: string, payload: unknown) => void;
+};
 
 type PlayerProfileSnapshot = {
   playerName: string;
@@ -48,7 +51,7 @@ type UseRoomOutboundSyncParams = {
   activeRoomName: 'world' | 'raid';
   playerRole: string;
   playerProfile: PlayerProfileSnapshot;
-  roomRef: MutableRefObject<RealtimeRoom | null>;
+  roomRef: RefObject<RealtimeRoom | null>;
   skillBalanceConfig: SkillBalanceConfig;
   mobBalanceConfig: MobBalanceConfig;
   hasReceivedSkillBalanceRef: MutableRefObject<boolean>;
@@ -63,6 +66,8 @@ type UseRoomOutboundSyncParams = {
   lastSentRespawnNonceRef: MutableRefObject<number>;
   fireNovaCastNonce: number;
   woodStaffStrikeCastNonce: number;
+  sessionTokenRef: MutableRefObject<string | null>;
+  contentVersionRef: MutableRefObject<string>;
   estimatedOneWayLatencyMsRef: MutableRefObject<number>;
   lastPointerWorldRef: MutableRefObject<{ x: number; y: number }>;
   skillCooldownsRef: MutableRefObject<{
@@ -97,6 +102,8 @@ export function useRoomOutboundSync({
   lastSentRespawnNonceRef,
   fireNovaCastNonce,
   woodStaffStrikeCastNonce,
+  sessionTokenRef,
+  contentVersionRef,
   estimatedOneWayLatencyMsRef,
   lastPointerWorldRef,
   skillCooldownsRef,
@@ -105,9 +112,12 @@ export function useRoomOutboundSync({
 }: UseRoomOutboundSyncParams) {
   useEffect(() => {
     const profileMessage = createWorldProfileMessage(playerProfile);
+    profileMessage.sessionToken = sessionTokenRef.current ?? undefined;
+    profileMessage.contentVersion = contentVersionRef.current || undefined;
     roomRef.current?.send('profile', profileMessage);
   }, [
     activeRoomName,
+    contentVersionRef,
     createWorldProfileMessage,
     playerProfile.playerAgility,
     playerProfile.playerEquipment,
@@ -122,6 +132,7 @@ export function useRoomOutboundSync({
     playerProfile.playerRole,
     playerProfile.playerStrength,
     roomRef,
+    sessionTokenRef,
   ]);
 
   useEffect(() => {

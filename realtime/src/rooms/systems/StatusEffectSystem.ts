@@ -1,7 +1,7 @@
 import type { MapSchema } from "@colyseus/schema";
+import type { SkillBalanceConfig } from "@mmorpg/shared";
 import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import type { DamageType } from "../projectileSkills.js";
-import type { SkillBalanceConfig } from "../skillBalance.js";
 import { BurnService } from "../services/BurnService.js";
 import { HealingService, type HealablePlayer } from "../services/HealingService.js";
 import { setMobAggroTarget } from "../mobAi.js";

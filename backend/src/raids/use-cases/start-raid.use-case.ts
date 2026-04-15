@@ -50,10 +50,20 @@ export class StartRaidUseCase {
     if (reusedRun) {
       reusedRun.playerCount += playerCount;
       const savedRun = await this.raidRunsRepository.save(reusedRun);
+      const realtimeRoom = this.createRealtimeRoom(savedRun);
+
+      if (party) {
+        await this.partiesService.markPendingRaidForParty(party.id, {
+          raidRunId: savedRun.id,
+          startedAt: savedRun.startedAt?.toISOString() ?? null,
+          realtimeRoom,
+        });
+      }
+
       return {
         ...this.serializeRun(savedRun),
         joinedExisting: true,
-        realtimeRoom: this.createRealtimeRoom(savedRun),
+        realtimeRoom,
       };
     }
 
@@ -63,6 +73,8 @@ export class StartRaidUseCase {
       status: 'ready',
       playerCount,
       generatedLayout: null,
+      runtimeState: null,
+      runtimeStateUpdatedAt: null,
       startedAt: new Date(),
       finishedAt: null,
       templateCode: scaledTemplate.code,
@@ -152,6 +164,7 @@ export class StartRaidUseCase {
       }),
       partyId: run.party?.id ?? null,
       generatedLayout: null,
+      runtimeState: run.runtimeState ?? null,
       startedAt: run.startedAt?.toISOString() ?? null,
       finishedAt: run.finishedAt?.toISOString() ?? null,
       createdAt: run.createdAt.toISOString(),
@@ -185,7 +198,7 @@ export class StartRaidUseCase {
       .createQueryBuilder('run')
       .leftJoinAndSelect('run.party', 'party')
       .where('run.templateCode = :templateCode', { templateCode: template.code })
-      .andWhere('run.status = :status', { status: 'ready' })
+      .andWhere('run.status IN (:...statuses)', { statuses: ['ready', 'forming', 'active', 'empty'] })
       .andWhere('run.finishedAt IS NULL')
       .andWhere('run.startedAt IS NOT NULL')
       .andWhere('run.startedAt >= :cutoff', { cutoff })

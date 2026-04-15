@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { parseInventoryItem, serializeInventoryItem, type ItemId } from '@mmorpg/shared';
+import { parseInventoryItem, serializeInventoryItem } from '@mmorpg/shared';
 import { Repository } from 'typeorm';
 import { ItemsService } from '../../items/items.service';
 import { GiveItemDto } from '../dto/give-item.dto';

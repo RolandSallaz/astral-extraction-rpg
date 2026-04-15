@@ -9,6 +9,8 @@ import { applyHealingMultiplier } from "../projectileSkills.js";
 import { type ArmorGemCarrier } from "../armorGems.js";
 
 export type HealablePlayer = ArmorGemCarrier & {
+  x: number;
+  y: number;
   health: number;
   maxHealth: number;
   dead: boolean;

@@ -52,6 +52,10 @@ import {
   sendRoomBalanceSnapshots,
   transferRoomOwnedReferences,
 } from "./runtime/sessionRuntime.js";
+import {
+  normalizeMoveMessage,
+  normalizeUseConsumableMessage,
+} from "./runtime/messageValidation.js";
 import { loadWorldDefinition } from "./worldDefinition.js";
 
 const TILE_SIZE = WORLD_GAMEPLAY_PROFILE.tileSize;
@@ -62,6 +66,7 @@ const PLAYER_MOB_COLLISION_HALF_WIDTH = WORLD_GAMEPLAY_PROFILE.playerMobCollisio
 const PLAYER_MOB_COLLISION_HALF_HEIGHT = WORLD_GAMEPLAY_PROFILE.playerMobCollisionHalfHeight;
 const PLAYER_MOB_COLLISION_OFFSET_Y = WORLD_GAMEPLAY_PROFILE.playerMobCollisionOffsetY;
 const WORLD_TILE_COLLISION_OFFSET_Y = TILE_SIZE * 0.375;
+const ALLOW_GUEST_EQUIPMENT_SYNC = process.env.NODE_ENV !== "production";
 
 export class MyRoom extends BaseGameRoom<PlayerState> {
   maxClients = 100;
@@ -214,6 +219,12 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     }, this.simulationIntervalMs);
 
     this.onMessage("move", (client, message: MoveMessage) => {
+      const normalizedMessage = normalizeMoveMessage(message);
+      if (!normalizedMessage) {
+        return;
+      }
+
+      const { x: moveX, y: moveY, sequence, clientEstimatedLatencyMs } = normalizedMessage;
       const player = this.state.players.get(client.sessionId);
       if (!player) {
         return;
@@ -222,15 +233,14 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       if (player.dead || player.castEndsAt > Date.now()) {
         player.moveX = 0;
         player.moveY = 0;
-        const sequence = Number.isFinite(message?.sequence) ? Math.max(0, Math.floor(message.sequence!)) : 0;
         player.lastProcessedInput = sequence;
         this.pendingMovementSequence.delete(client.sessionId);
         return;
       }
 
-      const moveX = Number.isFinite(message?.x) ? message.x : 0;
-      const moveY = Number.isFinite(message?.y) ? message.y : 0;
-      const sequence = Number.isFinite(message?.sequence) ? Math.max(0, Math.floor(message.sequence!)) : 0;
+      if (clientEstimatedLatencyMs !== undefined) {
+        this.playerLatencyMs.set(client.sessionId, clientEstimatedLatencyMs);
+      }
       const length = Math.hypot(moveX, moveY);
 
       if (length <= 0.001) {
@@ -271,6 +281,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       } else {
         applyRoomProfilePatch(player, message, {
           roleTransform: (value) => value.toUpperCase(),
+          allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+          defaultWeaponItem: "wood_staff",
         });
 
         this.syncPlayerInventory(player, message?.inventory);
@@ -290,32 +302,6 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         }
       }
 
-      const equipment = createEquipmentStateSnapshot({
-        bodyItem: message?.bodyItem,
-        headItem: message?.headItem,
-        weaponItem: message?.weaponItem,
-        headGemItem1: message?.headGemItem1,
-        headGemItem2: message?.headGemItem2,
-        headGemItem3: message?.headGemItem3,
-        bodyGemItem1: message?.bodyGemItem1,
-        bodyGemItem2: message?.bodyGemItem2,
-        bodyGemItem3: message?.bodyGemItem3,
-        weaponGemItem1: message?.weaponGemItem1,
-        weaponGemItem2: message?.weaponGemItem2,
-        weaponGemItem3: message?.weaponGemItem3,
-      });
-      const inventory = Array.isArray(message?.inventory)
-        ? normalizeRoomInventorySlots(message.inventory, INVENTORY_SIZE)
-        : Array.from(player.inventory);
-
-      this.publishPlayerProfileSnapshot({
-        sessionId: client.sessionId,
-        equipment,
-        inventory,
-        gold: typeof message?.gold === "number" ? message.gold : undefined,
-        quests: message?.quests,
-        source: "world",
-      });
     });
 
     this.onMessage("chat", (client, message: ChatInputMessage) => {
@@ -362,15 +348,20 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         return;
       }
 
-      const slotIndex = typeof message?.slotIndex === "number" ? Math.floor(message.slotIndex) : -1;
-      const source = message?.source === "container" ? "container" : "inventory";
+      const normalizedMessage = normalizeUseConsumableMessage(message);
+      if (!normalizedMessage) {
+        return;
+      }
+
+      const slotIndex = normalizedMessage.slotIndex ?? -1;
+      const source = normalizedMessage.source === "container" ? "container" : "inventory";
       const inventory = Array.from(player.inventory);
       let sourceSlots: string[] | null = null;
 
       if (source === "inventory") {
         sourceSlots = inventory;
-      } else if (typeof message?.containerId === "string") {
-        const chest = this.state.chests.get(message.containerId);
+      } else if (normalizedMessage.containerId) {
+        const chest = this.state.chests.get(normalizedMessage.containerId);
         if (chest) {
           sourceSlots = Array.from(chest.slots);
         }
@@ -400,9 +391,9 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
           }
         },
         {
-          mode: message?.mode,
-          targetX: message?.targetX,
-          targetY: message?.targetY,
+          mode: normalizedMessage.mode,
+          targetX: normalizedMessage.targetX,
+          targetY: normalizedMessage.targetY,
         },
       );
     });
@@ -427,7 +418,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     });
   }
 
-  onDispose() {
+  async onDispose() {
+    await this.waitForPendingPublishes();
     this.disposeShared();
   }
 
@@ -453,6 +445,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         defaultName: "Wanderer",
         defaultRole: "USER",
         roleTransform: (value) => value.toUpperCase(),
+        allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+        defaultWeaponItem: "wood_staff",
       });
       this.syncPlayerInventory(player, options?.inventory);
     }
@@ -551,8 +545,8 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
   private updatePlayers(deltaSeconds: number, tickNow: number) {
     this.removeExpiredOfflinePlayers();
-    // Rebuild mob spatial grid so canPlayerMoveTo uses grid queries instead of O(N)
-    this.rebuildMobSpatialGrid();
+    // Ensure mob queries are current before resolving player collision against mobs.
+    this.ensureMobSpatialGrid();
 
     for (const [sessionId, player] of this.state.players.entries()) {
       if (player.dead) {
@@ -585,6 +579,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
   }
 
   private canPlayerMoveTo(x: number, y: number, player?: PlayerState) {
+    this.ensureMobSpatialGrid();
     const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, x));
     const clampedY = Math.max(
       TILE_SIZE / 2,
@@ -695,6 +690,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       this.state.players.set(client.sessionId, player);
 
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
+      moveRoomMapValue(this.playerLatencyMs, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
       clearRoomSessionCollections(
         previousSessionId,
@@ -703,10 +699,14 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       this.skillCastSystem.clearPlayer(previousSessionId);
       this.statusEffects.movePlayerEffects(previousSessionId, client.sessionId);
 
-      applyRoomProfilePatch(player, options, {
-        roleTransform: (value) => value.toUpperCase(),
-      });
-      this.syncPlayerInventory(player, options?.inventory);
+      if (!this.verifiedPlayers.has(client.sessionId)) {
+        applyRoomProfilePatch(player, options, {
+          roleTransform: (value) => value.toUpperCase(),
+          allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+          defaultWeaponItem: "wood_staff",
+        });
+        this.syncPlayerInventory(player, options?.inventory);
+      }
       if (player.health > 0) {
         player.dead = false;
       } else {
@@ -827,6 +827,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       clearRoomSessionCollections(
         sessionId,
         this.consumableCooldownEndsAt,
+        this.playerLatencyMs,
         this.pendingMovementSequence,
         this.verifiedPlayers,
       );

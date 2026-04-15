@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback } from 'react';
-import type { Room } from '@colyseus/sdk';
 
 type RealtimeRoomState = {
   mobs?: Map<string, {
@@ -25,7 +24,9 @@ type RealtimeRoomState = {
   }>;
 };
 
-type RealtimeRoom = Room<RealtimeRoomState>;
+type RealtimeRoom = {
+  state: RealtimeRoomState;
+};
 
 type StatusIconVisual = {
   back: Phaser.GameObjects.Rectangle;
@@ -84,9 +85,9 @@ type UseMobRendererParams = {
     maxHealth: number,
   ) => MobVisual;
   destroyMob: (mobId: string) => void;
-  syncDeathState: (mob: MobVisual, dead: boolean, now: number) => void;
-  applyMobHealthToVisual: (mob: MobVisual, health: number, maxHealth: number) => void;
-  applyBurningToMobVisual: (mob: MobVisual, ticks: number, endsAt: number) => void;
+  syncDeathState: (mob: any, dead: boolean, now: number) => void;
+  applyMobHealthToVisual: (mob: any, health: number, maxHealth: number) => void;
+  applyBurningToMobVisual: (mob: any, ticks: number, endsAt: number) => void;
   hideStatusIcon: (icon: StatusIconVisual) => void;
 };
 

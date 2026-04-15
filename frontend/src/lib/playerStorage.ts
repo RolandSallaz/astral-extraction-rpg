@@ -1,8 +1,24 @@
 import type { CharacterProfile } from '@/lib/playerProfile';
 import type { ItemBalanceConfig } from '@/lib/itemBalance';
-import type { SkillBalanceConfig } from '@/lib/skillBalance';
-import type { MobBalanceConfig } from '@/lib/mobBalance';
+import type { GameContentSnapshot, MobBalanceConfig, RaidRuntimeState, SkillBalanceConfig } from '@mmorpg/shared';
 import type { MobVisualConfig } from '@mmorpg/shared/mobs/visuals';
+
+export type RealtimeRoomOptions = {
+  raidRunId?: string;
+  templateCode?: string;
+  templateName?: string;
+  biome?: string;
+  seed?: string;
+  width?: number;
+  height?: number;
+  runtimeState?: RaidRuntimeState | null;
+  [key: string]: unknown;
+};
+
+type RealtimeRoomDescriptor = {
+  roomName: string;
+  options: RealtimeRoomOptions;
+};
 
 export type PartyView = {
   id: string;
@@ -11,10 +27,7 @@ export type PartyView = {
   pendingRaid: {
     raidRunId: string;
     startedAt: string | null;
-    realtimeRoom: {
-      roomName: string;
-      options: Record<string, string | number>;
-    };
+    realtimeRoom: RealtimeRoomDescriptor;
   } | null;
   members: Array<{
     playerId: string;
@@ -44,7 +57,7 @@ export type StartedRaidView = {
   seed: string;
   status: string;
   playerCount: number;
-  joinedExisting: boolean;
+  joinedExisting?: boolean;
   template: RaidTemplateView;
   partyId: string | null;
   generatedLayout: {
@@ -55,14 +68,12 @@ export type StartedRaidView = {
     chests: Array<{ x: number; y: number }>;
     exitPoints: Array<{ x: number; y: number }>;
   } | null;
+  runtimeState: RaidRuntimeState | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  realtimeRoom: {
-    roomName: string;
-    options: Record<string, string | number>;
-  };
+  realtimeRoom: RealtimeRoomDescriptor;
 };
 
 const SESSION_TOKEN_KEY = 'mmorpg.session-token.v1';
@@ -78,6 +89,14 @@ type AuthResponse = {
 };
 
 function getApiBaseUrl() {
+  if (isBrowser()) {
+    return '/api/backend';
+  }
+
+  if (process.env.BACKEND_INTERNAL_URL) {
+    return process.env.BACKEND_INTERNAL_URL;
+  }
+
   if (process.env.NEXT_PUBLIC_API_URL) {
     return process.env.NEXT_PUBLIC_API_URL;
   }
@@ -250,8 +269,8 @@ export async function giveItemToPlayer(input: { nickname: string; itemCode: stri
   );
 }
 
-export async function loadSkillBalanceConfig() {
-  return request<SkillBalanceConfig>('/game-configs/skill-balance', undefined, true);
+export async function loadContentSnapshot() {
+  return request<GameContentSnapshot>('/game-configs/content-snapshot');
 }
 
 export async function saveSkillBalanceConfig(config: SkillBalanceConfig) {
@@ -265,10 +284,6 @@ export async function saveSkillBalanceConfig(config: SkillBalanceConfig) {
   );
 }
 
-export async function loadMobBalanceConfig() {
-  return request<MobBalanceConfig>('/game-configs/mob-balance', undefined, true);
-}
-
 export async function saveMobBalanceConfig(config: MobBalanceConfig) {
   return request<MobBalanceConfig>(
     '/game-configs/mob-balance',
@@ -280,10 +295,6 @@ export async function saveMobBalanceConfig(config: MobBalanceConfig) {
   );
 }
 
-export async function loadMobVisualConfig() {
-  return request<MobVisualConfig>('/game-configs/mob-visuals', undefined, true);
-}
-
 export async function saveMobVisualConfig(config: MobVisualConfig) {
   return request<MobVisualConfig>(
     '/game-configs/mob-visuals',
@@ -293,10 +304,6 @@ export async function saveMobVisualConfig(config: MobVisualConfig) {
     },
     true,
   );
-}
-
-export async function loadItemBalanceConfig() {
-  return request<ItemBalanceConfig>('/game-configs/item-balance', undefined, true);
 }
 
 export async function saveItemBalanceConfig(config: ItemBalanceConfig) {
@@ -385,6 +392,10 @@ export async function startRaid(templateCode: string, partyId?: string) {
     },
     true,
   );
+}
+
+export async function loadRaidRun(raidRunId: string) {
+  return request<StartedRaidView>(`/raids/runs/${raidRunId}`, undefined, true);
 }
 
 export function logoutPlayer() {

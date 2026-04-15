@@ -1,4 +1,4 @@
-import { type BaseProfileMessage } from "@mmorpg/shared/realtime/contracts";
+import { createEquipmentStateSnapshot, type BaseProfileMessage } from "@mmorpg/shared/realtime/contracts";
 import { type BasePlayerState } from "../schema/BasePlayerState.js";
 
 type RoomProfilePlayer = BasePlayerState & {
@@ -42,6 +42,8 @@ type RoomProfilePatchOptions = {
   defaultName?: string;
   defaultRole?: string;
   roleTransform?: (value: string) => string;
+  allowEquipmentSync?: boolean;
+  defaultWeaponItem?: string;
 };
 
 function normalizeProfileText(
@@ -142,41 +144,22 @@ export function applyRoomProfilePatch(
     player.intellect = nextIntellect;
   }
 
-  if (typeof profile?.bodyItem === "string") {
-    player.bodyItem = profile.bodyItem;
-  }
-  if (typeof profile?.headItem === "string") {
-    player.headItem = profile.headItem;
-  }
-  if (typeof profile?.weaponItem === "string") {
-    player.weaponItem = profile.weaponItem;
-  }
-  if (typeof profile?.headGemItem1 === "string") {
-    player.headGemItem1 = profile.headGemItem1;
-  }
-  if (typeof profile?.headGemItem2 === "string") {
-    player.headGemItem2 = profile.headGemItem2;
-  }
-  if (typeof profile?.headGemItem3 === "string") {
-    player.headGemItem3 = profile.headGemItem3;
-  }
-  if (typeof profile?.bodyGemItem1 === "string") {
-    player.bodyGemItem1 = profile.bodyGemItem1;
-  }
-  if (typeof profile?.bodyGemItem2 === "string") {
-    player.bodyGemItem2 = profile.bodyGemItem2;
-  }
-  if (typeof profile?.bodyGemItem3 === "string") {
-    player.bodyGemItem3 = profile.bodyGemItem3;
-  }
-  if (typeof profile?.weaponGemItem1 === "string") {
-    player.weaponGemItem1 = profile.weaponGemItem1;
-  }
-  if (typeof profile?.weaponGemItem2 === "string") {
-    player.weaponGemItem2 = profile.weaponGemItem2;
-  }
-  if (typeof profile?.weaponGemItem3 === "string") {
-    player.weaponGemItem3 = profile.weaponGemItem3;
+  if (options.allowEquipmentSync !== false) {
+    const nextEquipment = createEquipmentStateSnapshot(profile ?? {});
+    player.bodyItem = nextEquipment.body ?? player.bodyItem;
+    player.headItem = nextEquipment.head ?? player.headItem;
+    player.weaponItem = nextEquipment.weapon ?? player.weaponItem;
+    player.headGemItem1 = nextEquipment["head-gem-1"] ?? player.headGemItem1;
+    player.headGemItem2 = nextEquipment["head-gem-2"] ?? player.headGemItem2;
+    player.headGemItem3 = nextEquipment["head-gem-3"] ?? player.headGemItem3;
+    player.bodyGemItem1 = nextEquipment["body-gem-1"] ?? player.bodyGemItem1;
+    player.bodyGemItem2 = nextEquipment["body-gem-2"] ?? player.bodyGemItem2;
+    player.bodyGemItem3 = nextEquipment["body-gem-3"] ?? player.bodyGemItem3;
+    player.weaponGemItem1 = nextEquipment["weapon-gem-1"] ?? player.weaponGemItem1;
+    player.weaponGemItem2 = nextEquipment["weapon-gem-2"] ?? player.weaponGemItem2;
+    player.weaponGemItem3 = nextEquipment["weapon-gem-3"] ?? player.weaponGemItem3;
+  } else if (!player.weaponItem && options.defaultWeaponItem) {
+    player.weaponItem = options.defaultWeaponItem;
   }
 
   if (player.health > player.maxHealth) {

@@ -154,11 +154,11 @@ export function updateIntroductionQuestProgress(
   return updateQuestProgress(character, INTRODUCTION_QUEST_ID, updater);
 }
 
-export function isCryptSmallRaidTarget(options?: Record<string, string | number>) {
+export function isCryptSmallRaidTarget(options?: Record<string, unknown>) {
   return options?.templateCode === CRYPT_SMALL_TEMPLATE_CODE;
 }
 
-export function getRaidRunId(options?: Record<string, string | number>) {
+export function getRaidRunId(options?: Record<string, unknown>) {
   return typeof options?.raidRunId === 'string' ? options.raidRunId : null;
 }
 

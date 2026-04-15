@@ -1,5 +1,5 @@
 import { type BurnableEntity } from "../sharedGameplay.js";
-import { type SkillBalanceConfig } from "../skillBalance.js";
+import { type SkillBalanceConfig } from "@mmorpg/shared";
 import { BurnService } from "../services/BurnService.js";
 import { HealingService, type HealablePlayer } from "../services/HealingService.js";
 import { getRoomSkillBurnDamage } from "./skillRuntime.js";

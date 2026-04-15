@@ -16,7 +16,7 @@ import {
   getSharedFireballCastTimeMs,
 } from "../projectileSkills.js";
 import { type ProjectileState, type ProjectileServerData } from "../schema/ProjectileState.js";
-import { type SkillBalanceConfig } from "../skillBalance.js";
+import { type SkillBalanceConfig } from "@mmorpg/shared";
 import {
   getProjectileDamageScale as getSharedProjectileDamageScale,
   getProjectileDirectDamage as getSharedProjectileDirectDamage,

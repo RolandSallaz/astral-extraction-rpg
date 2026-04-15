@@ -5,6 +5,7 @@ import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
 import { MobState } from "../src/rooms/schema/MobState.js";
 import { WORLD_GAMEPLAY_PROFILE } from "../src/rooms/sharedGameplay.js";
 import { loadWorldDefinition } from "../src/rooms/worldDefinition.js";
+import { connectToRoom } from "./helpers/realtimeJoin.js";
 import {
   SKELETON_DASH_SKILL,
   SKELETON_DASH_SKILL_ID,
@@ -119,10 +120,10 @@ describe("world room", () => {
   it("puts multiple players into one shared world and syncs movement", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
 
-    const client1 = await colyseus.connectTo(room, {
+    const client1 = await connectToRoom(colyseus, room, {
       name: "Mage One",
     });
-    const client2 = await colyseus.connectTo(room, {
+    await connectToRoom(colyseus, room, {
       name: "Mage Two",
     });
 
@@ -155,7 +156,7 @@ describe("world room", () => {
       y: worldDefinition.spawn.y * tileSize + tileSize / 2,
     };
 
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Spawn Tester",
       position: { x: expectedSpawn.x + 400, y: expectedSpawn.y + 400 },
       worldSpawn: { x: expectedSpawn.x + 800, y: expectedSpawn.y + 800 },
@@ -171,7 +172,7 @@ describe("world room", () => {
 
   it("acknowledges the latest world move sequence after simulation", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Sequence Mage",
     });
 
@@ -194,7 +195,7 @@ describe("world room", () => {
 
   it("loads the world lobby without legacy starter mobs", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", { worldOwner: "tester" });
-    await colyseus.connectTo(room, {
+    await connectToRoom(colyseus, room, {
       worldOwner: "tester",
       name: "Aggro Target",
     });
@@ -210,14 +211,15 @@ describe("world room", () => {
 
   it("spawns a rat mob with balance-driven health and patrol movement", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Watcher",
     });
 
     await room.waitForNextPatch();
     await spawnStaticWorldMobsForTest(room);
 
-    const rat = client.state.mobs.get(RAT_ID);
+    const clientState = client.state as MyRoomState;
+    const rat = clientState.mobs.get(RAT_ID);
     assert.ok(rat);
     assert.strictEqual(rat?.name, "Rat");
     assert.strictEqual(rat?.health, 38);
@@ -226,14 +228,14 @@ describe("world room", () => {
     const startX = rat?.x ?? 0;
     await waitForNextSimulation(room, 220);
 
-    const movedRat = client.state.mobs.get(RAT_ID);
+    const movedRat = clientState.mobs.get(RAT_ID);
     assert.ok(movedRat);
     assert.notStrictEqual(movedRat?.x, startX);
   });
 
   it("makes the rat chase and attack a nearby player", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Target Dummy",
     });
 
@@ -257,8 +259,9 @@ describe("world room", () => {
 
     await waitForNextSimulation(room, 1200);
 
-    const updatedPlayer = client.state.players.get(client.sessionId);
-    const updatedRat = client.state.mobs.get(RAT_ID);
+    const clientState = client.state as MyRoomState;
+    const updatedPlayer = clientState.players.get(client.sessionId);
+    const updatedRat = clientState.mobs.get(RAT_ID);
 
     assert.ok(updatedPlayer);
     assert.ok(updatedRat);
@@ -269,7 +272,7 @@ describe("world room", () => {
 
   it("starts a skeleton dash skill cast with a visible cast window and a 2s cooldown", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Dash Target",
     });
 
@@ -302,7 +305,7 @@ describe("world room", () => {
 
   it("keeps skeletons from using generic melee while dash is on cooldown", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Melee Immune Target",
     });
 
@@ -330,7 +333,7 @@ describe("world room", () => {
 
   it("stops a skeleton dash skill lunge at the collision edge and deals 35 damage once", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Collision Target",
     });
 
@@ -363,7 +366,7 @@ describe("world room", () => {
 
   it("rejects fireball casts without the required weapon", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Unarmed Mage",
     });
 
@@ -391,7 +394,7 @@ describe("world room", () => {
 
   it("aggros the rat when a player hits it", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const attacker = await colyseus.connectTo(room, {
+    const attacker = await connectToRoom(colyseus, room, {
       name: "Mage Hunter",
       weaponItem: "fire_staff",
     });
@@ -427,7 +430,7 @@ describe("world room", () => {
 
   it("lets wood_staff hit a nearby mob with a wood staff strike", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const attacker = await colyseus.connectTo(room, {
+    const attacker = await connectToRoom(colyseus, room, {
       name: "Stick Fighter",
       weaponItem: "wood_staff",
     });
@@ -474,11 +477,11 @@ describe("world room", () => {
 
   it("rewinds recent player positions for lag-compensated wood staff strikes", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const attacker = await colyseus.connectTo(room, {
+    const attacker = await connectToRoom(colyseus, room, {
       name: "Lag Fighter",
       weaponItem: "wood_staff",
     });
-    const target = await colyseus.connectTo(room, {
+    const target = await connectToRoom(colyseus, room, {
       name: "Lag Target",
       weaponItem: "wood_staff",
     });
@@ -523,7 +526,7 @@ describe("world room", () => {
 
   it("aims the fireball through the cursor point from its actual spawn position", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Mage Aim",
       weaponItem: "fire_staff",
     });
@@ -565,11 +568,11 @@ describe("world room", () => {
 
   it("clamps targeted staff casts to the maximum cast range", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const fireballCaster = await colyseus.connectTo(room, {
+    const fireballCaster = await connectToRoom(colyseus, room, {
       name: "Range Mage",
       weaponItem: "fire_staff",
     });
-    const fireFieldCaster = await colyseus.connectTo(room, {
+    const fireFieldCaster = await connectToRoom(colyseus, room, {
       name: "Field Ranger",
       weaponItem: "wood_staff",
     });
@@ -620,11 +623,11 @@ describe("world room", () => {
 
   it("applies burn damage over time to a player hit by fireball", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Burn Mage",
       weaponItem: "fire_staff",
     });
-    const target = await colyseus.connectTo(room, {
+    const target = await connectToRoom(colyseus, room, {
       name: "Burn Target",
     });
 
@@ -660,7 +663,7 @@ describe("world room", () => {
 
   it("applies burn damage over time to a mob hit by fireball", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Burn Mage",
       weaponItem: "fire_staff",
     });
@@ -697,7 +700,7 @@ describe("world room", () => {
 
   it("casts fire nova as 12 projectiles and starts a cooldown", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Nova Mage",
       weaponItem: "wood_staff",
     });
@@ -718,7 +721,7 @@ describe("world room", () => {
 
   it("awards experience for killing a rat", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "XP Mage",
       weaponItem: "fire_staff",
     });
@@ -756,7 +759,7 @@ describe("world room", () => {
 
   it("resets player progression on death", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Fragile Mage",
     });
 
@@ -791,7 +794,7 @@ describe("world room", () => {
 
   it("keeps a disconnected player in the world for reconnect and preserves position", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Reconnect Mage",
       position: { x: 222, y: 333 },
     });
@@ -816,7 +819,7 @@ describe("world room", () => {
     assert.strictEqual(offlinePlayer?.isOnline, false);
     assert.ok((offlinePlayer?.offlineExpiresAt ?? 0) > Date.now());
 
-    const reconnectedClient = await colyseus.connectTo(room, {
+    const reconnectedClient = await connectToRoom(colyseus, room, {
       name: "Reconnect Mage",
       position: { x: 10, y: 10 },
     });
@@ -833,11 +836,11 @@ describe("world room", () => {
 
   it("preserves burn state across reconnect", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Reconnect Burner",
       weaponItem: "fire_staff",
     });
-    const target = await colyseus.connectTo(room, {
+    const target = await connectToRoom(colyseus, room, {
       name: "Burn Survivor",
     });
 
@@ -872,7 +875,7 @@ describe("world room", () => {
     await target.leave();
     await room.waitForNextPatch();
 
-    const reconnectedTarget = await colyseus.connectTo(room, {
+    const reconnectedTarget = await connectToRoom(colyseus, room, {
       name: "Burn Survivor",
     });
 
@@ -891,7 +894,7 @@ describe("world room", () => {
 
   it("preserves healing state across reconnect", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Healing Survivor",
     });
 
@@ -928,7 +931,7 @@ describe("world room", () => {
     await client.leave();
     await room.waitForNextPatch();
 
-    const reconnectedClient = await colyseus.connectTo(room, {
+    const reconnectedClient = await connectToRoom(colyseus, room, {
       name: "Healing Survivor",
     });
 
@@ -947,7 +950,7 @@ describe("world room", () => {
 
   it("broadcasts green floating text when a player receives healing", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Healing Popup",
     });
 
@@ -992,7 +995,7 @@ describe("world room", () => {
 
   it("removes a disconnected player after the offline grace period expires", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const client = await colyseus.connectTo(room, {
+    const client = await connectToRoom(colyseus, room, {
       name: "Timeout Mage",
     });
 
@@ -1016,7 +1019,7 @@ describe("world room", () => {
 
   it("casts fire field as a 3x3 burning ground zone and starts cooldown", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Field Mage",
       weaponItem: "wood_staff",
     });
@@ -1045,11 +1048,11 @@ describe("world room", () => {
 
   it("deals periodic damage and burn from fire field to players and mobs", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Inferno Mage",
       weaponItem: "wood_staff",
     });
-    const target = await colyseus.connectTo(room, {
+    const target = await connectToRoom(colyseus, room, {
       name: "Standing Target",
     });
 
@@ -1099,11 +1102,11 @@ describe("world room", () => {
 
   it("keeps player collision priority over a nearby mob in projectile broadphase", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
-    const caster = await colyseus.connectTo(room, {
+    const caster = await connectToRoom(colyseus, room, {
       name: "Priority Mage",
       weaponItem: "fire_staff",
     });
-    const target = await colyseus.connectTo(room, {
+    const target = await connectToRoom(colyseus, room, {
       name: "Priority Target",
     });
 
@@ -1145,3 +1148,4 @@ describe("world room", () => {
     assert.strictEqual(updatedRat?.health, updatedRat?.maxHealth);
   });
 });
+
