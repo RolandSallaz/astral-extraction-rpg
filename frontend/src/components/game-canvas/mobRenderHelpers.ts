@@ -38,7 +38,8 @@ export function getAnimatedMobTexture(texture: string, timeMs: number) {
 }
 
 export function getMobClipTextureKey(spritesheet: string) {
-  return `mob-clip:${encodeURIComponent(spritesheet)}`;
+  const normalizedSpritesheet = spritesheet.trim();
+  return `mob-clip:${encodeURIComponent(normalizedSpritesheet)}`;
 }
 
 export function getMobVisualKind(texture: string) {
@@ -46,9 +47,10 @@ export function getMobVisualKind(texture: string) {
 }
 
 export function toRuntimeAnimationFromMobClip(clip: MobAnimationClipDefinition): SheetAnimation {
+  const texturePath = clip.spritesheet.trim();
   return {
-    textureKey: getMobClipTextureKey(clip.spritesheet),
-    texturePath: clip.spritesheet,
+    textureKey: getMobClipTextureKey(texturePath),
+    texturePath,
     frameWidth: clip.frameWidth,
     frameHeight: clip.frameHeight,
     startFrame: clip.startFrame,

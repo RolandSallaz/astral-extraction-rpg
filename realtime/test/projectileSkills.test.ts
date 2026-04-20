@@ -4,8 +4,8 @@ import {
   FIRE_BURST_GEM_ID,
   FIRE_SPREAD_GEM_ID,
   FIRE_SPLIT_GEM_ID,
-} from "../src/rooms/fireballGems.js";
-import { buildFireballCastPlan } from "../src/rooms/projectileSkills.js";
+} from "../src/rooms/runtime/fireballGems.js";
+import { buildFireballCastPlan } from "../src/rooms/runtime/projectileSkills.js";
 
 describe("projectile skill planning", () => {
   it("stacks burst and spread by spawning a spread fan for each burst shot", () => {

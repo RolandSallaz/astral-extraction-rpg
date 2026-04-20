@@ -1,6 +1,6 @@
 import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
-import { buildGroundEffectTileArea } from "../sharedGameplay.js";
+import { buildGroundEffectTileArea } from "./sharedGameplay.js";
 import { GroundEffectState } from "../schema/GroundEffectState.js";
 
 type CreateFireFieldParams = {

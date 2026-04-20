@@ -8,22 +8,22 @@ import {
   type ProjectileServerData,
   createDefaultProjectileServerData,
 } from "../schema/ProjectileState.js";
-import { setMobAggroTarget } from "../mobAi.js";
+import { setMobAggroTarget } from "./mobAi.js";
 import {
   applyGemConfigToProjectile,
   buildOnHitProjectileEffects,
   shouldProjectileDealDirectDamage,
   type DamageType,
-} from "../projectileSkills.js";
+} from "./projectileSkills.js";
 import {
   canProjectileHitOwner,
   startProjectileReturn as startSharedProjectileReturn,
   tryBounceProjectile as trySharedProjectileBounce,
-} from "../sharedGameplay.js";
+} from "./sharedGameplay.js";
 import {
   FIREBALL_SHARD_SKILL_ID,
   type ProjectileGemConfig,
-} from "../fireballGems.js";
+} from "./fireballGems.js";
 import type { ProjectileSystem } from "../systems/ProjectileSystem.js";
 
 export interface ProjectileStateContext {

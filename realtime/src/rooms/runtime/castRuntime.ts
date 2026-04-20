@@ -1,4 +1,4 @@
-import { getFireballCastRange } from "../fireballGems.js";
+import { getFireballCastRange } from "./fireballGems.js";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import { type BasePlayerState } from "../schema/BasePlayerState.js";
 

@@ -1,5 +1,5 @@
 import { type MobKind } from "@mmorpg/shared/mobs/catalog";
-import { MobState } from "./schema/MobState.js";
+import { MobState } from "../schema/MobState.js";
 
 export type MobAiPlayer = {
   id: string;
@@ -264,7 +264,8 @@ export function moveMobTowards(mob: MobState, options: MobMoveOptions) {
     return;
   }
 
-  const maxStep = Math.max(mob.moveSpeed, MIN_EFFECTIVE_MOB_MOVE_SPEED) * deltaSeconds;
+  const slowMultiplier = mob.slowEndsAt > Date.now() ? 0.6 : 1;
+  const maxStep = Math.max(mob.moveSpeed * slowMultiplier, MIN_EFFECTIVE_MOB_MOVE_SPEED) * deltaSeconds;
   const step = Math.min(distance, maxStep);
   const moveX = (deltaX / distance) * step;
   const moveY = (deltaY / distance) * step;

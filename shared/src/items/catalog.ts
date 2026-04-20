@@ -73,7 +73,15 @@ export const GEM_ITEM_IDS = [
 ] as const;
 export type GemItemId = typeof GEM_ITEM_IDS[number];
 
-export const CONSUMABLE_ITEM_IDS = ["healing_potion", "teleport_scroll"] as const;
+export const CONSUMABLE_ITEM_IDS = [
+  "healing_potion",
+  "poison_potion",
+  "slow_potion",
+  "antidote",
+  "speed_potion",
+  "fire_resistance_potion",
+  "teleport_scroll",
+] as const;
 export type ConsumableItemId = typeof CONSUMABLE_ITEM_IDS[number];
 
 export const MISC_ITEM_IDS = [
@@ -524,8 +532,63 @@ export const ITEM_DEFINITIONS: Record<ItemId, SharedItemDefinition> = {
     type: "consumable",
     name: "Healing Potion",
     value: 12,
-    iconPath: "/pack/potion and poison asset pack/Crimson Health Elixir.png",
+    iconPath: "/sprites/consumables/healing-potion-white.png",
     tooltipStats: ["Restores 20 HP over 10s", "Cooldown: 20s", "Stacks to 5"],
+    stackable: true,
+    maxStack: 5,
+    fireResistancePercent: 0,
+  },
+  poison_potion: {
+    id: "poison_potion",
+    type: "consumable",
+    name: "Poison Potion",
+    value: 14,
+    iconPath: "/sprites/consumables/healing-potion-white.png",
+    tooltipStats: ["Poisons targets for 18 damage over 6s", "Thrown only", "Cooldown: 16s", "Stacks to 5"],
+    stackable: true,
+    maxStack: 5,
+    fireResistancePercent: 0,
+  },
+  slow_potion: {
+    id: "slow_potion",
+    type: "consumable",
+    name: "Slow Potion",
+    value: 16,
+    iconPath: "/sprites/consumables/healing-potion-white.png",
+    tooltipStats: ["Slows targets by 40% for 5s", "Thrown only", "Cooldown: 18s", "Stacks to 5"],
+    stackable: true,
+    maxStack: 5,
+    fireResistancePercent: 0,
+  },
+  antidote: {
+    id: "antidote",
+    type: "consumable",
+    name: "Antidote",
+    value: 10,
+    iconPath: "/sprites/consumables/healing-potion-white.png",
+    tooltipStats: ["Instantly removes poison", "Cooldown: 10s", "Stacks to 5"],
+    stackable: true,
+    maxStack: 5,
+    fireResistancePercent: 0,
+  },
+  speed_potion: {
+    id: "speed_potion",
+    type: "consumable",
+    name: "Speed Potion",
+    value: 18,
+    iconPath: "/sprites/consumables/healing-potion-white.png",
+    tooltipStats: ["Increases speed by 40% for 8s", "Cooldown: 30s", "Stacks to 5"],
+    stackable: true,
+    maxStack: 5,
+    fireResistancePercent: 0,
+  },
+  fire_resistance_potion: {
+    id: "fire_resistance_potion",
+    type: "consumable",
+    name: "Fire Resistance Potion",
+    value: 20,
+    iconPath: "/sprites/consumables/healing-potion-white.png",
+    tooltipStats: ["Reduces fire damage by 50% for 12s", "Cooldown: 30s", "Stacks to 5"],
     stackable: true,
     maxStack: 5,
     fireResistancePercent: 0,
@@ -634,6 +697,11 @@ export const INVENTORY_SIZE = 24;
 export const EMPTY_ITEM_SLOT = "" as const;
 export const ALLOWED_ITEM_IDS = new Set<string>([EMPTY_ITEM_SLOT, ...ITEM_IDS]);
 export const HEALING_POTION_ID = "healing_potion" as const;
+export const POISON_POTION_ID = "poison_potion" as const;
+export const SLOW_POTION_ID = "slow_potion" as const;
+export const ANTIDOTE_ID = "antidote" as const;
+export const SPEED_POTION_ID = "speed_potion" as const;
+export const FIRE_RESISTANCE_POTION_ID = "fire_resistance_potion" as const;
 export const TELEPORT_SCROLL_ID = "teleport_scroll" as const;
 
 export function isItemId(value: string): value is ItemId {

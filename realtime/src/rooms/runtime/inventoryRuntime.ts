@@ -1,6 +1,11 @@
 import { type ChestState } from "../schema/ChestState.js";
 import {
   HEALING_POTION_ID,
+  POISON_POTION_ID,
+  SLOW_POTION_ID,
+  ANTIDOTE_ID,
+  SPEED_POTION_ID,
+  FIRE_RESISTANCE_POTION_ID,
   TELEPORT_SCROLL_ID,
   consumeRoomInventoryEntry,
   normalizeRoomInventorySlots,
@@ -39,7 +44,15 @@ export function consumeSupportedRoomConsumable(
     return null;
   }
 
-  if (parsed.code !== HEALING_POTION_ID && parsed.code !== TELEPORT_SCROLL_ID) {
+  if (
+    parsed.code !== HEALING_POTION_ID &&
+    parsed.code !== POISON_POTION_ID &&
+    parsed.code !== SLOW_POTION_ID &&
+    parsed.code !== ANTIDOTE_ID &&
+    parsed.code !== SPEED_POTION_ID &&
+    parsed.code !== FIRE_RESISTANCE_POTION_ID &&
+    parsed.code !== TELEPORT_SCROLL_ID
+  ) {
     return null;
   }
 

@@ -264,6 +264,39 @@ describe("raid room", () => {
     await client.leave();
   });
 
+  it("removes tutorial damage protection after the tutorial mob dies", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-crypt-small-post-tutorial",
+      seed: "crypt-small-post-tutorial-seed",
+      templateCode: "crypt_small",
+    });
+
+    const client = await connectToRoom(colyseus, room, {
+      name: "Vulnerable Raider",
+      raidRunId: "raid-crypt-small-post-tutorial",
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+
+    const tutorialMob = room.state.mobs.get("raid-skeleton-tutorial");
+    assert.ok(tutorialMob);
+    tutorialMob!.health = 0;
+    tutorialMob!.dead = true;
+
+    player!.health = 3;
+    const dealt = (room as unknown as {
+      applyDamageToPlayer: (target: { health: number }, amount: number, damageType: "physical" | "fire") => number;
+    }).applyDamageToPlayer(player!, 999, "physical");
+
+    assert.strictEqual(dealt, 3);
+    assert.strictEqual(player!.health, 0);
+
+    await client.leave();
+  });
+
   it("rejects fireball casts without the required weapon", async () => {
     const room = await colyseus.createRoom<RaidRoomState>("raid", {
       raidRunId: "raid-no-weapon",

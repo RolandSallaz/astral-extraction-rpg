@@ -66,12 +66,14 @@ type UseRoomOutboundSyncParams = {
   lastSentRespawnNonceRef: MutableRefObject<number>;
   fireNovaCastNonce: number;
   woodStaffStrikeCastNonce: number;
+  woodStaffDashCastNonce: number;
   sessionTokenRef: MutableRefObject<string | null>;
   contentVersionRef: MutableRefObject<string>;
   estimatedOneWayLatencyMsRef: MutableRefObject<number>;
   lastPointerWorldRef: MutableRefObject<{ x: number; y: number }>;
   skillCooldownsRef: MutableRefObject<{
     woodStaffStrike?: number;
+    woodStaffDash?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
@@ -102,6 +104,7 @@ export function useRoomOutboundSync({
   lastSentRespawnNonceRef,
   fireNovaCastNonce,
   woodStaffStrikeCastNonce,
+  woodStaffDashCastNonce,
   sessionTokenRef,
   contentVersionRef,
   estimatedOneWayLatencyMsRef,
@@ -234,7 +237,7 @@ export function useRoomOutboundSync({
   }, [activeRoomName, fireNovaCastNonce, createTimedCastSkillMessage, estimatedOneWayLatencyMsRef, roomRef]);
 
   useEffect(() => {
-    if (woodStaffStrikeCastNonce <= 0) {
+    if (woodStaffStrikeCastNonce <= 0 && woodStaffDashCastNonce <= 0) {
       return;
     }
 
@@ -243,14 +246,15 @@ export function useRoomOutboundSync({
     }
 
     const now = Date.now();
-    if ((skillCooldownsRef.current.woodStaffStrike ?? 0) > now) {
+    const skillId = woodStaffDashCastNonce > woodStaffStrikeCastNonce ? 'woodStaffDash' : 'woodStaffStrike';
+    if ((skillCooldownsRef.current[skillId] ?? 0) > now) {
       return;
     }
 
     const target = lastPointerWorldRef.current;
     const castSkillMessage = createTimedCastSkillMessage(
       {
-        skillId: 'woodStaffStrike',
+        skillId,
         targetX: target.x,
         targetY: target.y,
       },
@@ -260,6 +264,7 @@ export function useRoomOutboundSync({
   }, [
     activeRoomName,
     woodStaffStrikeCastNonce,
+    woodStaffDashCastNonce,
     createTimedCastSkillMessage,
     estimatedOneWayLatencyMsRef,
     lastPointerWorldRef,

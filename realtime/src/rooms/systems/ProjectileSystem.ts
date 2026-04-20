@@ -1,5 +1,5 @@
 import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
-import type { DamageType, BurstSpawnRequest, PendingAftershock } from "../projectileSkills.js";
+import type { DamageType, BurstSpawnRequest, PendingAftershock } from "../runtime/projectileSkills.js";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { MobState } from "../schema/MobState.js";
 

@@ -13,12 +13,15 @@ type RoomProfilePlayer = BasePlayerState & {
   intellect: number;
   burnTicksRemaining: number;
   burnEndsAt: number;
+  poisonTicksRemaining: number;
+  poisonEndsAt: number;
   healingTicksRemaining: number;
   healingEndsAt: number;
   fireballCooldownEndsAt: number;
   fireNovaCooldownEndsAt: number;
   fireFieldCooldownEndsAt: number;
   woodStaffStrikeCooldownEndsAt: number;
+  woodStaffDashCooldownEndsAt: number;
   castingSkillId: string;
   castStartedAt: number;
   castEndsAt: number;
@@ -77,12 +80,15 @@ function applyOptionalFloor(
 export function initializeRoomPlayerTransientState(player: RoomProfilePlayer) {
   player.burnTicksRemaining = 0;
   player.burnEndsAt = 0;
+  player.poisonTicksRemaining = 0;
+  player.poisonEndsAt = 0;
   player.healingTicksRemaining = 0;
   player.healingEndsAt = 0;
   player.fireballCooldownEndsAt = 0;
   player.fireNovaCooldownEndsAt = 0;
   player.fireFieldCooldownEndsAt = 0;
   player.woodStaffStrikeCooldownEndsAt = 0;
+  player.woodStaffDashCooldownEndsAt = 0;
   player.castingSkillId = "";
   player.castStartedAt = 0;
   player.castEndsAt = 0;
@@ -181,6 +187,8 @@ export function applyRoomZeroHealthState(
   player.dead = true;
   player.burnTicksRemaining = 0;
   player.burnEndsAt = 0;
+  player.poisonTicksRemaining = 0;
+  player.poisonEndsAt = 0;
   player.healingTicksRemaining = 0;
   player.healingEndsAt = 0;
   options.resetMovement?.();

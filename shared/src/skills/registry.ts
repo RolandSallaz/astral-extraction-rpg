@@ -8,7 +8,7 @@ import { isSameEquipmentItemFamily } from "../items/catalog";
  * message handlers, cast logic, or cooldown tracking.
  */
 
-export type SkillId = "woodStaffStrike" | "fireball" | "fireNova" | "fireField";
+export type SkillId = "woodStaffStrike" | "woodStaffDash" | "fireball" | "fireNova" | "fireField";
 
 export type SkillCategory = "melee" | "projectile" | "nova" | "ground";
 
@@ -32,6 +32,14 @@ export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
     name: "Wood Staff Strike",
     requiredWeapon: "wood_staff",
     baseCooldownMs: 450,
+    spawnsProjectile: false,
+  },
+  woodStaffDash: {
+    id: "woodStaffDash",
+    category: "melee",
+    name: "Wood Staff Dash",
+    requiredWeapon: "wood_staff",
+    baseCooldownMs: 2000,
     spawnsProjectile: false,
   },
   fireball: {

@@ -3,7 +3,7 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
 import { MobState } from "../src/rooms/schema/MobState.js";
-import { WORLD_GAMEPLAY_PROFILE } from "../src/rooms/sharedGameplay.js";
+import { WORLD_GAMEPLAY_PROFILE } from "../src/rooms/runtime/sharedGameplay.js";
 import { loadWorldDefinition } from "../src/rooms/worldDefinition.js";
 import { connectToRoom } from "./helpers/realtimeJoin.js";
 import {
@@ -991,6 +991,72 @@ describe("world room", () => {
     const payload = await healingTextPromise;
     assert.strictEqual(payload.text, "+2");
     assert.strictEqual(payload.color, "#6dff8f");
+  });
+
+  it("broadcasts a thrown healing potion event to all room clients", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const thrower = await connectToRoom(colyseus, room, {
+      name: "Thrower",
+      inventory: ["healing_potion::1"],
+    });
+    const ally = await connectToRoom(colyseus, room, {
+      name: "Potion Ally",
+    });
+
+    await room.waitForNextPatch();
+
+    const throwerPlayer = room.state.players.get(thrower.sessionId);
+    const allyPlayer = room.state.players.get(ally.sessionId);
+    assert.ok(throwerPlayer);
+    assert.ok(allyPlayer);
+
+    if (!throwerPlayer || !allyPlayer) {
+      assert.fail("Expected both players to exist");
+    }
+
+    throwerPlayer.x = 320;
+    throwerPlayer.y = 320;
+    allyPlayer.x = 384;
+    allyPlayer.y = 320;
+    allyPlayer.health = 60;
+
+    const targetX = 384;
+    const targetY = 320;
+    const waitForThrownMessage = (client: typeof thrower) =>
+      Promise.race([
+        new Promise<Record<string, unknown>>((resolve) => {
+          client.onMessage("thrownConsumable", (payload) => resolve(payload as Record<string, unknown>));
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("thrownConsumable not received")), 1200),
+        ),
+      ]);
+
+    const selfPayloadPromise = waitForThrownMessage(thrower);
+    const allyPayloadPromise = waitForThrownMessage(ally);
+
+    thrower.send("useConsumable", {
+      source: "inventory",
+      slotIndex: 0,
+      mode: "throw",
+      targetX,
+      targetY,
+    });
+
+    const [selfPayload, allyPayload] = await Promise.all([selfPayloadPromise, allyPayloadPromise]);
+    await room.waitForNextPatch();
+
+    assert.deepStrictEqual(allyPayload, selfPayload);
+    assert.strictEqual(selfPayload.itemId, "healing_potion");
+    assert.strictEqual(selfPayload.sourcePlayerId, thrower.sessionId);
+    assert.strictEqual(selfPayload.targetX, targetX);
+    assert.strictEqual(selfPayload.targetY, targetY);
+    assert.ok(typeof selfPayload.startX === "number");
+    assert.ok(typeof selfPayload.startY === "number");
+    assert.ok(typeof selfPayload.durationMs === "number");
+    assert.ok((selfPayload.durationMs as number) >= 180);
+    assert.ok((allyPlayer.healingTicksRemaining ?? 0) > 0);
+    assert.strictEqual(room.state.players.get(thrower.sessionId)?.inventory[0], "");
   });
 
   it("removes a disconnected player after the offline grace period expires", async () => {

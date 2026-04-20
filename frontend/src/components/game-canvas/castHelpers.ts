@@ -1,6 +1,6 @@
 import type { EquipmentState } from "@mmorpg/shared/player/contracts";
 
-type CastHelpersConfig = {
+export type CastHelpersConfig = {
   fireballBaseCastTimeMs: number;
   fireTrailCastPenaltyMs: number;
   fireBurstExtraLockMs: number;

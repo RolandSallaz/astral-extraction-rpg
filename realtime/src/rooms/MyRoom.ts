@@ -22,7 +22,7 @@ import {
   awardExperience as awardSharedExperience,
   WORLD_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
-} from "./sharedGameplay.js";
+} from "./runtime/sharedGameplay.js";
 import { INVENTORY_SIZE } from "@mmorpg/shared";
 import {
   getMobDefinition,
@@ -56,6 +56,13 @@ import {
   normalizeMoveMessage,
   normalizeUseConsumableMessage,
 } from "./runtime/messageValidation.js";
+import {
+  canWorldPlayerMoveTo,
+  findRandomWorldTeleportDestination,
+  handleWorldMoveMessage,
+  updateWorldPlayers,
+  type WorldMovementRuntimeContext,
+} from "./runtime/worldMovementRuntime.js";
 import { loadWorldDefinition } from "./worldDefinition.js";
 
 const TILE_SIZE = WORLD_GAMEPLAY_PROFILE.tileSize;
@@ -81,6 +88,24 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
   private readonly worldSpawnPosition = {
     x: this.worldDefinition.spawn.x * TILE_SIZE + TILE_SIZE / 2,
     y: this.worldDefinition.spawn.y * TILE_SIZE + TILE_SIZE / 2,
+  };
+  private readonly worldMovementContext: WorldMovementRuntimeContext<PlayerState> = {
+    roomPlayers: this.state.players,
+    pendingMovementSequence: this.pendingMovementSequence,
+    playerLatencyMs: this.playerLatencyMs,
+    mobSpatialGrid: this.mobSpatialGrid,
+    blockedWorldTiles: this.blockedWorldTiles,
+    profile: this.profile,
+    tileSize: TILE_SIZE,
+    playerSpeed: PLAYER_SPEED,
+    collisionHalfWidth: PLAYER_MOB_COLLISION_HALF_WIDTH,
+    collisionHalfHeight: PLAYER_MOB_COLLISION_HALF_HEIGHT,
+    collisionOffsetY: PLAYER_MOB_COLLISION_OFFSET_Y,
+    footCollisionOffsetY: WORLD_TILE_COLLISION_OFFSET_Y,
+    teleportAttempts: this.profile.teleportScrollRandomAttempts,
+    getMapWidthPx: () => this.getMapWidthPx(),
+    getMapHeightPx: () => this.getMapHeightPx(),
+    ensureMobSpatialGrid: () => this.ensureMobSpatialGrid(),
   };
 
   // ── Abstract method implementations ─────────────────────────────
@@ -153,11 +178,11 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
   }
 
   protected canTeleportTo(x: number, y: number, _playerId: string): boolean {
-    return this.canPlayerMoveTo(x, y);
+    return canWorldPlayerMoveTo(this.worldMovementContext, x, y);
   }
 
   protected performTeleportScroll(playerId: string, player: PlayerState): void {
-    const destination = this.findRandomTeleportDestination(playerId);
+    const destination = findRandomWorldTeleportDestination(this.worldMovementContext, playerId, this.worldSpawnPosition);
     if (!destination) {
       return;
     }
@@ -223,44 +248,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       if (!normalizedMessage) {
         return;
       }
-
-      const { x: moveX, y: moveY, sequence, clientEstimatedLatencyMs } = normalizedMessage;
-      const player = this.state.players.get(client.sessionId);
-      if (!player) {
-        return;
-      }
-
-      if (player.dead || player.castEndsAt > Date.now()) {
-        player.moveX = 0;
-        player.moveY = 0;
-        player.lastProcessedInput = sequence;
-        this.pendingMovementSequence.delete(client.sessionId);
-        return;
-      }
-
-      if (clientEstimatedLatencyMs !== undefined) {
-        this.playerLatencyMs.set(client.sessionId, clientEstimatedLatencyMs);
-      }
-      const length = Math.hypot(moveX, moveY);
-
-      if (length <= 0.001) {
-        player.moveX = 0;
-        player.moveY = 0;
-        player.lastProcessedInput = sequence;
-        this.pendingMovementSequence.delete(client.sessionId);
-        return;
-      }
-
-      if (length > 1) {
-        player.moveX = moveX / length;
-        player.moveY = moveY / length;
-        this.pendingMovementSequence.set(client.sessionId, sequence);
-        return;
-      }
-
-      player.moveX = moveX;
-      player.moveY = moveY;
-      this.pendingMovementSequence.set(client.sessionId, sequence);
+      handleWorldMoveMessage(this.worldMovementContext, client.sessionId, normalizedMessage);
     });
 
     this.onMessage("profile", (client, message: WorldProfileMessage) => {
@@ -545,83 +533,10 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
   private updatePlayers(deltaSeconds: number, tickNow: number) {
     this.removeExpiredOfflinePlayers();
-    // Ensure mob queries are current before resolving player collision against mobs.
-    this.ensureMobSpatialGrid();
-
-    for (const [sessionId, player] of this.state.players.entries()) {
-      if (player.dead) {
-        continue;
-      }
-
-      const length = Math.hypot(player.moveX, player.moveY);
-      if (length <= 0) {
-        this.pendingMovementSequence.delete(sessionId);
-        continue;
-      }
-
-      const nextX = player.x + player.moveX * PLAYER_SPEED * deltaSeconds;
-      const nextY = player.y + player.moveY * PLAYER_SPEED * deltaSeconds;
-      const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, nextX));
-      const clampedY = Math.max(TILE_SIZE / 2, Math.min(this.getMapHeightPx() - TILE_SIZE / 2, nextY));
-      if (this.canPlayerMoveTo(clampedX, clampedY, player)) {
-        player.x = clampedX;
-        player.y = clampedY;
-      }
-      const processedSequence = this.pendingMovementSequence.get(sessionId);
-      if (typeof processedSequence === "number") {
-        player.lastProcessedInput = processedSequence;
-      }
-    }
-
+    updateWorldPlayers(this.worldMovementContext, deltaSeconds);
     this.recordPlayerPositionHistory(tickNow);
     this.updateMobs(deltaSeconds, tickNow);
     this.updateCombatSystems(deltaSeconds, tickNow, { includeMobBurns: false });
-  }
-
-  private canPlayerMoveTo(x: number, y: number, player?: PlayerState) {
-    this.ensureMobSpatialGrid();
-    const clampedX = Math.max(TILE_SIZE / 2, Math.min(this.getMapWidthPx() - TILE_SIZE / 2, x));
-    const clampedY = Math.max(
-      TILE_SIZE / 2,
-      Math.min(this.getMapHeightPx() - TILE_SIZE / 2, y + WORLD_TILE_COLLISION_OFFSET_Y),
-    );
-    const tileX = Math.floor(clampedX / TILE_SIZE);
-    const tileY = Math.floor(clampedY / TILE_SIZE);
-
-    if (this.blockedWorldTiles.has(`${tileX}:${tileY}`)) {
-      return false;
-    }
-
-    const nearbyMobs = this.mobSpatialGrid.queryRadius(
-      clampedX,
-      clampedY,
-      Math.max(PLAYER_MOB_COLLISION_HALF_WIDTH, PLAYER_MOB_COLLISION_HALF_HEIGHT),
-    );
-    if (nearbyMobs.length > 0) {
-      for (const mob of nearbyMobs) {
-        if (!player) {
-          return false;
-        }
-
-        const collisionCenterY = mob.y + PLAYER_MOB_COLLISION_OFFSET_Y;
-        const currentDistance = Math.hypot(
-          (player.x - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
-          (player.y - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
-        );
-        const nextDistance = Math.hypot(
-          (clampedX - mob.x) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_WIDTH),
-          (clampedY - collisionCenterY) / Math.max(0.001, PLAYER_MOB_COLLISION_HALF_HEIGHT),
-        );
-        const isAlreadyOverlapping = currentDistance < 1;
-        const isMovingOutOfOverlap = nextDistance > currentDistance + 0.01;
-
-        if (!isAlreadyOverlapping || !isMovingOutOfOverlap) {
-          return false;
-        }
-      }
-    }
-
-    return true;
   }
 
   private updateMobs(deltaSeconds: number, tickNow: number) {
@@ -633,55 +548,30 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     return this.mobBalance[kind];
   }
 
-  private findRandomTeleportDestination(playerId: string) {
-    const widthInTiles = this.getMapWidthTiles();
-    const heightInTiles = this.getMapHeightTiles();
-
-    for (let attempt = 0; attempt < this.profile.teleportScrollRandomAttempts; attempt += 1) {
-      const tileX = Math.floor(Math.random() * widthInTiles);
-      const tileY = Math.floor(Math.random() * heightInTiles);
-      const x = tileX * TILE_SIZE + TILE_SIZE / 2;
-      const y = tileY * TILE_SIZE + TILE_SIZE / 2;
-
-      if (!this.canPlayerMoveTo(x, y)) {
-        continue;
-      }
-
-      let blockedByPlayer = false;
-      for (const otherPlayer of this.state.players.values()) {
-        if (otherPlayer.id === playerId || otherPlayer.dead) {
-          continue;
-        }
-
-        if (Math.hypot(otherPlayer.x - x, otherPlayer.y - y) < TILE_SIZE * 0.75) {
-          blockedByPlayer = true;
-          break;
-        }
-      }
-
-      if (!blockedByPlayer) {
-        return { x, y };
-      }
-    }
-
-    const spawnPosition = this.resolveSpawnPosition(this.worldSpawnPosition);
-    return this.canPlayerMoveTo(spawnPosition.x, spawnPosition.y) ? spawnPosition : null;
-  }
-
   private restoreOfflinePlayer(client: Client, options?: WorldRoomJoinOptions) {
     const nextName = options?.name?.trim()?.slice(0, 24);
-    if (!nextName) {
+    const verified = this.verifiedPlayers.get(client.sessionId) ?? null;
+    const verifiedPlayerId = verified?.id ?? null;
+    if (!nextName && !verifiedPlayerId) {
       return null;
     }
 
     for (const [previousSessionId, player] of this.state.players.entries()) {
-      if (player.isOnline || player.name !== nextName) {
+      if (previousSessionId === client.sessionId) {
         continue;
       }
 
+      const previousVerified = this.verifiedPlayers.get(previousSessionId);
+      const sameVerifiedPlayer = verifiedPlayerId !== null && previousVerified?.id === verifiedPlayerId;
+      const sameOfflineGuestName = !sameVerifiedPlayer && !player.isOnline && nextName !== undefined && player.name === nextName;
+      if (!sameVerifiedPlayer && !sameOfflineGuestName) {
+        continue;
+      }
+
+      this.clients.find((entry) => entry.sessionId === previousSessionId)?.leave(4000);
       this.state.players.delete(previousSessionId);
       player.id = client.sessionId;
-      player.name = nextName;
+      player.name = sameVerifiedPlayer ? player.name : nextName;
       player.isOnline = true;
       player.offlineExpiresAt = 0;
       player.moveX = 0;
@@ -692,6 +582,9 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
       moveRoomMapValue(this.playerLatencyMs, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
+      if (verified) {
+        this.verifiedPlayers.set(client.sessionId, verified);
+      }
       clearRoomSessionCollections(
         previousSessionId,
         this.pendingMovementSequence,
@@ -843,12 +736,15 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.experience = 0;
     player.burnTicksRemaining = 0;
     player.burnEndsAt = 0;
+    player.poisonTicksRemaining = 0;
+    player.poisonEndsAt = 0;
     player.healingTicksRemaining = 0;
     player.healingEndsAt = 0;
     player.moveX = 0;
     player.moveY = 0;
     player.fireFieldCooldownEndsAt = 0;
     player.woodStaffStrikeCooldownEndsAt = 0;
+    player.woodStaffDashCooldownEndsAt = 0;
     this.clearPlayerCastState(player);
     this.statusEffects.deletePlayerEffects(player.id);
 

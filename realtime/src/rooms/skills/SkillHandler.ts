@@ -1,7 +1,7 @@
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
-import type { ProjectileGemConfig } from "../fireballGems.js";
-import type { BurstSpawnRequest } from "../projectileSkills.js";
+import type { ProjectileGemConfig } from "../runtime/fireballGems.js";
+import type { BurstSpawnRequest } from "../runtime/projectileSkills.js";
 
 /**
  * Narrow interface that skill handlers receive instead of the entire room.
@@ -25,6 +25,7 @@ export interface SkillCastContext {
   ): { x: number; y: number };
   clearPlayerMovement(sessionId: string): void;
   performWoodStaffStrike(player: BasePlayerState, targetX: number, targetY: number): void;
+  performWoodStaffDash(player: BasePlayerState, targetX: number, targetY: number): void;
 
   // Fireball-specific helpers
   getOwnerProjectileGemConfig(ownerId: string, skillId: string): ProjectileGemConfig;

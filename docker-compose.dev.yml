@@ -49,10 +49,44 @@ services:
       timeout: 5s
       retries: 20
 
+  deps:
+    image: node:22-bookworm
+    container_name: mmorpg-deps-dev
+    working_dir: /workspace
+    environment:
+      NODE_ENV: development
+    volumes:
+      - .:/workspace
+      - root-node-modules:/workspace/node_modules
+      - shared-node-modules:/workspace/shared/node_modules
+      - backend-node-modules:/workspace/backend/node_modules
+      - realtime-node-modules:/workspace/realtime/node_modules
+      - frontend-node-modules:/workspace/frontend/node_modules
+    command:
+      - sh
+      - -lc
+      - |
+        lock_hash="$$(sha256sum package-lock.json | cut -d ' ' -f1)"
+        marker="node_modules/.docker-dev-package-lock"
+        if [ -f "$$marker" ] && [ "$$(cat "$$marker")" = "$$lock_hash" ] \
+          && [ -x shared/node_modules/.bin/tsc ] \
+          && [ -x backend/node_modules/.bin/nest ] \
+          && [ -x realtime/node_modules/.bin/tsx ] \
+          && [ -x frontend/node_modules/.bin/next ]; then
+          echo "Dependencies are current; skipping npm ci."
+          exit 0
+        fi
+        npm ci
+        echo "$$lock_hash" > "$$marker"
+
   shared:
     image: node:22-bookworm
     container_name: mmorpg-shared-dev
-    working_dir: /workspace/shared
+    restart: unless-stopped
+    working_dir: /workspace
+    depends_on:
+      deps:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: development
       TSC_WATCHFILE: DynamicPriorityPolling
@@ -60,27 +94,35 @@ services:
       TSC_POLLINGINTERVAL: 1000
     volumes:
       - .:/workspace
+      - root-node-modules:/workspace/node_modules
       - shared-node-modules:/workspace/shared/node_modules
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test -f /workspace/shared/dist/index.js && test -f /workspace/shared/dist/player/contracts.js && test -f /workspace/shared/dist/realtime/contracts.js
+      interval: 5s
+      timeout: 2s
+      retries: 24
+      start_period: 30s
     command:
       - sh
       - -lc
       - |
-        if [ ! -f node_modules/typescript/bin/tsc ]; then
-          npm install --workspaces=false
-        fi
-        npm run build
-        npm run dev
+        rm -f shared/.docker-dev-ready
+        npm run build --workspace @mmorpg/shared
+        touch shared/.docker-dev-ready
+        npm run dev --workspace @mmorpg/shared
 
   backend:
     image: node:22-bookworm
     container_name: mmorpg-backend-dev
     restart: unless-stopped
-    working_dir: /workspace/backend
+    working_dir: /workspace
     depends_on:
       postgres:
         condition: service_healthy
       shared:
-        condition: service_started
+        condition: service_healthy
       kafka:
         condition: service_healthy
     environment:
@@ -101,25 +143,23 @@ services:
       - "3000:3000"
     volumes:
       - .:/workspace
+      - root-node-modules:/workspace/node_modules
       - backend-node-modules:/workspace/backend/node_modules
       - shared-node-modules:/workspace/shared/node_modules
     command:
       - sh
       - -lc
       - |
-        if [ ! -f node_modules/@nestjs/cli/bin/nest.js ]; then
-          npm ci --workspaces=false
-        fi
-        npm run start:dev
+        npm run start:dev --workspace backend
 
   realtime:
     image: node:22-bookworm
     container_name: mmorpg-realtime-dev
     restart: unless-stopped
-    working_dir: /workspace/realtime
+    working_dir: /workspace
     depends_on:
       shared:
-        condition: service_started
+        condition: service_healthy
       backend:
         condition: service_started
       kafka:
@@ -138,24 +178,23 @@ services:
       - "2567:2567"
     volumes:
       - .:/workspace
+      - root-node-modules:/workspace/node_modules
       - realtime-node-modules:/workspace/realtime/node_modules
       - shared-node-modules:/workspace/shared/node_modules
     command:
       - sh
       - -lc
       - |
-        if [ ! -f node_modules/tsx/dist/cli.mjs ] || [ ! -f node_modules/@colyseus/playground/build/index.mjs ]; then
-          npm ci --workspaces=false
-        fi
-        npm run start
+        npm run start --workspace my-app
 
   frontend:
     image: node:22-bookworm
     container_name: mmorpg-frontend-dev
-    working_dir: /workspace/frontend
+    restart: unless-stopped
+    working_dir: /workspace
     depends_on:
       shared:
-        condition: service_started
+        condition: service_healthy
       backend:
         condition: service_started
       realtime:
@@ -172,6 +211,7 @@ services:
       - "5173:5173"
     volumes:
       - .:/workspace
+      - root-node-modules:/workspace/node_modules
       - frontend-node-modules:/workspace/frontend/node_modules
       - frontend-next:/workspace/frontend/.next
       - shared-node-modules:/workspace/shared/node_modules
@@ -179,17 +219,12 @@ services:
       - sh
       - -lc
       - |
-        if [ ! -f node_modules/next/package.json ] || [ ! -f node_modules/next/dist/server/require-hook.js ]; then
-          if [ -d node_modules ]; then
-            find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-          fi
-          npm install --workspaces=false
-        fi
-        npm run dev
+        npm run dev --workspace frontend
 
 volumes:
   postgres-data:
   kafka-data:
+  root-node-modules:
   shared-node-modules:
   backend-node-modules:
   realtime-node-modules:

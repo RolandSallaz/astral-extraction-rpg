@@ -1,6 +1,6 @@
 import assert from "assert";
 import { MobState } from "../src/rooms/schema/MobState.js";
-import { resolveMobPathTarget } from "../src/rooms/mobPathing.js";
+import { resolveMobPathTarget } from "../src/rooms/runtime/mobPathing.js";
 
 describe("mobPathing", () => {
   it("routes around blocked tiles instead of chasing straight through them", () => {

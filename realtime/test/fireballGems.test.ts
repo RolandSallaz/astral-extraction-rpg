@@ -30,7 +30,7 @@ import {
   hasSplitProjectileGem,
   isProjectileReturningEnabled,
   type WeaponGemCarrier,
-} from "../src/rooms/fireballGems.js";
+} from "../src/rooms/runtime/fireballGems.js";
 
 describe("fireball gem helpers", () => {
   it("stacks projectile gem modifiers into one config", () => {

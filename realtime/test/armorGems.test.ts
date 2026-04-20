@@ -1,5 +1,5 @@
 import assert from "assert";
-import { countArmorGems, getArmorGemConfig } from "../src/rooms/armorGems.js";
+import { countArmorGems, getArmorGemConfig } from "../src/rooms/runtime/armorGems.js";
 
 describe("armor gem helpers", () => {
   it("keeps armor gem effects disabled while clothing is removed", () => {

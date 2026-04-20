@@ -34,6 +34,10 @@ export type RoomGameplayProfile = {
   meleeStrikeArcHalfAngleRad: number;
   meleeStrikeOriginOffsetY: number;
   meleeStrikeMobCenterOffsetY: number;
+  woodStaffDashDamage: number;
+  woodStaffDashCastMs: number;
+  woodStaffDashCooldownMs: number;
+  woodStaffDashDistanceTiles: number;
   fireballCooldownMs: number;
   fireNovaProjectileCount: number;
   fireNovaCooldownMs: number;
@@ -54,6 +58,20 @@ export type RoomGameplayProfile = {
   healingPotionDurationMs: number;
   healingPotionTickMs: number;
   healingPotionCooldownMs: number;
+  poisonPotionTotalDamage: number;
+  poisonPotionDurationMs: number;
+  poisonPotionTickMs: number;
+  poisonPotionCooldownMs: number;
+  slowPotionDurationMs: number;
+  slowPotionSpeedMultiplier: number;
+  slowPotionCooldownMs: number;
+  antidoteCooldownMs: number;
+  speedPotionDurationMs: number;
+  speedPotionSpeedMultiplier: number;
+  speedPotionCooldownMs: number;
+  fireResistancePotionDurationMs: number;
+  fireResistancePotionPercent: number;
+  fireResistancePotionCooldownMs: number;
   teleportScrollCastMs: number;
   teleportScrollRandomAttempts: number;
 };
@@ -90,6 +108,10 @@ const COMMON_GAMEPLAY: Omit<
   meleeStrikeArcHalfAngleRad: Math.PI * 0.5,
   meleeStrikeOriginOffsetY: 16,
   meleeStrikeMobCenterOffsetY: -8,
+  woodStaffDashDamage: 12,
+  woodStaffDashCastMs: 700,
+  woodStaffDashCooldownMs: 2000,
+  woodStaffDashDistanceTiles: 3,
   fireballCooldownMs: 1000,
   fireNovaProjectileCount: 12,
   fireNovaCooldownMs: 10000,
@@ -109,6 +131,20 @@ const COMMON_GAMEPLAY: Omit<
   healingPotionDurationMs: 10000,
   healingPotionTickMs: 1000,
   healingPotionCooldownMs: 20000,
+  poisonPotionTotalDamage: 18,
+  poisonPotionDurationMs: 6000,
+  poisonPotionTickMs: 1000,
+  poisonPotionCooldownMs: 16000,
+  slowPotionDurationMs: 5000,
+  slowPotionSpeedMultiplier: 0.6,
+  slowPotionCooldownMs: 18000,
+  antidoteCooldownMs: 10000,
+  speedPotionDurationMs: 8000,
+  speedPotionSpeedMultiplier: 1.4,
+  speedPotionCooldownMs: 30000,
+  fireResistancePotionDurationMs: 12000,
+  fireResistancePotionPercent: 50,
+  fireResistancePotionCooldownMs: 30000,
   teleportScrollCastMs: 3000,
 };
 

@@ -189,6 +189,16 @@ export type ConsumableCooldownMessage = {
   cooldownEndsAt?: number;
 };
 
+export type ThrownConsumableMessage = {
+  itemId?: string;
+  sourcePlayerId?: string;
+  startX?: number;
+  startY?: number;
+  targetX?: number;
+  targetY?: number;
+  durationMs?: number;
+};
+
 export type DamageTextMessage = {
   x?: number;
   y?: number;

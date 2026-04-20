@@ -538,7 +538,72 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 12,
     tooltipStats: ['Restores 20 HP over 10s', 'Cooldown: 20s', 'Stacks to 5'],
     textureKey: 'item-healing-potion',
-    texturePath: '/pack/potion and poison asset pack/Crimson Health Elixir.png',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  poison_potion: {
+    id: 'poison_potion',
+    type: 'consumable',
+    name: 'Poison Potion',
+    value: 14,
+    tooltipStats: ['Poisons targets for 18 damage over 6s', 'Thrown only', 'Cooldown: 16s', 'Stacks to 5'],
+    textureKey: 'item-poison-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  slow_potion: {
+    id: 'slow_potion',
+    type: 'consumable',
+    name: 'Slow Potion',
+    value: 16,
+    tooltipStats: ['Slows targets by 40% for 5s', 'Thrown only', 'Cooldown: 18s', 'Stacks to 5'],
+    textureKey: 'item-slow-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  antidote: {
+    id: 'antidote',
+    type: 'consumable',
+    name: 'Antidote',
+    value: 10,
+    tooltipStats: ['Instantly removes poison', 'Cooldown: 10s', 'Stacks to 5'],
+    textureKey: 'item-antidote',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  speed_potion: {
+    id: 'speed_potion',
+    type: 'consumable',
+    name: 'Speed Potion',
+    value: 18,
+    tooltipStats: ['Increases speed by 40% for 8s', 'Cooldown: 30s', 'Stacks to 5'],
+    textureKey: 'item-speed-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  fire_resistance_potion: {
+    id: 'fire_resistance_potion',
+    type: 'consumable',
+    name: 'Fire Resistance Potion',
+    value: 20,
+    tooltipStats: ['Reduces fire damage by 50% for 12s', 'Cooldown: 30s', 'Stacks to 5'],
+    textureKey: 'item-fire-resistance-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
     stackable: true,
     maxStack: 5,
     iconScale: 0.9,
@@ -663,9 +728,12 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
   },
 };
 
-type ItemVisualOverride = Pick<ItemDefinition, 'texturePath' | 'iconTint'>;
+type ItemVisualOverride = Partial<Pick<ItemDefinition, 'texturePath' | 'iconTint'>>;
 
 const ITEM_VISUAL_OVERRIDES: Partial<Record<ItemId, ItemVisualOverride>> = {
+  healing_potion: {
+    iconTint: '#db4d5d',
+  },
   fire_trail_gem: {
     texturePath: '/sprites/gems/round-faceted-white.png',
     iconTint: '#ff8a3d',
@@ -823,6 +891,20 @@ export function getItemIconTint(itemId: ItemId | string | null | undefined) {
   }
 
   return ITEM_DEFINITIONS[itemId as ItemId].iconTint ?? null;
+}
+
+export function getItemIconTintValue(itemId: ItemId | string | null | undefined) {
+  const tint = getItemIconTint(itemId);
+  if (!tint) {
+    return null;
+  }
+
+  const normalizedTint = tint.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalizedTint)) {
+    return null;
+  }
+
+  return Number.parseInt(normalizedTint, 16);
 }
 
 export function getEquipmentGemSlotId(slot: BaseEquipmentSlot, index: number): EquipmentSlot {

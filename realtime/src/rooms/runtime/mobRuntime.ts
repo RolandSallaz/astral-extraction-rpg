@@ -14,16 +14,16 @@ import {
   moveMobTowards,
   resetMobToSpawn,
   resolveMobAggroTarget,
-} from "../mobAi.js";
+} from "./mobAi.js";
 import {
   clearMobPath,
   hasGridLineOfSight,
   resolveMobPathTarget,
   type MobPathCacheEntry,
-} from "../mobPathing.js";
+} from "./mobPathing.js";
 import { SpatialGrid } from "../services/SpatialGrid.js";
 import type { StatusEffectSystem } from "../systems/StatusEffectSystem.js";
-import type { DamageType } from "../projectileSkills.js";
+import type { DamageType } from "./projectileSkills.js";
 import { tryCreateMobLootChest } from "./chestRuntime.js";
 import { getSegmentEllipseCollisionT } from "./geometry.js";
 import { pushTargetByKnockback as pushTargetByKnockbackRuntime } from "./knockbackRuntime.js";

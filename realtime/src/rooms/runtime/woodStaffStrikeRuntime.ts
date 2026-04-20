@@ -2,8 +2,8 @@ import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { MobState } from "../schema/MobState.js";
-import { setMobAggroTarget } from "../mobAi.js";
-import type { DamageType } from "../projectileSkills.js";
+import { setMobAggroTarget } from "./mobAi.js";
+import type { DamageType } from "./projectileSkills.js";
 
 type WoodStaffStrikeTarget =
   | { kind: "player"; entity: BasePlayerState; distance: number }

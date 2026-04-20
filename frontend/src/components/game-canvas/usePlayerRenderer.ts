@@ -22,6 +22,7 @@ type RealtimeRoomState = {
     healingTicksRemaining?: number;
     healingEndsAt?: number;
     woodStaffStrikeCooldownEndsAt?: number;
+    woodStaffDashCooldownEndsAt?: number;
     fireballCooldownEndsAt?: number;
     fireNovaCooldownEndsAt?: number;
     fireFieldCooldownEndsAt?: number;
@@ -179,12 +180,14 @@ type UsePlayerRendererParams = {
   playerProgressChangeRef: MutableRefObject<((payload: { level: number; experience: number }) => void) | undefined>;
   skillCooldownsRef: MutableRefObject<{
     woodStaffStrike?: number;
+    woodStaffDash?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
   }>;
   skillCooldownsChangeRef: MutableRefObject<((payload: {
     woodStaffStrike: number;
+    woodStaffDash: number;
     fireball: number;
     fireNova: number;
     fireField: number;
@@ -452,6 +455,7 @@ export function usePlayerRenderer() {
           });
           const nextCooldowns = {
             woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+            woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
             fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
             fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
             fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
@@ -484,6 +488,7 @@ export function usePlayerRenderer() {
           });
           const nextCooldowns = {
             woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+            woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
             fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
             fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
             fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,

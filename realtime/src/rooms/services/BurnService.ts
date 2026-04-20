@@ -5,7 +5,7 @@
  * updateBurningTargets / updateBurningMobs loops.
  */
 
-import { applyBurnState, type BurnableEntity } from "../sharedGameplay.js";
+import { applyBurnState, type BurnableEntity } from "../runtime/sharedGameplay.js";
 
 export type BurnSourceKey = string; // e.g. "fireball" | "fireField"
 

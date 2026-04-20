@@ -114,7 +114,7 @@ type AuthFormState = {
 };
 
 type SkillCooldownState = Partial<Record<SkillId, number>>;
-type ConsumableCooldownState = Partial<Record<'healing_potion', number>>;
+type ConsumableCooldownState = Partial<Record<'healing_potion' | 'poison_potion' | 'slow_potion' | 'antidote' | 'speed_potion' | 'fire_resistance_potion' | 'teleport_scroll', number>>;
 type AdminTabId = 'skills' | 'balance' | 'mobs' | 'items' | 'world' | 'assets' | 'system';
 type ActiveRoomTarget = {
   name: 'world' | 'raid';
@@ -1074,6 +1074,17 @@ function loadStoredActiveRoomTarget(): ActiveRoomTarget | null {
       return null;
     }
 
+    if (
+      parsed.name === 'raid' &&
+      (
+        typeof parsed.options?.deadlineAt !== 'number' ||
+        parsed.options.deadlineAt <= Date.now()
+      )
+    ) {
+      window.localStorage.removeItem(ACTIVE_ROOM_TARGET_STORAGE_KEY);
+      return null;
+    }
+
     return {
       name: parsed.name,
       options: parsed.options,
@@ -1503,6 +1514,7 @@ export default function Home() {
   const [pendingRaidWorldRespawn, setPendingRaidWorldRespawn] = useState(false);
   const [fireNovaCastNonce, setFireNovaCastNonce] = useState(0);
   const [woodStaffStrikeCastNonce, setWoodStaffStrikeCastNonce] = useState(0);
+  const [woodStaffDashCastNonce, setWoodStaffDashCastNonce] = useState(0);
   const [useConsumableRequest, setUseConsumableRequest] = useState<{
     source: 'inventory' | 'container';
     slotIndex: number;
@@ -1682,10 +1694,19 @@ export default function Home() {
         ? new Date(lastStartedRaid.startedAt).getTime() + RAID_DEADLINE_MS
         : null;
 
-  const activatePendingRaid = (pendingRaid: NonNullable<PartyView['pendingRaid']>) => {
+  const activatePendingRaid = async (pendingRaid: NonNullable<PartyView['pendingRaid']>) => {
     const deadlineAt = pendingRaid.startedAt
       ? new Date(pendingRaid.startedAt).getTime() + RAID_DEADLINE_MS
       : Date.now() + RAID_DEADLINE_MS;
+    if (deadlineAt <= Date.now()) {
+      const nextParty = await ackPendingRaidJoin(pendingRaid.raidRunId);
+      setParty(nextParty);
+      setActiveRoomTarget({ name: 'world' });
+      setLobbyActionMessage('Raid expired. Returned to world.');
+      setLobbyActionError('');
+      return false;
+    }
+
     setActiveRoomTarget({
       name: 'raid',
       options: {
@@ -1693,7 +1714,36 @@ export default function Home() {
         deadlineAt,
       },
     });
+    return true;
   };
+
+  useEffect(() => {
+    if (
+      authStatus !== 'ready' ||
+      activeRoomTarget.name !== 'raid' ||
+      !raidDeadlineAt ||
+      raidDeadlineAt > Date.now()
+    ) {
+      return;
+    }
+
+    const raidRunId = typeof activeRoomTarget.options?.raidRunId === 'string'
+      ? activeRoomTarget.options.raidRunId
+      : undefined;
+    setActiveRoomTarget({ name: 'world' });
+    setPendingRaidWorldRespawn(false);
+    setLobbyActionMessage('Raid expired. Returned to world.');
+    setLobbyActionError('');
+    if (raidRunId) {
+      void ackPendingRaidJoin(raidRunId)
+        .then((nextParty) => {
+          setParty(nextParty);
+        })
+        .catch((error) => {
+          console.error('Failed to acknowledge expired raid', error);
+        });
+    }
+  }, [activeRoomTarget.name, activeRoomTarget.options, authStatus, raidDeadlineAt]);
 
   const refreshLobbyState = async (questOverride?: IntroductionQuestProgress | null) => {
     const [nextParty, nextTemplates] = await Promise.all([
@@ -2160,9 +2210,11 @@ export default function Home() {
         activeRoomTarget.name !== 'raid' &&
         !pendingRaidWorldRespawn
       ) {
-        activatePendingRaid(nextParty.pendingRaid);
-        setLobbyActionMessage('Party entered raid.');
-        setLobbyActionError('');
+        const activated = await activatePendingRaid(nextParty.pendingRaid);
+        if (activated) {
+          setLobbyActionMessage('Party entered raid.');
+          setLobbyActionError('');
+        }
       }
     };
 
@@ -3134,6 +3186,12 @@ export default function Home() {
 
     if (skillId === 'woodStaffStrike') {
       setWoodStaffStrikeCastNonce((current) => current + 1);
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    if (skillId === 'woodStaffDash') {
+      setWoodStaffDashCastNonce((current) => current + 1);
       setActiveSkillTargeting(null);
       return;
     }
@@ -4838,6 +4896,7 @@ export default function Home() {
           respawnRequestNonce={respawnRequestNonce}
           fireNovaCastNonce={fireNovaCastNonce}
           woodStaffStrikeCastNonce={woodStaffStrikeCastNonce}
+          woodStaffDashCastNonce={woodStaffDashCastNonce}
           useConsumableRequest={useConsumableRequest}
           skillEffectOverrides={skillEffectOverrides}
           skillBalanceConfig={skillBalanceConfig}
