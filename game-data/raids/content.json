@@ -8,8 +8,7 @@
         "columns": 4,
         "rows": 3,
         "fixedSlots": [
-          "wood_staff",
-          "fire_trail_gem"
+          "wood_staff"
         ],
         "lootPools": {
           "outer": [],
@@ -66,41 +65,40 @@
           "outer": [
             "healing_potion",
             "healing_potion",
+            "poison_potion",
+            "slow_potion",
+            "antidote",
             "healing_potion",
             "teleport_scroll",
-            "fire_trail_gem",
-            "cast_speed_gem",
-            "duration_gem",
-            "fire_spiral_gem",
-            "fire_orbit_gem"
+            "wood",
+            "stone",
+            "fire_essence",
+            "ice_essence",
+            "lightning_essence"
           ],
           "mid": [
             "healing_potion",
-            "healing_potion",
+            "poison_potion",
+            "slow_potion",
+            "speed_potion",
+            "fire_resistance_potion",
             "teleport_scroll",
-            "fire_shatter_gem",
-            "fire_return_gem",
-            "fire_bounce_gem",
-            "pierce_gem",
-            "homing_gem",
-            "area_gem",
-            "fire_spread_gem",
-            "fire_burst_gem",
-            "fire_fork_gem"
+            "wood",
+            "stone",
+            "fire_essence",
+            "lightning_essence",
+            "ice_essence",
+            "darkness_essence",
+            "void_essence",
+            "fire_robe"
           ],
           "core": [
+            "speed_potion",
+            "fire_resistance_potion",
             "wood_staff",
-            "fire_longshot_gem",
-            "fire_split_gem",
-            "fire_range_gem",
-            "chain_gem",
-            "knockback_gem",
-            "lifesteal_gem",
-            "execution_gem",
-            "critical_gem",
-            "fire_nova_impact_gem",
-            "fire_aftershock_gem",
-            "fire_clone_gem"
+            "fire_robe",
+            "fire_essence",
+            "void_essence"
           ]
         },
         "lootBands": [

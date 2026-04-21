@@ -24,7 +24,7 @@ import {
   INVENTORY_SIZE,
   identifyAllRaidUnidentifiedInventoryEntries,
   isGemItemId,
-  resolveEquipmentItemTierVariant,
+  normalizeItemProgressionState,
   serializeRaidUnidentifiedInventoryItem,
   type ItemId,
 } from "@mmorpg/shared";
@@ -97,10 +97,15 @@ const RAT_PACK_ROAM_INTERVAL_MS = 5000;
 const RAT_PACK_TARGET_REACHED_DISTANCE = TILE_SIZE * 0.75;
 const RAID_INITIAL_MOB_MIN_SPAWN_DISTANCE_PX = TILE_SIZE * 10;
 const RAID_CHEST_GEM_ROLL_CHANCE = 0.05;
-const RAID_CHEST_LOOT_REDUCTION_FACTOR = 10;
-const RAID_CHEST_ITEM_TIER_2_CHANCE = 0.14;
-const RAID_CHEST_ITEM_TIER_3_CHANCE = 0.03;
-const RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS = new Set(["healing_potion", "poison_potion"]);
+const RAID_CHEST_LOOT_REDUCTION_FACTOR = 2;
+const RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS = new Set([
+  "healing_potion",
+  "poison_potion",
+  "slow_potion",
+  "antidote",
+  "speed_potion",
+  "fire_resistance_potion",
+]);
 const RAID_RUNTIME_PERSIST_INTERVAL_MS = 1000;
 const ALLOW_GUEST_EQUIPMENT_SYNC = process.env.NODE_ENV !== "production";
 
@@ -337,6 +342,8 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       } else {
         this.applyProfileToPlayer(player, message, {
           allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
+          allowVitalsSync: false,
+          allowStatsSync: false,
         });
         if (
           applyRoomZeroHealthState(player, {
@@ -349,6 +356,15 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
           this.statusEffects.deletePlayerEffects(player.id);
         }
       }
+
+      const weaponProgression = normalizeItemProgressionState(
+        player.weaponItem,
+        message?.equipmentItemProgression?.weapon,
+      );
+      this.setPlayerEquipmentItemProgression(
+        client.sessionId,
+        weaponProgression ? { weapon: weaponProgression } : {},
+      );
 
     });
 
@@ -384,11 +400,12 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.publishPlayerProfileSnapshot({
         sessionId: client.sessionId,
         equipment: payload.equipment ?? createEquipmentStateSnapshot({}),
+        equipmentItemProgression: this.getPlayerEquipmentItemProgression(client.sessionId),
         inventory: payload.inventory ?? [],
         source: "raid",
         force: true,
       });
-      this.send(client, "raidExited", {
+      client.send("raidExited", {
         raidRunId: this.state.raidRunId,
         exitId: normalizedMessage.exitId,
         reason: "extracted",
@@ -522,6 +539,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     const verified = resolveVerifiedRoomAuthResult(authResult);
     if (verified) {
       this.verifiedPlayers.set(client.sessionId, verified);
+      this.setPlayerEquipmentItemProgression(client.sessionId, verified.equipmentItemProgression);
     }
 
     this.clearDisposeTimeout();
@@ -583,6 +601,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         this.offlineExpiresAt,
         this.consumableCooldownEndsAt,
         this.playerLatencyMs,
+        this.playerEquipmentItemProgression,
         this.verifiedPlayers,
       );
       return;
@@ -979,12 +998,6 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       ) {
         itemId = nonGemItemPool[Math.floor(random() * nonGemItemPool.length)] ?? itemId;
       }
-      const rarityRoll = random();
-      if (rarityRoll < RAID_CHEST_ITEM_TIER_3_CHANCE) {
-        itemId = resolveEquipmentItemTierVariant(itemId, 3) ?? itemId;
-      } else if (rarityRoll < RAID_CHEST_ITEM_TIER_3_CHANCE + RAID_CHEST_ITEM_TIER_2_CHANCE) {
-        itemId = resolveEquipmentItemTierVariant(itemId, 2) ?? itemId;
-      }
       usedItems.add(itemId);
       const resolvedItemId = itemId as ItemId;
       slots[slotIndex] = RAID_UNIDENTIFIED_CONSUMABLE_ITEM_IDS.has(resolvedItemId)
@@ -1102,6 +1115,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     this.offlineExpiresAt.delete(playerId);
     this.statusEffects.deletePlayerEffects(playerId);
     this.consumableCooldownEndsAt.delete(playerId);
+    this.clearPlayerEquipmentItemProgression(playerId);
     this.state.players.delete(playerId);
   }
 
@@ -1177,6 +1191,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     this.offlineExpiresAt.delete(player.id);
     this.statusEffects.deletePlayerEffects(player.id);
     this.consumableCooldownEndsAt.delete(player.id);
+    this.clearPlayerEquipmentItemProgression(player.id);
     this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
 
     return {
@@ -1265,6 +1280,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       this.skillCastSystem.clearPlayer(previousSessionId);
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
       moveRoomMapValue(this.playerLatencyMs, previousSessionId, client.sessionId);
+      moveRoomMapValue(this.playerEquipmentItemProgression, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
       if (verified) {
         this.verifiedPlayers.set(client.sessionId, verified);
@@ -1325,6 +1341,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         this.pendingMovement,
         this.consumableCooldownEndsAt,
         this.playerLatencyMs,
+        this.playerEquipmentItemProgression,
         this.verifiedPlayers,
       );
       this.skillCastSystem.clearPlayer(sessionId);
@@ -1356,11 +1373,17 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   private applyProfileToPlayer(
     player: RaidPlayerState,
     profile: RaidProfileMessage | RaidRoomJoinOptions,
-    options: { allowEquipmentSync?: boolean } = {},
+    options: {
+      allowEquipmentSync?: boolean;
+      allowVitalsSync?: boolean;
+      allowStatsSync?: boolean;
+    } = {},
   ) {
     applyRoomProfilePatch(player, profile, {
       defaultName: "Raider",
       allowEquipmentSync: options.allowEquipmentSync,
+      allowVitalsSync: options.allowVitalsSync,
+      allowStatsSync: options.allowStatsSync,
       defaultWeaponItem: "wood_staff",
     });
     replaceRoomStringSlots(

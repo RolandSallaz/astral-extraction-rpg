@@ -14,7 +14,7 @@ export interface WoodStaffDashContext {
   profile: RoomGameplayProfile;
   roomPlayers: MapSchema<BasePlayerState>;
   queryNearbyMobs(x: number, y: number, radius: number): Iterable<MobState>;
-  canTeleportTo(x: number, y: number, playerId: string): boolean;
+  canDashMoveTo(x: number, y: number, playerId: string): boolean;
   applyDamageToPlayer(player: BasePlayerState, amount: number, damageType: DamageType): number;
   handlePlayerKilled(player: BasePlayerState): void;
   handleMobDeath(mob: MobState): void;
@@ -46,7 +46,7 @@ export function performWoodStaffDash(
     const travelled = Math.min(maxDistance, step * stepDistance);
     const candidateX = player.x + directionX * travelled;
     const candidateY = player.y + directionY * travelled;
-    if (!ctx.canTeleportTo(candidateX, candidateY, player.id)) {
+    if (!ctx.canDashMoveTo(candidateX, candidateY, player.id)) {
       break;
     }
     destinationX = candidateX;
@@ -59,7 +59,7 @@ export function performWoodStaffDash(
     const collisionY = player.y + (destinationY - player.y) * target.t;
     destinationX = collisionX;
     destinationY = collisionY;
-    applyWoodStaffDashDamage(ctx, ownerId, player, target);
+    applyWoodStaffDashDamage(ctx, ownerId, player, target, directionX, directionY);
   }
 
   player.x = destinationX;
@@ -90,8 +90,8 @@ function findFirstDashTarget(
       destinationY,
       mob.x,
       mob.y + p.meleeStrikeMobCenterOffsetY,
-      p.mobHitRadius,
-      p.mobHitRadius,
+      p.mobHitRadius + p.playerHitRadius,
+      p.mobHitRadius + p.playerHitRadius,
     );
     if (collisionT === null) {
       continue;
@@ -112,8 +112,8 @@ function findFirstDashTarget(
       destinationY,
       candidate.x,
       candidate.y,
-      p.playerHitRadius,
-      p.playerHitRadius,
+      p.playerHitRadius * 2,
+      p.playerHitRadius * 2,
     );
     if (collisionT === null) {
       continue;
@@ -131,6 +131,8 @@ function applyWoodStaffDashDamage(
   ownerId: string,
   player: BasePlayerState,
   target: WoodStaffDashTarget,
+  directionX: number,
+  directionY: number,
 ): void {
   const baseDamage = Math.max(1, ctx.profile.woodStaffDashDamage);
   const strengthBonus = Math.max(0, player.strength - 1) * 2;
@@ -141,6 +143,7 @@ function applyWoodStaffDashDamage(
     ctx.onCombatLog(`${player.name} dashes into ${target.entity.name} for ${resolvedDamage}.`);
     if (resolvedDamage > 0) {
       ctx.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${resolvedDamage}`, "#ffd089");
+      pushDashTarget(ctx, target.entity, directionX, directionY);
     }
     if (target.entity.health <= 0) {
       ctx.handlePlayerKilled(target.entity);
@@ -153,9 +156,41 @@ function applyWoodStaffDashDamage(
   ctx.onCombatLog(`${player.name} dashes into ${target.entity.name} for ${damage}.`);
   if (damage > 0) {
     ctx.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${damage}`, "#ffd089");
+    pushDashTarget(ctx, target.entity, directionX, directionY);
   }
   if (target.entity.health <= 0) {
     ctx.handleMobDeath(target.entity);
     ctx.awardExperience(ownerId, target.entity.experienceReward);
+  }
+}
+
+function pushDashTarget(
+  ctx: WoodStaffDashContext,
+  target: BasePlayerState | MobState,
+  directionX: number,
+  directionY: number,
+): void {
+  const distance = ctx.profile.tileSize * 0.75;
+  const stepDistance = Math.max(4, ctx.profile.tileSize / 4);
+  const steps = Math.max(1, Math.ceil(distance / stepDistance));
+  let nextX = target.x;
+  let nextY = target.y;
+
+  for (let step = 1; step <= steps; step += 1) {
+    const travelled = Math.min(distance, step * stepDistance);
+    const candidateX = target.x + directionX * travelled;
+    const candidateY = target.y + directionY * travelled;
+    if (!ctx.canDashMoveTo(candidateX, candidateY, target.id)) {
+      break;
+    }
+    nextX = candidateX;
+    nextY = candidateY;
+  }
+
+  target.x = nextX;
+  target.y = nextY;
+  if ("targetX" in target) {
+    target.targetX = nextX;
+    target.targetY = nextY;
   }
 }

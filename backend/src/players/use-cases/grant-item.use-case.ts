@@ -59,6 +59,7 @@ export class GrantItemUseCase {
       await this.playerInventoryService.syncPlayerItems(
         targetPlayer.id,
         this.playerSerializer.buildEquipmentState(targetPlayer),
+        this.playerSerializer.buildEquipmentItemProgressionState(targetPlayer),
         nextInventory,
       );
 

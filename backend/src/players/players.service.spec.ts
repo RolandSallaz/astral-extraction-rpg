@@ -25,15 +25,15 @@ describe('Player inventory and serialization helpers', () => {
     };
   }
 
-  it('serializes and parses multi-socket equipment entries', () => {
-    const serialized = serializeInventoryItem('wood_staff_t2', 1, ['fire_trail_gem', 'critical_gem']);
+  it('ignores socketed gems while gems are disabled', () => {
+    const serialized = serializeInventoryItem('wood_staff', 1, ['fire_trail_gem', 'critical_gem']);
     const parsed = parseInventoryItem(serialized);
 
-    expect(serialized).toBe('wood_staff_t2@@fire_trail_gem,critical_gem');
+    expect(serialized).toBe('wood_staff');
     expect(parsed).toEqual(expect.objectContaining({
-      itemId: 'wood_staff_t2',
+      itemId: 'wood_staff',
       quantity: 1,
-      socketedGemCodes: ['fire_trail_gem', 'critical_gem'],
+      socketedGemCodes: [],
     }));
   });
 
@@ -42,11 +42,11 @@ describe('Player inventory and serialization helpers', () => {
 
     expect(parsed).toEqual(expect.objectContaining({
       itemId: 'wood_staff',
-      socketedGemCodes: ['fire_return_gem'],
+      socketedGemCodes: [],
     }));
   });
 
-  it('builds equipment and inventory state including socketed weapon gems', () => {
+  it('builds equipment and inventory state without disabled socketed weapon gems', () => {
     const service = new PlayerSerializerService();
     const player = {
       id: 'player-1',
@@ -90,13 +90,11 @@ describe('Player inventory and serialization helpers', () => {
 
     expect(service.buildEquipmentState(player as any)).toEqual({
       weapon: 'wood_staff',
-      'weapon-gem-1': 'fire_trail_gem',
-      'weapon-gem-2': 'critical_gem',
     });
-    expect(service.buildInventoryState(player as any)[3]).toBe('wood_staff@@fire_return_gem');
+    expect(service.buildInventoryState(player as any)[3]).toBe('wood_staff');
   });
 
-  it('syncs weapon and inventory socket children into separate player items', async () => {
+  it('does not sync disabled socket children into separate player items', async () => {
     const { service, playerItemsRepository, itemsService } = createInventoryService();
     const savedBaseItems = [
       { id: 'weapon-item', equippedSlot: 'weapon', inventorySlot: null },
@@ -105,9 +103,6 @@ describe('Player inventory and serialization helpers', () => {
 
     itemsService.findByCodes.mockResolvedValue([
       { id: 'wood_staff', stackable: false, maxStack: 1 },
-      { id: 'fire_trail_gem', stackable: false, maxStack: 1 },
-      { id: 'critical_gem', stackable: false, maxStack: 1 },
-      { id: 'fire_return_gem', stackable: false, maxStack: 1 },
     ]);
     playerItemsRepository.save
       .mockResolvedValueOnce(savedBaseItems)
@@ -120,19 +115,11 @@ describe('Player inventory and serialization helpers', () => {
         'weapon-gem-1': 'fire_trail_gem',
         'weapon-gem-2': 'critical_gem',
       },
+      {},
       ['wood_staff@@fire_return_gem', null],
     );
 
     expect(playerItemsRepository.delete).toHaveBeenCalledWith({ playerId: 'player-1' });
-    expect(playerItemsRepository.save).toHaveBeenCalledTimes(2);
-
-    const socketChildren = playerItemsRepository.save.mock.calls[1][0];
-    expect(socketChildren).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ parentItemId: 'weapon-item', socketIndex: 0, itemCode: 'fire_trail_gem' }),
-        expect.objectContaining({ parentItemId: 'weapon-item', socketIndex: 1, itemCode: 'critical_gem' }),
-        expect.objectContaining({ parentItemId: 'inventory-staff', socketIndex: 0, itemCode: 'fire_return_gem' }),
-      ]),
-    );
+    expect(playerItemsRepository.save).toHaveBeenCalledTimes(1);
   });
 });

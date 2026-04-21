@@ -197,6 +197,18 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
     queryNearbyMobs: (x, y, radius) => bindings.queryNearbyMobs(x, y, radius),
     getPlayerPositionAt: (playerId, at) => bindings.getPlayerPositionAt(playerId, at),
     applyDamageToPlayer: (player, amount, damageType) => bindings.applyDamageToPlayer(player, amount, damageType),
+    canPushTargetTo: (x, y) => {
+      const profile = bindings.getProfile();
+      const tileX = Math.floor(x / profile.tileSize);
+      const tileY = Math.floor(y / profile.tileSize);
+      return (
+        x >= profile.tileSize / 2 &&
+        y >= profile.tileSize / 2 &&
+        x <= bindings.getMapWidthPx() - profile.tileSize / 2 &&
+        y <= bindings.getMapHeightPx() - profile.tileSize / 2 &&
+        !bindings.isBlockedTile(tileX, tileY)
+      );
+    },
     handlePlayerKilled: (player) => bindings.handlePlayerKilled(player),
     handleMobDeath: (mob) => bindings.handleMobDeath(mob),
     awardExperience: (playerId, amount) => bindings.awardExperience(playerId, amount),
@@ -208,7 +220,18 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
     profile: bindings.getProfile(),
     roomPlayers: bindings.getRoomPlayers(),
     queryNearbyMobs: (x, y, radius) => bindings.queryNearbyMobs(x, y, radius),
-    canTeleportTo: (x, y, playerId) => bindings.canTeleportTo(x, y, playerId),
+    canDashMoveTo: (x, y) => {
+      const profile = bindings.getProfile();
+      const tileX = Math.floor(x / profile.tileSize);
+      const tileY = Math.floor(y / profile.tileSize);
+      return (
+        x >= profile.tileSize / 2 &&
+        y >= profile.tileSize / 2 &&
+        x <= bindings.getMapWidthPx() - profile.tileSize / 2 &&
+        y <= bindings.getMapHeightPx() - profile.tileSize / 2 &&
+        !bindings.isBlockedTile(tileX, tileY)
+      );
+    },
     applyDamageToPlayer: (player, amount, damageType) => bindings.applyDamageToPlayer(player, amount, damageType),
     handlePlayerKilled: (player) => bindings.handlePlayerKilled(player),
     handleMobDeath: (mob) => bindings.handleMobDeath(mob),
@@ -294,6 +317,7 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
     now,
     lagCompensatedAt: lagCompensation.at,
     lagCompensationEnabled: lagCompensation.enabled,
+    weaponProgression: null,
     getPlayerCastTimeMs: (candidate) => bindings.getPlayerCastTimeMs(candidate),
     clampTargetToCastRange: (candidate, originX, originY, targetX, targetY) =>
       clampTargetToCastRangeRuntime(bindings.getProfile(), candidate, originX, originY, targetX, targetY),

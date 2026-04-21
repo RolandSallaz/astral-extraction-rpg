@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import {
   canonicalizeItemId,
+  GEMS_ENABLED,
   INVENTORY_SIZE,
+  normalizeItemProgressionState,
   serializeInventoryItem,
 } from '@mmorpg/shared';
 import type { CharacterProfile } from '@mmorpg/shared/player/contracts';
@@ -20,6 +22,7 @@ export class PlayerSerializerService {
       character: {
         equipment: this.buildEquipmentState(player),
         inventory: this.buildInventoryState(player),
+        equipmentItemProgression: this.buildEquipmentItemProgressionState(player),
         gold: player.gold,
         position: player.position,
         health: player.health,
@@ -52,7 +55,7 @@ export class PlayerSerializerService {
 
       equipment[equippedSlot] = canonicalItemCode as CharacterProfile['equipment'][typeof equippedSlot];
 
-      if (item.socketedItems?.length) {
+      if (GEMS_ENABLED && item.socketedItems?.length) {
         const socketedItems = [...(item.socketedItems ?? [])]
           .filter((socketedItem) => socketedItem.socketIndex !== null && socketedItem.socketIndex !== undefined)
           .sort((left, right) => (left.socketIndex ?? 0) - (right.socketIndex ?? 0));
@@ -87,11 +90,61 @@ export class PlayerSerializerService {
           .filter((socketedItem) => socketedItem.socketIndex !== null && socketedItem.socketIndex !== undefined)
           .sort((left, right) => (left.socketIndex ?? 0) - (right.socketIndex ?? 0))
           .map((socketedItem) => socketedItem.itemCode);
-        inventory[item.inventorySlot] = serializeInventoryItem(canonicalItemCode, item.quantity, socketedCodes);
+        inventory[item.inventorySlot] = serializeInventoryItem(canonicalItemCode, item.quantity, socketedCodes, {
+          itemProgression: normalizeItemProgressionState(canonicalItemCode, {
+            level: (item.progressionLevel ?? 1) as 1 | 2 | 3 | 4 | 5,
+            selectedUpgradeIds: (item.selectedUpgradeIds ?? []) as Array<
+              | 'wood_staff_range_2'
+              | 'wood_staff_focus_2'
+              | 'wood_staff_cooldown_3'
+              | 'wood_staff_channel_3'
+              | 'wood_staff_knockback_4'
+              | 'wood_staff_force_4'
+              | 'wood_staff_dash_5'
+              | 'wood_staff_nova_5'
+            >,
+          }),
+        });
       }
     }
 
     return inventory;
+  }
+
+  buildEquipmentItemProgressionState(player: PlayerEntity): CharacterProfile['equipmentItemProgression'] {
+    const progression: CharacterProfile['equipmentItemProgression'] = {};
+
+    for (const item of player.items ?? []) {
+      if (!item.equippedSlot || item.parentItemId) {
+        continue;
+      }
+
+      const canonicalItemCode = canonicalizeItemId(item.itemCode);
+      if (!canonicalItemCode) {
+        continue;
+      }
+
+      const normalized = normalizeItemProgressionState(canonicalItemCode, {
+        level: (item.progressionLevel ?? 1) as 1 | 2 | 3 | 4 | 5,
+        selectedUpgradeIds: (item.selectedUpgradeIds ?? []) as Array<
+          | 'wood_staff_range_2'
+          | 'wood_staff_focus_2'
+          | 'wood_staff_cooldown_3'
+          | 'wood_staff_channel_3'
+          | 'wood_staff_knockback_4'
+          | 'wood_staff_force_4'
+          | 'wood_staff_dash_5'
+          | 'wood_staff_nova_5'
+        >,
+      });
+      if (!normalized) {
+        continue;
+      }
+
+      progression[item.equippedSlot as keyof CharacterProfile['equipmentItemProgression']] = normalized;
+    }
+
+    return progression;
   }
 
   isEquipmentGemSlot(slot: string) {

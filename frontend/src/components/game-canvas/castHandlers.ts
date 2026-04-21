@@ -1,5 +1,6 @@
 'use client';
 
+import { getItemProgressionBonuses } from '@mmorpg/shared';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { MouseActionSlotKey, MouseSkillBindings, SkillId } from '@/components/game-hud/types';
 import type { CharacterVisual } from '@/components/game-canvas/gameCanvasVisualTypes';
@@ -10,6 +11,7 @@ import {
   getCharacterCastTimeMs,
   hasWoodStaffEquipped,
 } from '@/components/game-canvas/castHelpers';
+import type { EquipmentItemProgressionState } from '@/lib/playerProfile';
 import {
   createTimedCastSkillMessage,
   readStoredMouseSkillBindings,
@@ -33,6 +35,7 @@ export type CastContext = {
   localSessionId: string | null;
   characters: Map<string, CharacterVisual>;
   equipment: EquipmentState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   estimatedOneWayLatencyMs: number;
   castHelpersConfig: CastHelpersConfig;
   onFireballCast?: ((target: { x: number; y: number }) => void) | null;
@@ -105,6 +108,7 @@ export function castFireField(ctx: CastContext, targetX: number, targetY: number
 
 export function castWoodStaffDash(ctx: CastContext, targetX: number, targetY: number): void {
   if (!ctx.room || !hasWoodStaffEquipped(ctx.equipment, ctx.castHelpersConfig)) return;
+  if (!getItemProgressionBonuses(ctx.equipment.weapon, ctx.equipmentItemProgression.weapon).grantsWoodStaffDash) return;
   const localCharacter = ctx.localSessionId ? ctx.characters.get(ctx.localSessionId) : undefined;
   const now = Date.now();
   if ((ctx.skillCooldowns.woodStaffDash ?? 0) > now) return;

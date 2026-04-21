@@ -7,6 +7,7 @@ export {
   type CharacterProgression,
   type CharacterResources,
   type CharacterTimestamps,
+  type EquipmentItemProgressionState,
   type EquipmentState,
   type InventoryState,
 } from '@mmorpg/shared/player/contracts';

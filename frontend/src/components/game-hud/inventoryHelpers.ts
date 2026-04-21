@@ -1,6 +1,7 @@
 import { isSameEquipmentItemFamily } from '@mmorpg/shared';
 import {
   EQUIPMENT_ITEMS,
+  GEMS_ENABLED,
   getInventoryItemId,
   type BaseEquipmentSlot,
   type EquipmentSlot,
@@ -59,6 +60,10 @@ export function canSocketGemIntoSlot(
   slot: BaseEquipmentSlot,
   equipment: EquipmentState,
 ) {
+  if (!GEMS_ENABLED) {
+    return false;
+  }
+
   const equippedItem = getEquipmentItemDefinition(slot, equipment);
   if (!equippedItem) {
     return false;

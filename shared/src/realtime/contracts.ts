@@ -2,8 +2,9 @@ import { z } from "zod";
 import type { MobBalanceConfig } from "../balance/mobBalance";
 import type { SkillBalanceConfig } from "../balance/skillBalance";
 import { canonicalizeItemId } from "../items/catalog";
+import type { ItemProgressionState } from "../items/itemProgression";
 import type { MobKind } from "../mobs/catalog";
-import type { EquipmentState, InventoryState } from "../player/contracts";
+import type { EquipmentItemProgressionState, EquipmentState, InventoryState } from "../player/contracts";
 import type { QuestLog } from "../quests/core";
 import type { RaidRuntimeState } from "../raids/runtime";
 
@@ -124,6 +125,8 @@ export type BaseProfileMessage = EquipmentSyncFields & {
   agility?: number;
   intellect?: number;
   inventory?: string[];
+  equipmentItemProgression?: EquipmentItemProgressionState;
+  weaponItemProgression?: ItemProgressionState | null;
   gold?: number;
   quests?: QuestLog;
 };

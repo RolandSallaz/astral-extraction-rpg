@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, type MutableRefObject, type RefObject } from 'react';
-import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { EquipmentItemProgressionState, EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { QuestLog } from '@mmorpg/shared/quests/core';
 import type {
   AdminUpdateMobBalanceMessage,
@@ -35,6 +35,7 @@ type PlayerProfileSnapshot = {
   playerQuests: QuestLog;
   playerInventory: Array<string | null>;
   playerEquipment: EquipmentState;
+  playerEquipmentItemProgression: EquipmentItemProgressionState;
 };
 
 type UseConsumableRequest = {
@@ -124,6 +125,7 @@ export function useRoomOutboundSync({
     createWorldProfileMessage,
     playerProfile.playerAgility,
     playerProfile.playerEquipment,
+    playerProfile.playerEquipmentItemProgression,
     playerProfile.playerExperience,
     playerProfile.playerHealth,
     playerProfile.playerIntellect,

@@ -34,6 +34,12 @@ export class PlayerItemEntity {
   quantity: number;
 
   @Column({ type: 'int', nullable: true })
+  progressionLevel: number | null;
+
+  @Column({ type: 'simple-json', nullable: true })
+  selectedUpgradeIds: string[] | null;
+
+  @Column({ type: 'int', nullable: true })
   inventorySlot: number | null;
 
   @Column({ type: 'varchar', nullable: true })

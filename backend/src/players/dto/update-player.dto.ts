@@ -12,6 +12,10 @@ export class UpdatePlayerDto {
   inventory?: CharacterProfile['inventory'];
 
   @IsOptional()
+  @IsObject()
+  equipmentItemProgression?: CharacterProfile['equipmentItemProgression'];
+
+  @IsOptional()
   @IsNumber()
   gold?: number;
 

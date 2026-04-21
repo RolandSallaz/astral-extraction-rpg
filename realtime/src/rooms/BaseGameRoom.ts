@@ -5,8 +5,11 @@ import {
   createDefaultItemFireResistanceMap,
   DEFAULT_MOB_BALANCE_CONFIG,
   DEFAULT_SKILL_BALANCE_CONFIG,
+  getItemProgressionBonuses,
   type EquipmentState,
   type InventoryState,
+  type ItemProgressionState,
+  type EquipmentItemProgressionState,
   type MobBalanceSection,
   type QuestLog,
   type SkillBalanceConfig,
@@ -217,6 +220,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   });
   protected readonly kafkaPublisher = getRealtimeServices().kafkaPublisher;
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
+  protected readonly playerEquipmentItemProgression = new Map<string, EquipmentItemProgressionState>();
   protected readonly skillHandlers = createSkillHandlers();
   private readonly pendingPublishes = new Set<Promise<void>>();
   private readonly lastPersistedProfileSnapshots = new Map<string, string>();
@@ -390,11 +394,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
 
-    const skillId = normalizedMessage.skillId ?? "";
-    const player = this.getPlayer(sessionId);
-    if (!player || player.dead || !canCastSkill(skillId, player.weaponItem)) {
-      return;
-    }
+      const skillId = normalizedMessage.skillId ?? "";
+      const player = this.getPlayer(sessionId);
+      if (!player || player.dead || !canCastSkill(skillId, player.weaponItem)) {
+        return;
+      }
 
     const now = Date.now();
     if (player.castEndsAt > now) {
@@ -410,8 +414,26 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
 
-    const lagCompensation = resolveLagCompensatedCastTimingRuntime(this.profile, normalizedMessage, now);
-    const ctx = this.runtime.createSkillCastContext(sessionId, player, now, lagCompensation);
+      const lagCompensation = resolveLagCompensatedCastTimingRuntime(this.profile, normalizedMessage, now);
+      const weaponProgression = this.getPlayerWeaponItemProgression(sessionId);
+      const ctx = {
+        ...this.runtime.createSkillCastContext(sessionId, player, now, lagCompensation),
+        weaponProgression,
+        performWoodStaffStrike: (candidate: BasePlayerState, targetX: number, targetY: number) =>
+          this.performWoodStaffStrike(
+            sessionId,
+            candidate,
+            targetX,
+            targetY,
+            lagCompensation.at,
+            lagCompensation.enabled,
+            weaponProgression,
+          ),
+      };
+
+      if (skillId === "woodStaffDash" && !getItemProgressionBonuses(player.weaponItem, weaponProgression).grantsWoodStaffDash) {
+        return;
+      }
 
     let targetX = player.x;
     let targetY = player.y;
@@ -491,6 +513,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected publishPlayerProfileSnapshot(options: {
     sessionId: string;
     equipment: EquipmentState;
+    equipmentItemProgression?: EquipmentItemProgressionState;
     inventory: InventoryState;
     gold?: number;
     quests?: QuestLog;
@@ -504,6 +527,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
     const snapshotKey = JSON.stringify({
       equipment: options.equipment,
+      equipmentItemProgression: options.equipmentItemProgression ?? {},
       inventory: options.inventory,
       gold: options.gold,
       quests: options.quests,
@@ -517,6 +541,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       this.kafkaPublisher.publish("player.profile.updated", {
         playerId: verified.id,
         equipment: options.equipment,
+        equipmentItemProgression: options.equipmentItemProgression,
         inventory: options.inventory,
         gold: options.gold,
         quests: options.quests,
@@ -553,6 +578,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     targetY: number,
     lagCompensatedAt = Date.now(),
     lagCompensationEnabled = false,
+    weaponProgression?: ItemProgressionState | null,
   ) {
     performWoodStaffStrikeRuntime(
       this.runtime.woodStaffStrikeContext(),
@@ -562,6 +588,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       targetY,
       lagCompensatedAt,
       lagCompensationEnabled,
+      weaponProgression,
     );
   }
 
@@ -916,5 +943,26 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
 
   protected getPlayer(sessionId: string): TPlayer | undefined {
     return this.roomPlayers.get(sessionId);
+  }
+
+  protected getPlayerEquipmentItemProgression(sessionId: string): EquipmentItemProgressionState {
+    return this.playerEquipmentItemProgression.get(sessionId) ?? {};
+  }
+
+  protected getPlayerWeaponItemProgression(sessionId: string): ItemProgressionState | null {
+    return this.getPlayerEquipmentItemProgression(sessionId).weapon ?? null;
+  }
+
+  protected setPlayerEquipmentItemProgression(sessionId: string, progression: EquipmentItemProgressionState | null | undefined) {
+    if (!progression || Object.keys(progression).length === 0) {
+      this.playerEquipmentItemProgression.delete(sessionId);
+      return;
+    }
+
+    this.playerEquipmentItemProgression.set(sessionId, progression);
+  }
+
+  protected clearPlayerEquipmentItemProgression(sessionId: string) {
+    this.playerEquipmentItemProgression.delete(sessionId);
   }
 }

@@ -1,4 +1,5 @@
 import type { EquipmentState } from "@mmorpg/shared/player/contracts";
+import { GEMS_ENABLED } from "@mmorpg/shared/items/catalog";
 
 export type CastHelpersConfig = {
   fireballBaseCastTimeMs: number;
@@ -18,6 +19,10 @@ export function getCharacterCastTimeMs(
   config: CastHelpersConfig,
 ) {
   let castTimeMs = config.fireballBaseCastTimeMs;
+
+  if (!GEMS_ENABLED) {
+    return Math.round(castTimeMs);
+  }
 
   if (
     equipment["weapon-gem-1"] === FIRE_TRAIL_GEM_ID ||
@@ -47,6 +52,10 @@ export function getCharacterCastTimeMs(
 }
 
 export function getCharacterCastRange(equipment: EquipmentState, config: CastHelpersConfig) {
+  if (!GEMS_ENABLED) {
+    return config.staffCastRange;
+  }
+
   if (
     equipment["weapon-gem-1"] === config.fireRangeGemId ||
     equipment["weapon-gem-2"] === config.fireRangeGemId ||

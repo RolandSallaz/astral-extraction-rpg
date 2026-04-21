@@ -1,9 +1,9 @@
-import { isSameEquipmentItemFamily } from '@mmorpg/shared';
+import { getItemProgressionBonuses, isSameEquipmentItemFamily } from '@mmorpg/shared';
 import {
   EQUIPMENT_ITEMS,
   type ConsumableItemId,
 } from '@/lib/items/equipmentItems';
-import type { EquipmentState } from '@/lib/playerProfile';
+import type { EquipmentItemProgressionState, EquipmentState } from '@/lib/playerProfile';
 import type {
   ActionBarBinding,
   ActionSlotKey,
@@ -35,12 +35,17 @@ export const ACTION_BAR_SLOTS: Array<{ key: ActionSlotKey; code?: string }> = [
   ...KEYBOARD_ACTION_SLOTS,
 ];
 
-export function getAvailableSkills(equipment: EquipmentState): SkillId[] {
+export function getAvailableSkills(
+  equipment: EquipmentState,
+  equipmentItemProgression: EquipmentItemProgressionState = {},
+): SkillId[] {
   const availableSkills: SkillId[] = [];
 
   if (isSameEquipmentItemFamily(equipment.weapon, 'wood_staff')) {
     availableSkills.push('woodStaffStrike');
-    availableSkills.push('woodStaffDash');
+    if (getItemProgressionBonuses(equipment.weapon, equipmentItemProgression.weapon).grantsWoodStaffDash) {
+      availableSkills.push('woodStaffDash');
+    }
   }
 
   return availableSkills;
@@ -128,8 +133,9 @@ export function getMouseSkillBindingsFromActionBar(
 export function getResolvedActionBarBindings(
   bindings: Partial<Record<ActionSlotKey, ActionBarBinding | null>>,
   equipment: EquipmentState,
+  equipmentItemProgression: EquipmentItemProgressionState = {},
 ) {
-  const availableSkills = getAvailableSkills(equipment);
+  const availableSkills = getAvailableSkills(equipment, equipmentItemProgression);
   const merged: Partial<Record<ActionSlotKey, ActionBarBinding | null>> = {
     ...getDefaultActionBarBindings(),
     ...bindings,

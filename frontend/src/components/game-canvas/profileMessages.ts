@@ -1,4 +1,5 @@
-import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { EquipmentItemProgressionState, EquipmentState } from '@mmorpg/shared/player/contracts';
+import { GEMS_ENABLED } from '@mmorpg/shared/items/catalog';
 import type { QuestLog } from '@mmorpg/shared/quests/core';
 import type {
   BaseProfileMessage,
@@ -21,6 +22,7 @@ export type ProfileSnapshot = {
   playerQuests: QuestLog;
   playerInventory: Array<string | null>;
   playerEquipment: EquipmentState;
+  playerEquipmentItemProgression: EquipmentItemProgressionState;
 };
 
 export function createEquipmentSyncFields(equipment: EquipmentState): EquipmentSyncFields {
@@ -28,15 +30,15 @@ export function createEquipmentSyncFields(equipment: EquipmentState): EquipmentS
     bodyItem: equipment.body ?? '',
     headItem: equipment.head ?? '',
     weaponItem: equipment.weapon ?? '',
-    headGemItem1: equipment['head-gem-1'] ?? '',
-    headGemItem2: equipment['head-gem-2'] ?? '',
-    headGemItem3: equipment['head-gem-3'] ?? '',
-    bodyGemItem1: equipment['body-gem-1'] ?? '',
-    bodyGemItem2: equipment['body-gem-2'] ?? '',
-    bodyGemItem3: equipment['body-gem-3'] ?? '',
-    weaponGemItem1: equipment['weapon-gem-1'] ?? '',
-    weaponGemItem2: equipment['weapon-gem-2'] ?? '',
-    weaponGemItem3: equipment['weapon-gem-3'] ?? '',
+    headGemItem1: GEMS_ENABLED ? equipment['head-gem-1'] ?? '' : '',
+    headGemItem2: GEMS_ENABLED ? equipment['head-gem-2'] ?? '' : '',
+    headGemItem3: GEMS_ENABLED ? equipment['head-gem-3'] ?? '' : '',
+    bodyGemItem1: GEMS_ENABLED ? equipment['body-gem-1'] ?? '' : '',
+    bodyGemItem2: GEMS_ENABLED ? equipment['body-gem-2'] ?? '' : '',
+    bodyGemItem3: GEMS_ENABLED ? equipment['body-gem-3'] ?? '' : '',
+    weaponGemItem1: GEMS_ENABLED ? equipment['weapon-gem-1'] ?? '' : '',
+    weaponGemItem2: GEMS_ENABLED ? equipment['weapon-gem-2'] ?? '' : '',
+    weaponGemItem3: GEMS_ENABLED ? equipment['weapon-gem-3'] ?? '' : '',
   };
 }
 
@@ -54,6 +56,8 @@ export function createBaseProfileMessage(profile: ProfileSnapshot): BaseProfileM
     gold: profile.playerGold,
     quests: profile.playerQuests,
     inventory: profile.playerInventory.map((itemId) => itemId ?? ''),
+    equipmentItemProgression: profile.playerEquipmentItemProgression,
+    weaponItemProgression: profile.playerEquipmentItemProgression.weapon ?? null,
     ...createEquipmentSyncFields(profile.playerEquipment),
   };
 }

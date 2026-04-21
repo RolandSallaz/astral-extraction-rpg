@@ -1,5 +1,7 @@
 import {
   EQUIPMENT_ITEMS,
+  GEMS_ENABLED,
+  type ItemProgressionState,
   type BaseEquipmentSlot,
   type EquipmentItemId,
   getBaseEquipmentSlot,
@@ -12,29 +14,14 @@ import type { EquipmentState } from '@/lib/playerProfile';
 import type { DragSource } from '@/components/game-hud/types';
 
 export type ItemTintOverrides = Partial<Record<string, string | null>>;
+export type ItemTierStyle = {
+  slotBackground: string;
+  slotBorder: string;
+  textColor: string;
+  badgeBackground: string;
+};
 
 export const MAX_ITEM_SOCKET_COUNT = 3;
-
-export const ITEM_TIER_STYLES = {
-  1: {
-    slotBackground: 'linear-gradient(180deg,rgba(92,92,92,0.34),rgba(38,38,38,0.52))',
-    slotBorder: '#9d9d9d',
-    textColor: '#d2d2d2',
-    badgeBackground: 'rgba(78,78,78,0.9)',
-  },
-  2: {
-    slotBackground: 'linear-gradient(180deg,rgba(67,121,210,0.3),rgba(19,44,94,0.56))',
-    slotBorder: '#6da8ff',
-    textColor: '#8cc4ff',
-    badgeBackground: 'rgba(32,72,148,0.9)',
-  },
-  3: {
-    slotBackground: 'linear-gradient(180deg,rgba(130,76,184,0.32),rgba(55,23,91,0.58))',
-    slotBorder: '#bc8cff',
-    textColor: '#d3a8ff',
-    badgeBackground: 'rgba(88,40,132,0.9)',
-  },
-} as const;
 
 export function getEquipmentItemDefinition(slot: BaseEquipmentSlot, equipment: EquipmentState) {
   const itemId = equipment[slot];
@@ -47,6 +34,10 @@ export function getEquipmentItemDefinition(slot: BaseEquipmentSlot, equipment: E
 }
 
 export function getEquipmentSocketSlotIds(slot: BaseEquipmentSlot, equipment: EquipmentState) {
+  if (!GEMS_ENABLED) {
+    return [];
+  }
+
   const item = getEquipmentItemDefinition(slot, equipment);
   return item ? getEquipmentGemSlotIds(slot, item.socketCount ?? 0) : [];
 }
@@ -79,6 +70,10 @@ export function getItemSocketGemIds(
   equipment: EquipmentState,
   source?: DragSource,
 ) {
+  if (!GEMS_ENABLED) {
+    return [];
+  }
+
   if (source?.type === 'equipment') {
     const baseSlot = getBaseEquipmentSlot(source.slot);
     return baseSlot ? getEquipmentSocketGemIds(baseSlot, equipment) : [];
@@ -97,19 +92,16 @@ export function getItemSocketColors(
   return getSocketColors(getItemSocketGemIds(itemValue, equipment, source), itemTintOverrides);
 }
 
-export function serializeSocketedEquipmentItem(itemId: string, gemIds: Array<string | null>) {
-  return serializeInventoryItem(itemId as EquipmentItemId, 1, gemIds);
+export function serializeSocketedEquipmentItem(
+  itemId: string,
+  gemIds: Array<string | null>,
+  itemProgression?: ItemProgressionState | null,
+) {
+  return serializeInventoryItem(itemId as EquipmentItemId, 1, GEMS_ENABLED ? gemIds : [], {
+    itemProgression,
+  });
 }
 
-export function getItemTierStyle(itemId: string | null | undefined) {
-  if (!itemId) {
-    return null;
-  }
-
-  const item = EQUIPMENT_ITEMS[itemId as keyof typeof EQUIPMENT_ITEMS];
-  if (!item || item.type !== 'equipment' || !item.tier) {
-    return null;
-  }
-
-  return ITEM_TIER_STYLES[item.tier];
+export function getItemTierStyle(_itemId: string | null | undefined): ItemTierStyle | null {
+  return null;
 }

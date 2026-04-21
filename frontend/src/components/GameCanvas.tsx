@@ -13,7 +13,7 @@ import {
   RAID_GAMEPLAY_PROFILE,
   WORLD_GAMEPLAY_PROFILE,
 } from '@mmorpg/shared/gameplay/profiles';
-import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { EquipmentItemProgressionState, EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { QuestLog } from '@mmorpg/shared/quests/core';
 import {
   DEFAULT_PLAYER_VISUALS,
@@ -359,6 +359,7 @@ const RAID_VISION_RADIUS_TILES = 6;
 
 export function GameCanvas({
   playerEquipment,
+  playerEquipmentItemProgression,
   playerInventory,
   playerName,
   playerPosition,
@@ -433,6 +434,7 @@ export function GameCanvas({
   locale = 'ru',
 }: {
   playerEquipment: PlayerEquipment;
+  playerEquipmentItemProgression: EquipmentItemProgressionState;
   playerInventory: Array<string | null>;
   playerName: string;
   playerPosition: { x: number; y: number };
@@ -618,9 +620,10 @@ export function GameCanvas({
   const pendingRespawnNonceRef = useRef(0);
   const lastSentRespawnNonceRef = useRef(0);
   const latestProfileRef = useRef({
-    playerName,
-    playerEquipment,
-    playerPosition,
+      playerName,
+      playerEquipment,
+      playerEquipmentItemProgression,
+      playerPosition,
     playerHealth,
     playerMaxHealth,
     playerLevel,
@@ -701,6 +704,7 @@ export function GameCanvas({
     latestProfileRef.current = {
       playerName,
       playerEquipment,
+      playerEquipmentItemProgression,
       playerPosition,
       playerHealth,
       playerMaxHealth,
@@ -715,8 +719,9 @@ export function GameCanvas({
       playerInventory,
     };
   }, [
-    playerEquipment,
-    playerExperience,
+      playerEquipment,
+      playerEquipmentItemProgression,
+      playerExperience,
     playerHealth,
     playerInventory,
     playerAgility,
@@ -774,6 +779,7 @@ export function GameCanvas({
         playerQuests,
         playerInventory,
         playerEquipment,
+        playerEquipmentItemProgression,
       },
       roomRef,
       skillBalanceConfig,
@@ -1569,8 +1575,9 @@ export function GameCanvas({
             skillCooldowns: skillCooldownsRef.current,
             localSessionId,
             characters,
-            equipment: latestProfileRef.current.playerEquipment,
-            estimatedOneWayLatencyMs: estimatedOneWayLatencyMsRef.current,
+              equipment: latestProfileRef.current.playerEquipment,
+              equipmentItemProgression: latestProfileRef.current.playerEquipmentItemProgression,
+              estimatedOneWayLatencyMs: estimatedOneWayLatencyMsRef.current,
             castHelpersConfig: CAST_HELPERS_CONFIG,
             onFireballCast: fireballCastRef.current,
             mouseSkillBindings: mouseSkillBindingsRef.current,
@@ -2200,7 +2207,7 @@ export function GameCanvas({
             });
           };
 
-          const latestProfileSnapshot: ProfileSnapshot = {
+            const latestProfileSnapshot: ProfileSnapshot = {
             playerName: latestProfileRef.current.playerName,
             playerRole: latestProfileRef.current.playerRole,
             playerPosition: latestProfileRef.current.playerPosition,
@@ -2212,10 +2219,11 @@ export function GameCanvas({
             playerAgility: latestProfileRef.current.playerAgility,
             playerIntellect: latestProfileRef.current.playerIntellect,
             playerGold: latestProfileRef.current.playerGold,
-            playerQuests: latestProfileRef.current.playerQuests,
-            playerInventory: latestProfileRef.current.playerInventory,
-            playerEquipment: latestProfileRef.current.playerEquipment,
-          };
+              playerQuests: latestProfileRef.current.playerQuests,
+              playerInventory: latestProfileRef.current.playerInventory,
+              playerEquipment: latestProfileRef.current.playerEquipment,
+              playerEquipmentItemProgression: latestProfileRef.current.playerEquipmentItemProgression,
+            };
           void (async () => {
             try {
               const sessionToken = sessionTokenRef.current ?? undefined;
@@ -2598,7 +2606,15 @@ export function GameCanvas({
                   character.targetY,
                 );
 
-                if (distanceToTarget > 64) {
+                const isFinishingLargeInterpolation =
+                  character.interpNextAt > this.time.now &&
+                  character.interpNextX === character.targetX &&
+                  character.interpNextY === character.targetY;
+                if (
+                  distanceToTarget > 64 &&
+                  character.currentCastingSkillId !== 'woodStaffDash' &&
+                  !isFinishingLargeInterpolation
+                ) {
                   character.container.setPosition(
                     character.targetX,
                     character.targetY,

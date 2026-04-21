@@ -1,5 +1,6 @@
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
+import type { ItemProgressionState } from "@mmorpg/shared";
 import type { ProjectileGemConfig } from "../runtime/fireballGems.js";
 import type { BurstSpawnRequest } from "../runtime/projectileSkills.js";
 
@@ -14,6 +15,7 @@ export interface SkillCastContext {
   readonly now: number;
   readonly lagCompensatedAt: number;
   readonly lagCompensationEnabled: boolean;
+  readonly weaponProgression: ItemProgressionState | null;
 
   getPlayerCastTimeMs(player: BasePlayerState): number;
   clampTargetToCastRange(

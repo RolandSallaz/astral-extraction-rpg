@@ -3,8 +3,27 @@
 import { HudWindow } from './ui/HudWindow';
 import { ItemIcon } from './ItemIcon';
 import { ITEM_DEFINITIONS } from '@/lib/items/equipmentItems';
+import type { ItemProgressionTier } from '@mmorpg/shared';
 
 export type WorkbenchTab = 'craft' | 'upgrade';
+export type WorkbenchUpgradeChoiceView = {
+  id: string;
+  level: ItemProgressionTier;
+  title: string;
+  description: string;
+  isPlaceholder?: boolean;
+  isAvailable: boolean;
+};
+
+export type WorkbenchUpgradeableWeaponView = {
+  key: string;
+  sourceLabel: string;
+  title: string;
+  subtitle: string;
+  level: number;
+  selectedUpgradeTitles: string[];
+  nextChoices: WorkbenchUpgradeChoiceView[];
+};
 
 type WorkbenchWindowProps = {
   isOpen: boolean;
@@ -18,6 +37,10 @@ type WorkbenchWindowProps = {
   status: string;
   onCraft: () => void;
   onCollect: () => void;
+  upgradeableWeapons: WorkbenchUpgradeableWeaponView[];
+  selectedUpgradeableWeaponKey: string | null;
+  onSelectUpgradeableWeapon: (weaponKey: string) => void;
+  onApplyUpgradeChoice: (choiceId: string) => void;
   onClose: () => void;
 };
 
@@ -33,6 +56,10 @@ export function WorkbenchWindow({
   status,
   onCraft,
   onCollect,
+  upgradeableWeapons,
+  selectedUpgradeableWeaponKey,
+  onSelectUpgradeableWeapon,
+  onApplyUpgradeChoice,
   onClose,
 }: WorkbenchWindowProps) {
   if (!isOpen) {
@@ -42,6 +69,9 @@ export function WorkbenchWindow({
   const craftButtonEnabled = hasPendingPickup || canCraft;
   const craftButtonLabel = hasPendingPickup ? 'Collect' : isCrafting ? 'Crafting...' : 'Craft';
   const craftButtonAction = hasPendingPickup ? onCollect : onCraft;
+  const selectedUpgradeableWeapon = selectedUpgradeableWeaponKey
+    ? upgradeableWeapons.find((weapon) => weapon.key === selectedUpgradeableWeaponKey) ?? null
+    : upgradeableWeapons[0] ?? null;
 
   return (
     <HudWindow
@@ -150,10 +180,104 @@ export function WorkbenchWindow({
             ) : null}
           </div>
         ) : (
-          <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-4">
-            <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Upgrade</div>
-            <div className="mt-3 text-sm text-[#d8ebc7]">
-              Upgrade recipes will appear here.
+          <div className="grid gap-4 md:grid-cols-[168px_minmax(0,1fr)]">
+            <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-3">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Weapons</div>
+              <div className="mt-3 space-y-2">
+                {upgradeableWeapons.length > 0 ? upgradeableWeapons.map((weapon) => {
+                  const isSelected = selectedUpgradeableWeapon?.key === weapon.key;
+                  return (
+                    <button
+                      key={weapon.key}
+                      type="button"
+                      onClick={() => onSelectUpgradeableWeapon(weapon.key)}
+                      className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                        isSelected
+                          ? 'border-[#d9efbd]/55 bg-[#d7f0b6] text-[#18310d]'
+                          : 'border-[#d9efbd]/18 bg-[#203b11]/45 text-[#d8ebc7] hover:bg-[#294816]/72'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold">{weapon.title}</div>
+                      <div className={`mt-1 text-[10px] uppercase tracking-[0.18em] ${isSelected ? 'text-[#35511e]' : 'text-[#9fbc7e]'}`}>
+                        {weapon.sourceLabel}
+                      </div>
+                      <div className={`mt-2 text-xs ${isSelected ? 'text-[#264116]' : 'text-[#cfe1ba]'}`}>
+                        Level {weapon.level}
+                      </div>
+                    </button>
+                  );
+                }) : (
+                  <div className="rounded-xl border border-[#d9efbd]/18 bg-[#203b11]/45 px-3 py-3 text-sm text-[#9fbc7e]">
+                    No upgradeable weapons found.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-[#89ad5d]/20 bg-[linear-gradient(180deg,rgba(39,64,23,0.72),rgba(23,38,14,0.78))] p-4">
+              <div className="text-[11px] uppercase tracking-[0.22em] text-[#bfd8a4]">Upgrade Tree</div>
+
+              {selectedUpgradeableWeapon ? (
+                <div className="mt-3 space-y-4">
+                  <div className="flex items-center gap-3 rounded-xl border border-[#d9efbd]/16 bg-[#203b11]/45 px-3 py-3">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-[#d9efbd]/20 bg-[#102108]/60">
+                      <ItemIcon item={ITEM_DEFINITIONS.wood_staff} className="h-8 w-8" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-[#f4ffe8]">{selectedUpgradeableWeapon.title}</div>
+                      <div className="mt-1 text-xs text-[#cfe1ba]">{selectedUpgradeableWeapon.subtitle}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-xl border border-[#d9efbd]/16 bg-[#203b11]/45 px-3 py-3">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">Current Level</div>
+                      <div className="mt-2 text-2xl font-semibold text-[#f4ffe8]">{selectedUpgradeableWeapon.level}</div>
+                    </div>
+                    <div className="rounded-xl border border-[#d9efbd]/16 bg-[#203b11]/45 px-3 py-3">
+                      <div className="text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">Chosen Upgrades</div>
+                      <div className="mt-2 text-sm text-[#d8ebc7]">
+                        {selectedUpgradeableWeapon.selectedUpgradeTitles.length > 0
+                          ? selectedUpgradeableWeapon.selectedUpgradeTitles.join(', ')
+                          : 'No upgrades selected yet.'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-[#d9efbd]/16 bg-[#203b11]/45 px-3 py-3">
+                    <div className="text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">Next Choice</div>
+                    <div className="mt-3 space-y-2">
+                      {selectedUpgradeableWeapon.nextChoices.length > 0 ? selectedUpgradeableWeapon.nextChoices.map((choice) => (
+                        <button
+                          key={choice.id}
+                          type="button"
+                          onClick={() => onApplyUpgradeChoice(choice.id)}
+                          disabled={!choice.isAvailable}
+                          className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                            choice.isAvailable
+                              ? 'border-[#d9efbd]/24 bg-[#284715]/62 text-[#f4ffe8] hover:bg-[#355d1d]/78'
+                              : 'cursor-not-allowed border-[#d9efbd]/12 bg-[#203b11]/30 text-[#88a26e]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-semibold">{choice.title}</div>
+                            <div className="text-[10px] uppercase tracking-[0.18em] text-[#9fbc7e]">Lv {choice.level}</div>
+                          </div>
+                          <div className="mt-2 text-xs text-[#cfe1ba]">{choice.description}</div>
+                        </button>
+                      )) : (
+                        <div className="text-sm text-[#d8ebc7]">
+                          This weapon already reached the final skill choice.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-[#d8ebc7]">
+                  Bring a wood staff to the workbench to start upgrading it.
+                </div>
+              )}
             </div>
           </div>
         )}

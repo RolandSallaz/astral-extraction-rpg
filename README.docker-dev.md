@@ -50,17 +50,17 @@ docker compose -f docker-compose.dev.yml down -v
 - `frontend`: `http://localhost:5173`
 - `backend`: `http://localhost:3000`
 - `realtime`: `ws://localhost:2567`
-- `postgres`: `localhost:5432`
+- `postgres`: `localhost:5433`
 
 ## Runtime behavior
 
-On startup, `backend`, `realtime`, and `frontend` check for the package files they need inside their own local `node_modules` volume. If those files are missing, `backend` and `realtime` repair the directory with `npm ci --workspaces=false`, while `frontend` performs a clean `npm install --workspaces=false` because its local shared-package dependency does not currently round-trip cleanly through `npm ci`.
+On startup, the `deps` service checks the root `package-lock.json` hash and verifies the expected package entrypoints in the per-workspace `node_modules` volumes. If the volumes are missing or stale, it runs a root `npm ci` once before the application services start.
 
-The container start commands invoke the package entrypoints directly from `node_modules` instead of relying on shell shims in `.bin`. This avoids npm workspace path issues inside bind-mounted Docker development environments.
+The `shared` service builds `@mmorpg/shared`, writes `shared/.docker-dev-ready`, and then runs TypeScript in watch mode. `backend`, `realtime`, and `frontend` wait for the shared build before starting through their normal npm workspace scripts.
 
 The frontend container also receives `BACKEND_INTERNAL_URL=http://backend:3000` so its server-side admin routes can validate bearer tokens against the backend instead of trusting client-side role checks.
 
-If you already created Docker volumes before this change, recreate them once so the per-service `node_modules` and frontend `.next` volumes are attached cleanly:
+If you already created Docker volumes before this dependency flow, recreate them once so the per-service `node_modules` and frontend `.next` volumes are attached cleanly:
 
 ```bash
 docker compose -f docker-compose.dev.yml down -v

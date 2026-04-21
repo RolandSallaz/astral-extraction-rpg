@@ -12,7 +12,7 @@ import {
   type EquipmentSlot,
   type GemItemId,
 } from '@/lib/items/equipmentItems';
-import type { EquipmentState, InventoryState } from '@/lib/playerProfile';
+import type { EquipmentItemProgressionState, EquipmentState, InventoryState } from '@/lib/playerProfile';
 import type {
   ActionBarBinding,
   ActionSlotKey,
@@ -68,6 +68,7 @@ type ActionBarBindings = Partial<Record<ActionSlotKey, ActionBarBinding | null>>
 
 export type UseInventoryInteractionsParams = {
   equipment: EquipmentState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   inventory: InventoryState;
   container: ContainerLike;
   dragState: DragState | null;
@@ -88,7 +89,10 @@ export type UseInventoryInteractionsParams = {
     itemSource: DragSource,
     socketIndex: number,
   ) => RemoveGemResult | null;
-  onEquipmentChange: (equipment: EquipmentState) => void;
+  onEquipmentChange: (
+    equipment: EquipmentState,
+    equipmentItemProgression: EquipmentItemProgressionState,
+  ) => void;
   onInventoryChange: (inventory: InventoryState) => void;
   onContainerChange: (slots: InventoryState) => void;
   onInventoryUse: (request: ConsumableUseRequest) => void;
@@ -96,6 +100,7 @@ export type UseInventoryInteractionsParams = {
 
 export function useInventoryInteractions({
   equipment,
+  equipmentItemProgression,
   inventory,
   container,
   dragState,
@@ -114,6 +119,13 @@ export function useInventoryInteractions({
   onContainerChange,
   onInventoryUse,
 }: UseInventoryInteractionsParams) {
+  const emitEquipmentChange = (
+    nextEquipment: EquipmentState,
+    nextEquipmentItemProgression: EquipmentItemProgressionState = equipmentItemProgression,
+  ) => {
+    onEquipmentChange(nextEquipment, nextEquipmentItemProgression);
+  };
+
   const handleEquipFromSource = (source: DragSource, itemValue: string) => {
     const itemId = getInventoryItemId(itemValue);
     if (!itemId) {
@@ -173,7 +185,7 @@ export function useInventoryInteractions({
         onContainerChange(nextContainer);
       }
 
-      onEquipmentChange(nextEquipment);
+      emitEquipmentChange(nextEquipment);
       setItemContextMenu(null);
       return;
     }
@@ -185,6 +197,14 @@ export function useInventoryInteractions({
       ...equipment,
       [targetSlot]: itemId as EquipmentItemId,
     };
+    const nextEquipmentItemProgression: EquipmentItemProgressionState = {
+      ...equipmentItemProgression,
+    };
+    if (parsedItem?.itemProgression) {
+      nextEquipmentItemProgression[targetSlot] = parsedItem.itemProgression;
+    } else {
+      delete nextEquipmentItemProgression[targetSlot];
+    }
 
     getEquipmentGemSlotIds(targetSlot, MAX_ITEM_SOCKET_COUNT).forEach((slotId, index) => {
       const gemId = parsedItem?.socketedGemIds[index] ?? null;
@@ -197,7 +217,11 @@ export function useInventoryInteractions({
 
     const replacedItemValue =
       replacedItem
-        ? serializeSocketedEquipmentItem(replacedItem, getEquipmentSocketGemIds(targetSlot, equipment))
+        ? serializeSocketedEquipmentItem(
+          replacedItem,
+          getEquipmentSocketGemIds(targetSlot, equipment),
+          equipmentItemProgression[targetSlot],
+        )
         : replacedItem;
 
     if (source.type === 'inventory') {
@@ -210,7 +234,7 @@ export function useInventoryInteractions({
       onContainerChange(nextContainer);
     }
 
-    onEquipmentChange(nextEquipment);
+    emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
     setItemContextMenu(null);
   };
 
@@ -225,9 +249,11 @@ export function useInventoryInteractions({
       onContainerChange(nextContainer);
     } else if (source.type === 'equipment') {
       const nextEquipment = { ...equipment };
+      const nextEquipmentItemProgression = { ...equipmentItemProgression };
       delete nextEquipment[source.slot];
+      delete nextEquipmentItemProgression[source.slot as BaseEquipmentSlot];
       getEquipmentGemSlotIds(source.slot as BaseEquipmentSlot, MAX_ITEM_SOCKET_COUNT).forEach((slotId) => delete nextEquipment[slotId]);
-      onEquipmentChange(nextEquipment);
+      emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
     }
 
     setItemContextMenu(null);
@@ -389,7 +415,7 @@ export function useInventoryInteractions({
         }
 
         if (result.nextEquipment) {
-          onEquipmentChange(result.nextEquipment);
+          emitEquipmentChange(result.nextEquipment);
         }
 
         const nextInventory = result.nextInventory ? [...result.nextInventory] : [...inventory];
@@ -454,7 +480,11 @@ export function useInventoryInteractions({
       const preferredIndex =
         inventory[index] === null ? index : findFirstEmptySlot(inventory);
       const sourceItemValue =
-        serializeSocketedEquipmentItem(dragState.itemId, getEquipmentSocketGemIds(sourceSlot as BaseEquipmentSlot, equipment));
+        serializeSocketedEquipmentItem(
+          dragState.itemId,
+          getEquipmentSocketGemIds(sourceSlot as BaseEquipmentSlot, equipment),
+          equipmentItemProgression[sourceSlot as BaseEquipmentSlot],
+        );
 
       if (preferredIndex !== -1) {
         const nextInventory = [...inventory];
@@ -462,9 +492,11 @@ export function useInventoryInteractions({
         onInventoryChange(nextInventory);
 
         const nextEquipment = { ...equipment };
+        const nextEquipmentItemProgression = { ...equipmentItemProgression };
         delete nextEquipment[sourceSlot];
+        delete nextEquipmentItemProgression[sourceSlot as BaseEquipmentSlot];
         getEquipmentGemSlotIds(sourceSlot as BaseEquipmentSlot, MAX_ITEM_SOCKET_COUNT).forEach((slotId) => delete nextEquipment[slotId]);
-        onEquipmentChange(nextEquipment);
+        emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
         setDragState(null);
         return;
       }
@@ -481,15 +513,23 @@ export function useInventoryInteractions({
       onInventoryChange(nextInventory);
 
       if (targetItem) {
-        onEquipmentChange({
-          ...equipment,
-          [sourceSlot]: targetItem,
-        });
+        emitEquipmentChange(
+          {
+            ...equipment,
+            [sourceSlot]: targetItem,
+          },
+          {
+            ...equipmentItemProgression,
+            [sourceSlot]: undefined,
+          },
+        );
       } else {
         const nextEquipment = { ...equipment };
+        const nextEquipmentItemProgression = { ...equipmentItemProgression };
         delete nextEquipment[sourceSlot];
+        delete nextEquipmentItemProgression[sourceSlot as BaseEquipmentSlot];
         getEquipmentGemSlotIds(sourceSlot as BaseEquipmentSlot, MAX_ITEM_SOCKET_COUNT).forEach((slotId) => delete nextEquipment[slotId]);
-        onEquipmentChange(nextEquipment);
+        emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
       }
 
       setDragState(null);
@@ -542,7 +582,7 @@ export function useInventoryInteractions({
 
         const replacedItem = equipment[targetSocketSlot] ?? null;
 
-        onEquipmentChange({
+        emitEquipmentChange({
           ...equipment,
           [targetSocketSlot]: dragItem.id as GemItemId,
         });
@@ -577,20 +617,36 @@ export function useInventoryInteractions({
         }
 
         const nextEquipment = { ...equipment };
+        const nextEquipmentItemProgression: EquipmentItemProgressionState = {
+          ...equipmentItemProgression,
+        };
         const sourceItem = nextEquipment[sourceSlot];
         const currentTargetItem = nextEquipment[slot];
+        const sourceProgression = nextEquipmentItemProgression[sourceSlot as BaseEquipmentSlot];
+        const targetProgression = nextEquipmentItemProgression[slot as BaseEquipmentSlot];
 
         if (sourceItem) {
           nextEquipment[slot] = sourceItem;
+          if (sourceProgression) {
+            nextEquipmentItemProgression[slot as BaseEquipmentSlot] = sourceProgression;
+          } else {
+            delete nextEquipmentItemProgression[slot as BaseEquipmentSlot];
+          }
         }
 
         if (currentTargetItem) {
           nextEquipment[sourceSlot] = currentTargetItem;
+          if (targetProgression) {
+            nextEquipmentItemProgression[sourceSlot as BaseEquipmentSlot] = targetProgression;
+          } else {
+            delete nextEquipmentItemProgression[sourceSlot as BaseEquipmentSlot];
+          }
         } else {
           delete nextEquipment[sourceSlot];
+          delete nextEquipmentItemProgression[sourceSlot as BaseEquipmentSlot];
         }
 
-        onEquipmentChange(nextEquipment);
+        emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
         setDragState(null);
         return;
       }
@@ -609,13 +665,25 @@ export function useInventoryInteractions({
       const parsedDraggedItem = parseInventoryItem(dragState.itemId);
       const targetItemValue =
         targetItem
-          ? serializeSocketedEquipmentItem(targetItem, getEquipmentSocketGemIds(slot as BaseEquipmentSlot, equipment))
+          ? serializeSocketedEquipmentItem(
+            targetItem,
+            getEquipmentSocketGemIds(slot as BaseEquipmentSlot, equipment),
+            equipmentItemProgression[slot as BaseEquipmentSlot],
+          )
           : targetItem ?? null;
 
       const nextEquipment: EquipmentState = {
         ...equipment,
         [slot]: dragItemId,
       };
+      const nextEquipmentItemProgression: EquipmentItemProgressionState = {
+        ...equipmentItemProgression,
+      };
+      if (parsedDraggedItem?.itemProgression) {
+        nextEquipmentItemProgression[slot as BaseEquipmentSlot] = parsedDraggedItem.itemProgression;
+      } else {
+        delete nextEquipmentItemProgression[slot as BaseEquipmentSlot];
+      }
       getEquipmentGemSlotIds(slot as BaseEquipmentSlot, MAX_ITEM_SOCKET_COUNT).forEach((slotId, index) => {
         const gemId = parsedDraggedItem?.socketedGemIds[index] ?? null;
         if (gemId) {
@@ -625,7 +693,7 @@ export function useInventoryInteractions({
         }
       });
 
-      onEquipmentChange(nextEquipment);
+      emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
 
       if (dragState.source.type === 'inventory') {
         const nextInventory = [...inventory];
@@ -698,7 +766,7 @@ export function useInventoryInteractions({
         }
 
         if (result.nextEquipment) {
-          onEquipmentChange(result.nextEquipment);
+          emitEquipmentChange(result.nextEquipment);
         }
 
         const nextContainer = result.nextContainer ? [...result.nextContainer] : [...container.slots];
@@ -755,7 +823,7 @@ export function useInventoryInteractions({
       }
 
       if (result.nextEquipment) {
-        onEquipmentChange(result.nextEquipment);
+        emitEquipmentChange(result.nextEquipment);
       }
       const nextInventoryFromResult = result.nextInventory ? [...result.nextInventory] : [...inventory];
       nextInventoryFromResult[emptyIndex] = result.gemValue;
@@ -774,15 +842,21 @@ export function useInventoryInteractions({
 
     nextInventory[emptyIndex] =
       dragState.source.type === 'equipment'
-        ? serializeSocketedEquipmentItem(dragState.itemId, getEquipmentSocketGemIds(dragState.source.slot as BaseEquipmentSlot, equipment))
+        ? serializeSocketedEquipmentItem(
+          dragState.itemId,
+          getEquipmentSocketGemIds(dragState.source.slot as BaseEquipmentSlot, equipment),
+          equipmentItemProgression[dragState.source.slot as BaseEquipmentSlot],
+        )
         : dragState.itemId;
     onInventoryChange(nextInventory);
 
     if (dragState.source.type === 'equipment') {
       const nextEquipment = { ...equipment };
+      const nextEquipmentItemProgression = { ...equipmentItemProgression };
       delete nextEquipment[dragState.source.slot];
+      delete nextEquipmentItemProgression[dragState.source.slot as BaseEquipmentSlot];
       getEquipmentGemSlotIds(dragState.source.slot as BaseEquipmentSlot, MAX_ITEM_SOCKET_COUNT).forEach((slotId) => delete nextEquipment[slotId]);
-      onEquipmentChange(nextEquipment);
+      emitEquipmentChange(nextEquipment, nextEquipmentItemProgression);
     }
 
     if (dragState.source.type === 'container' && container) {

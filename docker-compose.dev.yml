@@ -190,7 +190,6 @@ services:
   frontend:
     image: node:22-bookworm
     container_name: mmorpg-frontend-dev
-    restart: unless-stopped
     working_dir: /workspace
     depends_on:
       shared:

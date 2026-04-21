@@ -243,6 +243,7 @@ export async function saveCharacter(character: CharacterProfile) {
       body: JSON.stringify({
         equipment: character.equipment,
         inventory: character.inventory,
+        equipmentItemProgression: character.equipmentItemProgression,
         gold: character.gold,
         quests: character.quests,
       }),

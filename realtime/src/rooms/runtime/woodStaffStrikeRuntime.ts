@@ -1,5 +1,6 @@
 import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
+import { getItemProgressionBonuses, type ItemProgressionState } from "@mmorpg/shared";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { MobState } from "../schema/MobState.js";
 import { setMobAggroTarget } from "./mobAi.js";
@@ -15,6 +16,7 @@ export interface WoodStaffStrikeContext {
   queryNearbyMobs(x: number, y: number, radius: number): Iterable<MobState>;
   getPlayerPositionAt(playerId: string, at: number): { x: number; y: number } | null;
   applyDamageToPlayer(player: BasePlayerState, amount: number, damageType: DamageType): number;
+  canPushTargetTo(x: number, y: number, targetId: string): boolean;
   handlePlayerKilled(player: BasePlayerState): void;
   handleMobDeath(mob: MobState): void;
   awardExperience(playerId: string, amount: number): void;
@@ -30,8 +32,18 @@ export function performWoodStaffStrike(
   targetY: number,
   lagCompensatedAt: number,
   lagCompensationEnabled: boolean,
+  weaponProgression?: ItemProgressionState | null,
 ): void {
-  const target = findWoodStaffStrikeTarget(ctx, player, targetX, targetY, lagCompensatedAt, lagCompensationEnabled);
+  const bonuses = getItemProgressionBonuses(player.weaponItem, weaponProgression);
+  const target = findWoodStaffStrikeTarget(
+    ctx,
+    player,
+    targetX,
+    targetY,
+    lagCompensatedAt,
+    lagCompensationEnabled,
+    bonuses.meleeStrikeRangeBonusPx,
+  );
   if (!target) {
     return;
   }
@@ -45,6 +57,7 @@ export function performWoodStaffStrike(
     ctx.onCombatLog(`${player.name} hits ${target.entity.name} for ${resolvedDamage}.`);
     if (resolvedDamage > 0) {
       ctx.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${resolvedDamage}`, "#ffd089");
+      applyWoodStaffStrikeKnockback(ctx, target.entity, player, bonuses.woodStaffStrikeKnockbackBonusTiles);
     }
     if (target.entity.health <= 0) {
       ctx.handlePlayerKilled(target.entity);
@@ -57,6 +70,7 @@ export function performWoodStaffStrike(
   ctx.onCombatLog(`${player.name} hits ${target.entity.name} for ${damage}.`);
   if (damage > 0) {
     ctx.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${damage}`, "#ffd089");
+    applyWoodStaffStrikeKnockback(ctx, target.entity, player, bonuses.woodStaffStrikeKnockbackBonusTiles);
   }
   if (target.entity.health <= 0) {
     ctx.handleMobDeath(target.entity);
@@ -71,8 +85,9 @@ function findWoodStaffStrikeTarget(
   targetY: number,
   lagCompensatedAt: number,
   lagCompensationEnabled: boolean,
+  rangeBonusPx = 0,
 ): WoodStaffStrikeTarget | null {
-  const maxRange = ctx.profile.meleeStrikeRange;
+  const maxRange = ctx.profile.meleeStrikeRange + rangeBonusPx;
   const hitSlack = 4;
   const playerCenterOffsetY = -ctx.profile.playerHitRadius + ctx.profile.meleeStrikeOriginOffsetY;
   const rawPlayerPosition = lagCompensationEnabled
@@ -159,4 +174,48 @@ function findWoodStaffStrikeTarget(
   }
 
   return nearestPlayer;
+}
+
+function applyWoodStaffStrikeKnockback(
+  ctx: WoodStaffStrikeContext,
+  target: BasePlayerState | MobState,
+  player: BasePlayerState,
+  knockbackBonusTiles: number,
+) {
+  if (knockbackBonusTiles <= 0) {
+    return;
+  }
+
+  const distance = ctx.profile.tileSize * knockbackBonusTiles;
+  const dx = target.x - player.x;
+  const dy = target.y - player.y;
+  const length = Math.hypot(dx, dy);
+  if (length <= 0.001) {
+    return;
+  }
+
+  const directionX = dx / length;
+  const directionY = dy / length;
+  const stepDistance = Math.max(4, ctx.profile.tileSize / 4);
+  const steps = Math.max(1, Math.ceil(distance / stepDistance));
+  let nextX = target.x;
+  let nextY = target.y;
+
+  for (let step = 1; step <= steps; step += 1) {
+    const travelled = Math.min(distance, step * stepDistance);
+    const candidateX = target.x + directionX * travelled;
+    const candidateY = target.y + directionY * travelled;
+    if (!ctx.canPushTargetTo(candidateX, candidateY, target.id)) {
+      break;
+    }
+    nextX = candidateX;
+    nextY = candidateY;
+  }
+
+  target.x = nextX;
+  target.y = nextY;
+  if ("targetX" in target) {
+    target.targetX = nextX;
+    target.targetY = nextY;
+  }
 }

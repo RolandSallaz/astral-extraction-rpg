@@ -111,6 +111,47 @@ describe("raid room", () => {
     assert.strictEqual(stoppedPlayer?.lastProcessedInput, 12);
   });
 
+  it("does not let raid profile sync restore server-authoritative health", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-profile-health",
+      seed: "raid-profile-health-seed",
+      templateCode: "crypt",
+      width: 64,
+      height: 64,
+    });
+
+    const client = await connectToRoom(colyseus, room, {
+      name: "Profile Raider",
+      raidRunId: "raid-profile-health",
+      weaponItem: "wood_staff",
+      health: 100,
+      maxHealth: 100,
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+    player!.health = 37;
+
+    client.send("profile", {
+      name: "Profile Raider",
+      raidRunId: "raid-profile-health",
+      weaponItem: "wood_staff",
+      health: 100,
+      maxHealth: 100,
+      level: 99,
+      strength: 99,
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(player!.health, 37);
+    assert.strictEqual(player!.maxHealth, 100);
+    assert.notStrictEqual(player!.level, 99);
+    assert.notStrictEqual(player!.strength, 99);
+  });
+
   it("extracts the player with current loot when using an exit", async () => {
     const room = await colyseus.createRoom<RaidRoomState>("raid", {
       raidRunId: "raid-extract-test",
@@ -125,7 +166,7 @@ describe("raid room", () => {
       raidRunId: "raid-extract-test",
       weaponItem: "wood_staff",
       weaponGemItem1: "fire_trail_gem",
-      inventory: ["healing_potion::2", "critical_gem"],
+      inventory: ["healing_potion::2", "wood"],
     });
 
     await room.waitForNextPatch();
@@ -153,11 +194,10 @@ describe("raid room", () => {
     assert.strictEqual(payload.exitId, exitId);
     assert.deepStrictEqual(payload.equipment, {
       weapon: "wood_staff",
-      "weapon-gem-1": "fire_trail_gem",
     });
     assert.deepStrictEqual(payload.inventory, [
       "healing_potion::2",
-      "critical_gem",
+      "wood",
       ...new Array(22).fill(null),
     ]);
     assert.strictEqual(room.state.players.get(client.sessionId), undefined);
@@ -197,7 +237,7 @@ describe("raid room", () => {
     assert.strictEqual(tutorialChest?.subtitle, "Training Cache");
     assert.deepStrictEqual(Array.from(tutorialChest?.slots ?? []), [
       "wood_staff",
-      "fire_trail_gem",
+      "",
       "",
       "",
       "",
@@ -233,6 +273,74 @@ describe("raid room", () => {
     assert.ok(room.state.mobs.size > 0);
     assert.ok(mobKinds.has("bat"));
     assert.ok(Array.from(mobKinds).some((kind) => kind !== "bat"));
+  });
+
+  it("fills non-tutorial raid chests with loot", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-crypt-loot",
+      seed: "crypt-loot-seed",
+      templateCode: "crypt",
+      width: 128,
+      height: 128,
+    });
+
+    const lootChests = Array.from(room.state.chests.values()).filter((chest) => chest.title === "Crypt Chest");
+    const nonEmptyLootChests = lootChests.filter((chest) => Array.from(chest.slots).some((slot) => slot !== ""));
+
+    assert.ok(lootChests.length > 0);
+    assert.strictEqual(nonEmptyLootChests.length, lootChests.length);
+  });
+
+  it("wood staff dash damages and knocks back a raid player", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-wood-staff-dash",
+      seed: "raid-wood-staff-dash-seed",
+      templateCode: "crypt",
+      width: 64,
+      height: 64,
+    });
+
+    const client = await connectToRoom(colyseus, room, {
+      name: "Dash Raider",
+      raidRunId: "raid-wood-staff-dash",
+      weaponItem: "wood_staff",
+    });
+    const targetClient = await connectToRoom(colyseus, room, {
+      name: "Dash Target",
+      raidRunId: "raid-wood-staff-dash",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    const target = room.state.players.get(targetClient.sessionId);
+    assert.ok(player);
+    assert.ok(target);
+
+    const roomBounds = room.state.rooms[0]?.split(":").map((value) => Number.parseInt(value, 10));
+    assert.ok(roomBounds);
+    const [roomX, roomY, roomWidth, roomHeight] = roomBounds!;
+    const centerTileX = roomX + Math.max(2, Math.floor(roomWidth / 3));
+    const centerTileY = roomY + Math.floor(roomHeight / 2);
+    player!.x = centerTileX * 32 + 16;
+    player!.y = centerTileY * 32 + 16;
+    target!.x = player!.x + 64;
+    target!.y = player!.y;
+    target!.health = target!.maxHealth;
+    const startingHealth = target!.health;
+    const startingTargetX = target!.x;
+
+    client.send("castSkill", {
+      skillId: "woodStaffDash",
+      targetX: target!.x + 16,
+      targetY: target!.y,
+    });
+
+    await waitForNextSimulation(room, 900);
+
+    assert.ok(target!.health < startingHealth);
+    assert.ok(target!.x > startingTargetX);
   });
 
   it("keeps the player alive in the crypt_small tutorial", async () => {

@@ -3,14 +3,16 @@
 import type { Dispatch, MouseEvent as ReactMouseEvent, SetStateAction } from 'react';
 import {
   EQUIPMENT_ITEMS,
+  GEMS_ENABLED,
   type GemItemId,
   getBaseEquipmentSlot,
   getEquipmentGemSlotIds,
   getInventoryItemId,
+  parseInventoryItem,
   serializeInventoryItem,
   type BaseEquipmentSlot,
 } from '@/lib/items/equipmentItems';
-import type { EquipmentState, InventoryState } from '@/lib/playerProfile';
+import type { EquipmentItemProgressionState, EquipmentState, InventoryState } from '@/lib/playerProfile';
 import type {
   DragSource,
   DragState,
@@ -59,12 +61,16 @@ export type InspectSocketHandlersParams = {
 
 export type UseSocketMutationsParams = {
   equipment: EquipmentState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   inventory: InventoryState;
   container: ContainerLike;
   inspectItem: InspectItemState | null;
   setInspectItem: Dispatch<SetStateAction<InspectItemState | null>>;
   setHoveredItem: Dispatch<SetStateAction<HoveredItemState | null>>;
-  onEquipmentChange: (equipment: EquipmentState) => void;
+  onEquipmentChange: (
+    equipment: EquipmentState,
+    equipmentItemProgression: EquipmentItemProgressionState,
+  ) => void;
   onInventoryChange: (inventory: InventoryState) => void;
   onContainerChange: (slots: InventoryState) => void;
 };
@@ -92,13 +98,13 @@ function buildInventoryWithItemSockets(
   nextGemIds: Array<string | null>,
 ) {
   const currentValue = sourceInventory[index];
-  const itemId = getInventoryItemId(currentValue);
-  if (!currentValue || !itemId) {
+  const parsed = parseInventoryItem(currentValue);
+  if (!currentValue || !parsed) {
     return sourceInventory;
   }
 
   const nextInventory = [...sourceInventory];
-  nextInventory[index] = serializeSocketedEquipmentItem(itemId, nextGemIds);
+  nextInventory[index] = serializeSocketedEquipmentItem(parsed.itemId, nextGemIds, parsed.itemProgression);
   return nextInventory;
 }
 
@@ -108,18 +114,19 @@ function buildContainerWithItemSockets(
   nextGemIds: Array<string | null>,
 ) {
   const currentValue = sourceSlots[index] ?? null;
-  const itemId = getInventoryItemId(currentValue);
-  if (!currentValue || !itemId) {
+  const parsed = parseInventoryItem(currentValue);
+  if (!currentValue || !parsed) {
     return sourceSlots;
   }
 
   const nextContainer = [...sourceSlots];
-  nextContainer[index] = serializeSocketedEquipmentItem(itemId, nextGemIds);
+  nextContainer[index] = serializeSocketedEquipmentItem(parsed.itemId, nextGemIds, parsed.itemProgression);
   return nextContainer;
 }
 
 export function useSocketMutations({
   equipment,
+  equipmentItemProgression,
   inventory,
   container,
   inspectItem,
@@ -130,6 +137,10 @@ export function useSocketMutations({
   onContainerChange,
 }: UseSocketMutationsParams) {
   const socketGemIntoInspectItem = (socketIndex: number, gemValue: string, source: DragSource) => {
+    if (!GEMS_ENABLED) {
+      return false;
+    }
+
     const gemId = getInventoryItemId(gemValue);
     if (!inspectItem || !gemId) {
       return false;
@@ -165,7 +176,7 @@ export function useSocketMutations({
         return false;
       }
 
-      onEquipmentChange(buildEquipmentWithSockets(equipment, baseSlot, nextSocketGemIds));
+      onEquipmentChange(buildEquipmentWithSockets(equipment, baseSlot, nextSocketGemIds), equipmentItemProgression);
     } else if (inspectItem.source.type === 'inventory') {
       const nextInventory = buildInventoryWithItemSockets(inventory, inspectItem.source.index, nextSocketGemIds);
       if (source.type === 'inventory') {
@@ -208,6 +219,10 @@ export function useSocketMutations({
   };
 
   const removeGemFromInspectItem = (socketIndex: number) => {
+    if (!GEMS_ENABLED) {
+      return false;
+    }
+
     if (!inspectItem) {
       return false;
     }
@@ -232,7 +247,7 @@ export function useSocketMutations({
         return false;
       }
 
-      onEquipmentChange(buildEquipmentWithSockets(equipment, baseSlot, nextSocketGemIds));
+      onEquipmentChange(buildEquipmentWithSockets(equipment, baseSlot, nextSocketGemIds), equipmentItemProgression);
       const nextInventory = [...inventory];
       nextInventory[emptyIndex] = gemId;
       onInventoryChange(nextInventory);
@@ -286,6 +301,10 @@ export function useSocketMutations({
     itemSource: DragSource,
     socketIndex: number,
   ): RemoveGemResult | null => {
+    if (!GEMS_ENABLED) {
+      return null;
+    }
+
     const sourceItemValue =
       itemSource.type === 'inventory'
         ? inventory[itemSource.index]

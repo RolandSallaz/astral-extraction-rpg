@@ -23,7 +23,7 @@ import {
   WORLD_GAMEPLAY_PROFILE,
   type RoomGameplayProfile,
 } from "./runtime/sharedGameplay.js";
-import { INVENTORY_SIZE } from "@mmorpg/shared";
+import { INVENTORY_SIZE, normalizeItemProgressionState } from "@mmorpg/shared";
 import {
   getMobDefinition,
   MOB_KINDS,
@@ -290,6 +290,15 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         }
       }
 
+      const weaponProgression = normalizeItemProgressionState(
+        player.weaponItem,
+        message?.equipmentItemProgression?.weapon,
+      );
+      this.setPlayerEquipmentItemProgression(
+        client.sessionId,
+        weaponProgression ? { weapon: weaponProgression } : {},
+      );
+
     });
 
     this.onMessage("chat", (client, message: ChatInputMessage) => {
@@ -428,6 +437,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
     if (verified) {
       applyVerifiedProfile(player, verified);
+      this.setPlayerEquipmentItemProgression(client.sessionId, verified.equipmentItemProgression);
     } else {
       applyRoomProfilePatch(player, options, {
         defaultName: "Wanderer",
@@ -581,6 +591,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
 
       moveRoomMapValue(this.consumableCooldownEndsAt, previousSessionId, client.sessionId);
       moveRoomMapValue(this.playerLatencyMs, previousSessionId, client.sessionId);
+      moveRoomMapValue(this.playerEquipmentItemProgression, previousSessionId, client.sessionId);
       moveRoomMapValue(this.verifiedPlayers, previousSessionId, client.sessionId);
       if (verified) {
         this.verifiedPlayers.set(client.sessionId, verified);
@@ -721,6 +732,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
         sessionId,
         this.consumableCooldownEndsAt,
         this.playerLatencyMs,
+        this.playerEquipmentItemProgression,
         this.pendingMovementSequence,
         this.verifiedPlayers,
       );
@@ -795,6 +807,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.weaponGemItem1 = "";
     player.weaponGemItem2 = "";
     player.weaponGemItem3 = "";
+    this.clearPlayerEquipmentItemProgression(player.id);
     replaceRoomStringSlots(player.inventory, normalizeRoomInventorySlots([], INVENTORY_SIZE));
 
     const client = this.clients.find((entry: Client): boolean => entry.sessionId === player.id);

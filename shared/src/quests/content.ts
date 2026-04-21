@@ -26,7 +26,7 @@ export const QUEST_STEP_CONTENT: Record<string, readonly QuestStepContent[]> = {
       title: { ru: "Обыщи реликварий", en: "Search the Reliquary" },
       description: {
         ru: "Забери из сундука учебный посох и астральный гем.",
-        en: "Take the training staff and astral gem from the chest.",
+        en: "Take the training staff from the chest.",
       },
       shortLabel: { ru: "Сундук", en: "Chest" },
     },

@@ -14,7 +14,7 @@ describe("spread + split combo", () => {
   });
   beforeEach(async () => await colyseus.cleanup());
 
-  it("spawns six projectiles for a fireball cast with spread and split gems", async () => {
+  it("ignores legacy spread and split gems while gems are disabled", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", {});
     const caster = await connectToRoom(colyseus, room, {
       name: "Combo Mage",
@@ -41,7 +41,7 @@ describe("spread + split combo", () => {
     await new Promise((resolve) => setTimeout(resolve, 320));
     await room.waitForNextPatch();
 
-    assert.strictEqual(room.state.projectiles.size, 6);
+    assert.strictEqual(room.state.projectiles.size, 1);
   });
 });
 

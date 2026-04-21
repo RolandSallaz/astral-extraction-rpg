@@ -7,7 +7,7 @@ import {
   parseInventoryItem,
   type ConsumableItemId,
 } from '@/lib/items/equipmentItems';
-import type { EquipmentState, InventoryState } from '@/lib/playerProfile';
+import type { EquipmentItemProgressionState, EquipmentState, InventoryState } from '@/lib/playerProfile';
 import type {
   ActionBarBinding,
   ActionSlotKey,
@@ -35,6 +35,7 @@ type ActionBarBindings = Partial<Record<ActionSlotKey, ActionBarBinding | null>>
 
 export type UseActionBarParams = {
   equipment: EquipmentState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   inventory: InventoryState;
   skillCooldowns: SkillCooldownState;
   consumableCooldowns: ConsumableCooldownState;
@@ -46,6 +47,7 @@ export type UseActionBarParams = {
 
 export function useActionBar({
   equipment,
+  equipmentItemProgression,
   inventory,
   skillCooldowns,
   consumableCooldowns,
@@ -64,21 +66,21 @@ export function useActionBar({
       ?? getDefaultActionBarBindings();
   });
 
-  const availableSkills = getAvailableSkills(equipment);
+  const availableSkills = getAvailableSkills(equipment, equipmentItemProgression);
 
   useEffect(() => {
-    const persistedBindings = getResolvedActionBarBindings(actionBarBindings, equipment);
+    const persistedBindings = getResolvedActionBarBindings(actionBarBindings, equipment, equipmentItemProgression);
     window.localStorage.setItem(ACTION_BAR_STORAGE_KEY, JSON.stringify(persistedBindings));
-  }, [actionBarBindings, equipment]);
+  }, [actionBarBindings, equipment, equipmentItemProgression]);
 
   useEffect(() => {
-    const resolvedBindings = getResolvedActionBarBindings(actionBarBindings, equipment);
+    const resolvedBindings = getResolvedActionBarBindings(actionBarBindings, equipment, equipmentItemProgression);
     onMouseSkillBindingsChange?.(getMouseSkillBindingsFromActionBar(resolvedBindings));
-  }, [actionBarBindings, equipment, onMouseSkillBindingsChange]);
+  }, [actionBarBindings, equipment, equipmentItemProgression, onMouseSkillBindingsChange]);
 
   useEffect(() => {
     setActionBarBindings((current) => {
-      const resolved = getResolvedActionBarBindings(current, equipment);
+      const resolved = getResolvedActionBarBindings(current, equipment, equipmentItemProgression);
       const next: ActionBarBindings = { ...resolved };
       let changed = false;
       const boundSkills = new Set<SkillId>();
@@ -128,16 +130,16 @@ export function useActionBar({
 
       return changed ? next : current;
     });
-  }, [availableSkills, equipment]);
+  }, [availableSkills, equipment, equipmentItemProgression]);
 
   const updateActionBarBindings = (
     updater: (current: ActionBarBindings) => ActionBarBindings,
   ) => {
-    setActionBarBindings((current) => updater(getResolvedActionBarBindings(current, equipment)));
+    setActionBarBindings((current) => updater(getResolvedActionBarBindings(current, equipment, equipmentItemProgression)));
   };
 
   const getActionBarBinding = (slotKey: ActionSlotKey) =>
-    getResolvedActionBarBindings(actionBarBindings, equipment)[slotKey] ?? null;
+    getResolvedActionBarBindings(actionBarBindings, equipment, equipmentItemProgression)[slotKey] ?? null;
 
   const findActionBarInventorySlot = (itemId: ConsumableItemId) =>
     inventory.findIndex((itemValue) => getInventoryItemId(itemValue) === itemId);

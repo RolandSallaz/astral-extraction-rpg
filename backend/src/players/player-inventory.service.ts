@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
+  GEMS_ENABLED,
+  normalizeItemProgressionState,
   parseInventoryItem,
   type CharacterProfile,
 } from '@mmorpg/shared';
@@ -21,9 +23,12 @@ export class PlayerInventoryService {
   async syncPlayerItems(
     playerId: string,
     equipment: CharacterProfile['equipment'],
+    equipmentItemProgression: CharacterProfile['equipmentItemProgression'],
     inventory: CharacterProfile['inventory'],
   ) {
-    const equipmentCodes = Object.values(equipment).flatMap((value) => (value ? [value] : []));
+    const equipmentCodes = Object.entries(equipment).flatMap(([slot, value]) =>
+      value && (GEMS_ENABLED || !EQUIPMENT_GEM_SLOT_PATTERN.test(slot)) ? [value] : [],
+    );
     const requestedCodes = [
       ...equipmentCodes,
       ...inventory
@@ -36,6 +41,10 @@ export class PlayerInventoryService {
     const uniqueCodes = [...new Set(requestedCodes)];
     const equippedSocketGemEntries = Object.entries(equipment).flatMap((entry) => {
       const [slot, code] = entry;
+      if (!GEMS_ENABLED) {
+        return [];
+      }
+
       const match = slot.match(EQUIPMENT_GEM_SLOT_PATTERN);
       if (!match || !code) {
         return [];
@@ -69,6 +78,8 @@ export class PlayerInventoryService {
         this.playerItemsRepository.create({
           playerId,
           itemCode: itemDefinition.id,
+          progressionLevel: normalizeItemProgressionState(code, equipmentItemProgression[slot as keyof CharacterProfile['equipmentItemProgression']])?.level ?? null,
+          selectedUpgradeIds: normalizeItemProgressionState(code, equipmentItemProgression[slot as keyof CharacterProfile['equipmentItemProgression']])?.selectedUpgradeIds ?? null,
           equippedSlot: slot,
           inventorySlot: null,
           parentItemId: null,
@@ -99,6 +110,8 @@ export class PlayerInventoryService {
         this.playerItemsRepository.create({
           playerId,
           itemCode: itemDefinition.id,
+          progressionLevel: parsed.itemProgression?.level ?? null,
+          selectedUpgradeIds: parsed.itemProgression?.selectedUpgradeIds ?? null,
           equippedSlot: null,
           inventorySlot: index,
           parentItemId: null,
@@ -138,6 +151,8 @@ export class PlayerInventoryService {
         this.playerItemsRepository.create({
           playerId,
           itemCode: itemDefinition.id,
+          progressionLevel: null,
+          selectedUpgradeIds: null,
           equippedSlot: null,
           inventorySlot: null,
           parentItemId: parentItem.id,
@@ -164,6 +179,8 @@ export class PlayerInventoryService {
         this.playerItemsRepository.create({
           playerId,
           itemCode: socketDefinition.id,
+          progressionLevel: null,
+          selectedUpgradeIds: null,
           equippedSlot: null,
           inventorySlot: null,
           parentItemId: parentItem.id,

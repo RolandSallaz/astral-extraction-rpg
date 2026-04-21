@@ -51,6 +51,7 @@ import {
 } from '@/lib/itemBalance';
 import { type BaseEquipmentSlot } from '@/lib/items/equipmentItems';
 import {
+  type EquipmentItemProgressionState,
   type EquipmentState,
   type InventoryState,
 } from '@/lib/playerProfile';
@@ -90,6 +91,7 @@ type ActiveTargetingState =
 
 export function GameHud({
   equipment,
+  equipmentItemProgression,
   inventory,
   container,
   playerGold,
@@ -113,6 +115,7 @@ export function GameHud({
   itemBalanceConfig = DEFAULT_ITEM_BALANCE_CONFIG,
 }: {
   equipment: EquipmentState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   inventory: InventoryState;
   container: ContainerView | null;
   playerGold: number;
@@ -125,7 +128,10 @@ export function GameHud({
   onSkillTrigger: (skillId: SkillId) => void;
   onActionBarConsumableTrigger: (itemId: 'healing_potion') => void;
   onMouseSkillBindingsChange?: (bindings: MouseSkillBindings) => void;
-  onEquipmentChange: (equipment: EquipmentState) => void;
+  onEquipmentChange: (
+    equipment: EquipmentState,
+    equipmentItemProgression: EquipmentItemProgressionState,
+  ) => void;
   onInventoryChange: (inventory: InventoryState) => void;
   onInventoryUse: (request: ConsumableUseRequest) => void;
   onContainerChange: (slots: InventoryState) => void;
@@ -151,6 +157,7 @@ export function GameHud({
     getDraggedActionBarBinding,
   } = useActionBar({
     equipment,
+    equipmentItemProgression,
     inventory,
     skillCooldowns,
     consumableCooldowns,
@@ -227,6 +234,7 @@ export function GameHud({
     buildRemoveGemFromItemSourceResult,
   } = useSocketMutations({
     equipment,
+    equipmentItemProgression,
     inventory,
     container,
     inspectItem,
@@ -247,6 +255,7 @@ export function GameHud({
     handleEquipFromSource,
   } = useInventoryInteractions({
     equipment,
+    equipmentItemProgression,
     inventory,
     container,
     dragState,
