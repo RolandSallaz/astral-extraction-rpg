@@ -38,6 +38,9 @@ export type RoomGameplayProfile = {
   woodStaffDashCastMs: number;
   woodStaffDashCooldownMs: number;
   woodStaffDashDistanceTiles: number;
+  woodStaffSlamDamage: number;
+  woodStaffSlamCooldownMs: number;
+  woodStaffSlamRadiusTiles: number;
   fireballCooldownMs: number;
   fireNovaProjectileCount: number;
   fireNovaCooldownMs: number;
@@ -112,6 +115,9 @@ const COMMON_GAMEPLAY: Omit<
   woodStaffDashCastMs: 700,
   woodStaffDashCooldownMs: 2000,
   woodStaffDashDistanceTiles: 3,
+  woodStaffSlamDamage: 14,
+  woodStaffSlamCooldownMs: 6000,
+  woodStaffSlamRadiusTiles: 1.5,
   fireballCooldownMs: 1000,
   fireNovaProjectileCount: 12,
   fireNovaCooldownMs: 10000,

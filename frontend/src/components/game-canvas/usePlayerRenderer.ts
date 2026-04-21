@@ -24,6 +24,7 @@ type RealtimeRoomState = {
     healingEndsAt?: number;
     woodStaffStrikeCooldownEndsAt?: number;
     woodStaffDashCooldownEndsAt?: number;
+    woodStaffSlamCooldownEndsAt?: number;
     fireballCooldownEndsAt?: number;
     fireNovaCooldownEndsAt?: number;
     fireFieldCooldownEndsAt?: number;
@@ -183,14 +184,18 @@ type UsePlayerRendererParams = {
   playerProgressChangeRef: MutableRefObject<((payload: { level: number; experience: number }) => void) | undefined>;
   skillCooldownsRef: MutableRefObject<{
     woodStaffStrike?: number;
+    woodStaffChainStrike?: number;
     woodStaffDash?: number;
+    woodStaffSlam?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
   }>;
   skillCooldownsChangeRef: MutableRefObject<((payload: {
     woodStaffStrike: number;
+    woodStaffChainStrike: number;
     woodStaffDash: number;
+    woodStaffSlam: number;
     fireball: number;
     fireNova: number;
     fireField: number;
@@ -212,6 +217,7 @@ type UsePlayerRendererParams = {
     authoritativeY: number,
   ) => void;
   hideStatusIcon: (icon: StatusIconVisual) => void;
+  playChainStrikeTrail?: (startX: number, startY: number, endX: number, endY: number) => void;
 };
 
 export function usePlayerRenderer() {
@@ -309,6 +315,7 @@ export function usePlayerRenderer() {
         reconcileRaidLocalCharacter,
         reconcileWorldLocalCharacter,
         hideStatusIcon,
+        playChainStrikeTrail,
       } = params;
 
       if (!room?.state.players) {
@@ -378,6 +385,13 @@ export function usePlayerRenderer() {
             character.targetX,
             character.targetY,
           );
+          const isChainStrikeDisplacement =
+            distance > 24 &&
+            distance <= tileSize * 5 &&
+            (
+              character.currentCastingSkillId === 'woodStaffChainStrike' ||
+              networkPlayer.castingSkillId === 'woodStaffChainStrike'
+            );
           const isDashDisplacement =
             distance > 64 &&
             distance <= tileSize * 5 &&
@@ -385,7 +399,21 @@ export function usePlayerRenderer() {
               character.currentCastingSkillId === 'woodStaffDash' ||
               networkPlayer.castingSkillId === 'woodStaffDash'
             );
-          if (isDashDisplacement) {
+          if (isChainStrikeDisplacement) {
+            playChainStrikeTrail?.(
+              character.container.x,
+              character.container.y,
+              character.targetX,
+              character.targetY,
+            );
+            character.container.setPosition(character.targetX, character.targetY);
+            character.interpPrevX = character.targetX;
+            character.interpPrevY = character.targetY;
+            character.interpPrevAt = now;
+            character.interpNextX = character.targetX;
+            character.interpNextY = character.targetY;
+            character.interpNextAt = now;
+          } else if (isDashDisplacement) {
             character.interpPrevX = character.container.x;
             character.interpPrevY = character.container.y;
             character.interpPrevAt = now;
@@ -481,12 +509,14 @@ export function usePlayerRenderer() {
             level: networkPlayer.level ?? latestProfileRef.current.playerLevel,
             experience: networkPlayer.experience ?? latestProfileRef.current.playerExperience,
           });
-          const nextCooldowns = {
-            woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
-            woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
-            fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
-            fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
-            fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
+            const nextCooldowns = {
+              woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffChainStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
+              woodStaffSlam: networkPlayer.woodStaffSlamCooldownEndsAt ?? 0,
+              fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
+              fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
+              fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
           };
           skillCooldownsRef.current = nextCooldowns;
           skillCooldownsChangeRef.current?.(nextCooldowns);
@@ -520,12 +550,14 @@ export function usePlayerRenderer() {
             level: networkPlayer.level ?? latestProfileRef.current.playerLevel,
             experience: networkPlayer.experience ?? latestProfileRef.current.playerExperience,
           });
-          const nextCooldowns = {
-            woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
-            woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
-            fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
-            fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
-            fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
+            const nextCooldowns = {
+              woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffChainStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
+              woodStaffSlam: networkPlayer.woodStaffSlamCooldownEndsAt ?? 0,
+              fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
+              fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
+              fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
           };
           skillCooldownsRef.current = nextCooldowns;
           skillCooldownsChangeRef.current?.(nextCooldowns);

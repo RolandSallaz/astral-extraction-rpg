@@ -60,3 +60,9 @@ Notes:
 - Continue cutting `GameHud` panel rendering by moving inventory/equipment/container/action-bar slot rendering out of `GameHud.tsx`, now that shared interaction state lives in `useDragAndDrop.ts`.
 - Continue cutting `GameHud` interaction logic by moving equip/socket mutations and action-bar binding state into dedicated `game-hud` hooks.
 - Continue cutting `GameCanvas` scene setup by moving world asset loaders, raid/world sync blocks, camera/viewport, and long scene callbacks into `game-canvas` modules/hooks.
+- Wood staff Chain Strike branch pass: added level 6-9 upgrade choices for +1 hit, +1 tile start range, +1 tile bounce search radius, and 50% chained-hit bounce refund.
+- Chain Strike runtime now reads those progression bonuses, clamps server-side target range with the chain range bonus, and guards refund loops with a safety hit budget.
+- Tooltip pass: wood staff and Chain Strike tooltips now derive hit count, search radius, start range, refund chance, and cooldown from shared progression/skill data.
+- Verification for Chain Strike branch pass: `npm --workspace realtime test -- --runInBand MyRoom.test.ts --grep "chain strike"` and `npm run typecheck:build` pass.
+- Chain Strike branch level correction: moved those Chain Strike upgrades after the level 10 unlock, to levels 11-14, and expanded workbench progression UI/selection logic to max level 14.
+- Verification after level correction: `npm run typecheck:build` and `npm --workspace realtime test -- --runInBand MyRoom.test.ts --grep "chain strike"` pass. `npm --workspace frontend run build` is blocked locally before app compilation by Next/SWC native binary loading (`next-swc.win32-x64-msvc.node is not a valid Win32 application`) and `next.config` ESM `__dirname`.

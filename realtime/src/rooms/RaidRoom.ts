@@ -113,7 +113,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
   maxClients = 8;
   state = new RaidRoomState();
   private readonly raidContent = loadRaidContent();
-  private activeRaidContent = resolveRaidTemplateContent(this.raidContent, "crypt_small");
+  private activeRaidContent = resolveRaidTemplateContent(this.raidContent, "crypt");
   private readonly pendingMovement = new Map<string, { x: number; y: number; sequence: number }>();
   private blockedTiles = new Uint8Array(0);
   private chestBlockedTiles = new Uint8Array(0);
@@ -261,7 +261,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     this.contentSnapshotPoller.start();
     this.registerSharedMessageHandlers();
     const seed = options.seed || `raid-${Date.now().toString(36)}`;
-    const templateCode = options.templateCode ?? "crypt_small";
+    const templateCode = options.templateCode ?? "crypt";
     this.activeRaidContent = resolveRaidTemplateContent(this.raidContent, templateCode);
     const layout = generateRaidLayoutForTemplate(
       templateCode,
@@ -272,7 +272,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
 
     this.state.raidRunId = options.raidRunId ?? "";
     this.state.templateCode = templateCode;
-    this.state.templateName = options.templateName ?? "Crypt Small";
+    this.state.templateName = options.templateName ?? "Crypt";
     this.state.biome = options.biome ?? "crypt";
     this.state.seed = seed;
     this.state.status = "forming";
@@ -313,6 +313,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
         chestBlockedTiles: this.chestBlockedTiles,
         width: layout.width,
       });
+      this.applyMobBalanceToLiveMobs();
       this.state.status = options.runtimeState.status || this.state.status;
       this.raidExpiresAt = options.runtimeState.expiresAt || this.raidExpiresAt;
       this.raidClosed = this.state.status === "expired";
@@ -560,6 +561,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     } else {
       player.name = "Raider";
       this.applyProfileToPlayer(player, options, {
+        allowVitalsSync: false,
         allowEquipmentSync: ALLOW_GUEST_EQUIPMENT_SYNC,
       });
     }
@@ -1128,11 +1130,12 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.healingTicksRemaining = 0;
     player.healingEndsAt = 0;
     player.fireballCooldownEndsAt = 0;
-    player.fireNovaCooldownEndsAt = 0;
-    player.fireFieldCooldownEndsAt = 0;
-    player.woodStaffStrikeCooldownEndsAt = 0;
-    player.woodStaffDashCooldownEndsAt = 0;
-    this.clearPlayerCastState(player);
+      player.fireNovaCooldownEndsAt = 0;
+      player.fireFieldCooldownEndsAt = 0;
+      player.woodStaffStrikeCooldownEndsAt = 0;
+      player.woodStaffDashCooldownEndsAt = 0;
+      player.woodStaffSlamCooldownEndsAt = 0;
+      this.clearPlayerCastState(player);
     this.removePlayerFromRaidState(player.id);
     this.publishRaidRuntimeStateIfNeeded(Date.now(), true);
     return payload;
@@ -1168,11 +1171,12 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
     player.healingTicksRemaining = 0;
     player.healingEndsAt = 0;
     player.fireballCooldownEndsAt = 0;
-    player.fireNovaCooldownEndsAt = 0;
-    player.fireFieldCooldownEndsAt = 0;
-    player.woodStaffStrikeCooldownEndsAt = 0;
-    player.woodStaffDashCooldownEndsAt = 0;
-    this.clearPlayerCastState(player);
+      player.fireNovaCooldownEndsAt = 0;
+      player.fireFieldCooldownEndsAt = 0;
+      player.woodStaffStrikeCooldownEndsAt = 0;
+      player.woodStaffDashCooldownEndsAt = 0;
+      player.woodStaffSlamCooldownEndsAt = 0;
+      this.clearPlayerCastState(player);
     player.headItem = "";
     player.bodyItem = "";
     player.weaponItem = "";

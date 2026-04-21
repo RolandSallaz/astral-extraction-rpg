@@ -11,9 +11,9 @@ import {
   getDisplayItemName,
   getDisplayItemTooltipLines,
   getSkillDisplayName,
+  getSkillTooltipLines,
   getSafeTooltipPosition,
 } from '@/components/game-hud/tooltipHelpers';
-import { SKILL_TOOLTIP_STATS } from '@/components/game-hud/skillConstants';
 import type {
   HoveredItemState,
   HoveredSkillState,
@@ -26,13 +26,14 @@ import {
   parseInventoryItem,
   serializeInventoryItem,
 } from '@/lib/items/equipmentItems';
-import type { EquipmentState } from '@/lib/playerProfile';
+import type { EquipmentItemProgressionState, EquipmentState } from '@/lib/playerProfile';
 import type { ItemBalanceConfig } from '@/lib/itemBalance';
 
 type ContainerLike = { slots: unknown } | null;
 
 export function useHudViews({
   equipment,
+  equipmentItemProgression,
   container,
   hoveredItem,
   hoveredSkill,
@@ -42,6 +43,7 @@ export function useHudViews({
   itemTintOverrides,
 }: {
   equipment: EquipmentState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   container: ContainerLike;
   hoveredItem: HoveredItemState | null;
   hoveredSkill: HoveredSkillState | null;
@@ -71,7 +73,13 @@ export function useHudViews({
     ? {
         name: getDisplayItemName(visibleHoveredItem.itemId),
         label: getDisplayItemCategory(visibleHoveredItem.itemId),
-        lines: getDisplayItemTooltipLines(visibleHoveredItem.itemId, itemBalanceConfig),
+        lines: getDisplayItemTooltipLines(
+          visibleHoveredItem.itemId,
+          itemBalanceConfig,
+          visibleHoveredItem.scope === 'equipment' && getInventoryItemId(visibleHoveredItem.itemId) === equipment.weapon
+            ? equipmentItemProgression.weapon
+            : null,
+        ),
         textColor: getItemTierStyle(getInventoryItemId(visibleHoveredItem.itemId))?.textColor ?? '#f6ffea',
       }
     : null;
@@ -90,7 +98,11 @@ export function useHudViews({
   const hoveredSkillView = hoveredSkill
     ? {
         name: getSkillDisplayName(hoveredSkill.skillId),
-        lines: SKILL_TOOLTIP_STATS[hoveredSkill.skillId],
+        lines: getSkillTooltipLines(
+          hoveredSkill.skillId,
+          equipment.weapon,
+          equipmentItemProgression.weapon,
+        ),
       }
     : null;
 
@@ -122,7 +134,13 @@ export function useHudViews({
         return {
           name: getDisplayItemName(visibleInspectItem.itemValue),
           label: item.slot ?? item.type,
-          lines: getDisplayItemTooltipLines(visibleInspectItem.itemValue, itemBalanceConfig),
+          lines: getDisplayItemTooltipLines(
+            visibleInspectItem.itemValue,
+            itemBalanceConfig,
+            visibleInspectItem.source.type === 'equipment' && visibleInspectItem.source.slot === 'weapon'
+              ? equipmentItemProgression.weapon
+              : parsed.itemProgression,
+          ),
           textColor: getItemTierStyle(item.id)?.textColor ?? '#f6ffea',
           socketColors,
           socketCount,

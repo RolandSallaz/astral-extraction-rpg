@@ -11,6 +11,18 @@ export const SKILL_ICONS: Partial<Record<SkillId, { src: string; alt: string }>>
     src: '/items/equipment/wood_staff.png',
     alt: 'Wood Staff Dash',
   },
+  woodStaffSlam: {
+    src: '/items/equipment/wood_staff.png',
+    alt: 'Wood Staff Slam',
+  },
+  woodStaffChainStrike: {
+    src: '/items/equipment/wood_staff.png',
+    alt: 'Chain Strike',
+  },
+  woodStaffSpectralVolley: {
+    src: '/items/equipment/wood_staff.png',
+    alt: 'Spectral Volley',
+  },
   fireball: {
     src: '/ui/skills/fireball-skill-16x16.png',
     alt: 'Fireball',
@@ -28,6 +40,9 @@ export const SKILL_ICONS: Partial<Record<SkillId, { src: string; alt: string }>>
 export const SKILL_COOLDOWN_MS: Record<SkillId, number> = {
   woodStaffStrike: 450,
   woodStaffDash: 2000,
+  woodStaffSlam: 6000,
+  woodStaffChainStrike: 800,
+  woodStaffSpectralVolley: 3000,
   fireball: 1000,
   fireNova: 10000,
   fireField: 12000,
@@ -36,6 +51,9 @@ export const SKILL_COOLDOWN_MS: Record<SkillId, number> = {
 export const SKILL_TOOLTIP_STATS: Record<SkillId, string[]> = {
   woodStaffStrike: ['Close-range strike', 'Cooldown: 0.45s'],
   woodStaffDash: ['Dash like a skeleton', 'Physical hit on impact', 'Cooldown: 2s'],
+  woodStaffSlam: ['Area hit around you', 'Physical damage', 'Cooldown: 6s'],
+  woodStaffChainStrike: ['Strike bounces between 3 enemies', 'Shares strike cooldown'],
+  woodStaffSpectralVolley: ['Fires 3 bolts in a spread', 'Cooldown: 3s'],
   fireball: ['20 damage', 'Applies burning', 'Cooldown: 1s'],
   fireNova: ['12 projectiles around you', 'Applies burning', 'Cooldown: 10s'],
   fireField: ['3x3 burning ground', '10s duration', 'Cooldown: 12s'],

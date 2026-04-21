@@ -754,10 +754,11 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.healingEndsAt = 0;
     player.moveX = 0;
     player.moveY = 0;
-    player.fireFieldCooldownEndsAt = 0;
-    player.woodStaffStrikeCooldownEndsAt = 0;
-    player.woodStaffDashCooldownEndsAt = 0;
-    this.clearPlayerCastState(player);
+      player.fireFieldCooldownEndsAt = 0;
+      player.woodStaffStrikeCooldownEndsAt = 0;
+      player.woodStaffDashCooldownEndsAt = 0;
+      player.woodStaffSlamCooldownEndsAt = 0;
+      this.clearPlayerCastState(player);
     this.statusEffects.deletePlayerEffects(player.id);
 
     const droppedItems = [

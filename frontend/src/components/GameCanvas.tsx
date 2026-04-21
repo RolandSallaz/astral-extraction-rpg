@@ -136,6 +136,7 @@ import {
 import {
   createFloatingCombatText,
   createThrownConsumableVisual,
+  playChainStrikeTrail,
   playThrownConsumableImpact,
   type ThrownConsumableVisual,
 } from '@/components/game-canvas/overlayEffects';
@@ -402,7 +403,9 @@ export function GameCanvas({
   respawnRequestNonce,
   fireNovaCastNonce,
   woodStaffStrikeCastNonce,
+  woodStaffChainStrikeCastNonce,
   woodStaffDashCastNonce,
+  woodStaffSlamCastNonce,
   useConsumableRequest = null,
   containerStates,
   onContainersStateChange,
@@ -466,7 +469,9 @@ export function GameCanvas({
   onHeldConsumableThrow?: (payload: { itemId: 'healing_potion'; x: number; y: number }) => void;
   onSkillCooldownsChange?: (payload: {
     woodStaffStrike: number;
+    woodStaffChainStrike: number;
     woodStaffDash: number;
+    woodStaffSlam: number;
     fireball: number;
     fireNova: number;
     fireField: number;
@@ -486,7 +491,9 @@ export function GameCanvas({
   respawnRequestNonce: number;
   fireNovaCastNonce: number;
   woodStaffStrikeCastNonce: number;
+  woodStaffChainStrikeCastNonce: number;
   woodStaffDashCastNonce: number;
+  woodStaffSlamCastNonce: number;
   useConsumableRequest?: {
     source: 'inventory' | 'container';
     slotIndex: number;
@@ -549,7 +556,9 @@ export function GameCanvas({
   const lastPointerWorldRef = useRef({ x: playerPosition.x, y: playerPosition.y });
   const skillCooldownsRef = useRef({
     woodStaffStrike: 0,
+    woodStaffChainStrike: 0,
     woodStaffDash: 0,
+    woodStaffSlam: 0,
     fireball: 0,
     fireNova: 0,
     fireField: 0,
@@ -796,7 +805,9 @@ export function GameCanvas({
       lastSentRespawnNonceRef,
       fireNovaCastNonce,
       woodStaffStrikeCastNonce,
+      woodStaffChainStrikeCastNonce,
       woodStaffDashCastNonce,
+      woodStaffSlamCastNonce,
       sessionTokenRef,
       contentVersionRef,
       estimatedOneWayLatencyMsRef,
@@ -921,6 +932,7 @@ export function GameCanvas({
             frameWidth: 32,
             frameHeight: 32,
           });
+          this.load.image('dummy', '/sprites/characters/dummy.png');
           this.load.image('skeleton-npc-16x16', '/sprites/characters/skeleton-npc-16x16.png');
           this.load.image('bat_1', '/npc/bat/bat_1.png');
           this.load.image('bat_2', '/npc/bat/bat_2.png');
@@ -1657,6 +1669,20 @@ export function GameCanvas({
               reconcileRaidLocalCharacter,
               reconcileWorldLocalCharacter,
               hideStatusIcon,
+              playChainStrikeTrail: (startX, startY, endX, endY) => {
+                playChainStrikeTrail({
+                  scene: this,
+                  startX,
+                  startY,
+                  endX,
+                  endY,
+                  tileSize,
+                  mapHeight,
+                  isWorldPointVisible,
+                  getEntitySortDepth,
+                  entitySortEffectOffset: ENTITY_SORT_EFFECT_OFFSET,
+                });
+              },
             });
           };
 
@@ -1722,31 +1748,65 @@ export function GameCanvas({
             authoritativeY: number,
             width: number,
             height: number,
-          ) => reconcileRaidLocalCharacterImpl(character, authoritativeX, authoritativeY, width, height, {
-            tileSize,
-            pendingRaidInputs,
-            raidBlockedTiles,
-            raidChestBlockedTiles,
-            speed: CLIENT_RAID_PLAYER_SPEED,
-            strongDesyncDistance: tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES,
-            mobBlockers: getMovementMobBlockers(),
-          });
+          ) => {
+            const distance = Phaser.Math.Distance.Between(character.container.x, character.container.y, authoritativeX, authoritativeY);
+            if (character.currentCastingSkillId === 'woodStaffChainStrike' && distance > 24 && distance <= tileSize * 5) {
+              playChainStrikeTrail({
+                scene: this,
+                startX: character.container.x,
+                startY: character.container.y,
+                endX: authoritativeX,
+                endY: authoritativeY,
+                tileSize,
+                mapHeight,
+                isWorldPointVisible,
+                getEntitySortDepth,
+                entitySortEffectOffset: ENTITY_SORT_EFFECT_OFFSET,
+              });
+            }
+            reconcileRaidLocalCharacterImpl(character, authoritativeX, authoritativeY, width, height, {
+              tileSize,
+              pendingRaidInputs,
+              raidBlockedTiles,
+              raidChestBlockedTiles,
+              speed: CLIENT_RAID_PLAYER_SPEED,
+              strongDesyncDistance: tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES,
+              mobBlockers: getMovementMobBlockers(),
+            });
+          };
 
           const reconcileWorldLocalCharacter = (
             character: CharacterVisual,
             authoritativeX: number,
             authoritativeY: number,
-          ) => reconcileWorldLocalCharacterImpl(character, authoritativeX, authoritativeY, {
-            tileSize,
-            pendingWorldInputs,
-            mapWidth: meadowMap.width * tileSize,
-            mapHeight: meadowMap.height * tileSize,
-            meadowDecorations,
-            meadowStamps: worldMapRenderState.currentAsset.stamps,
-            speed: CLIENT_PLAYER_SPEED,
-            strongDesyncDistance: tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES,
-            mobBlockers: getMovementMobBlockers(),
-          });
+          ) => {
+            const distance = Phaser.Math.Distance.Between(character.container.x, character.container.y, authoritativeX, authoritativeY);
+            if (character.currentCastingSkillId === 'woodStaffChainStrike' && distance > 24 && distance <= tileSize * 5) {
+              playChainStrikeTrail({
+                scene: this,
+                startX: character.container.x,
+                startY: character.container.y,
+                endX: authoritativeX,
+                endY: authoritativeY,
+                tileSize,
+                mapHeight,
+                isWorldPointVisible,
+                getEntitySortDepth,
+                entitySortEffectOffset: ENTITY_SORT_EFFECT_OFFSET,
+              });
+            }
+            reconcileWorldLocalCharacterImpl(character, authoritativeX, authoritativeY, {
+              tileSize,
+              pendingWorldInputs,
+              mapWidth: meadowMap.width * tileSize,
+              mapHeight: meadowMap.height * tileSize,
+              meadowDecorations,
+              meadowStamps: worldMapRenderState.currentAsset.stamps,
+              speed: CLIENT_PLAYER_SPEED,
+              strongDesyncDistance: tileSize * LOCAL_PLAYER_STRONG_DESYNC_TELEPORT_DISTANCE_TILES,
+              mobBlockers: getMovementMobBlockers(),
+            });
+          };
 
           const setCharacterVisibility = (
             character: CharacterVisual,
@@ -2914,7 +2974,8 @@ export function GameCanvas({
               if (distanceToTarget > 64) {
                 mob.sprite.setPosition(mob.targetX, mob.targetY);
               } else {
-                const lerpFactor = Math.min(1, deltaSeconds * 10);
+                const lerpSpeed = distanceToTarget > 24 ? 6 : 10;
+                const lerpFactor = Math.min(1, deltaSeconds * lerpSpeed);
                 mob.sprite.x = Phaser.Math.Linear(mob.sprite.x, mob.targetX, lerpFactor);
                 mob.sprite.y = Phaser.Math.Linear(mob.sprite.y, mob.targetY, lerpFactor);
               }

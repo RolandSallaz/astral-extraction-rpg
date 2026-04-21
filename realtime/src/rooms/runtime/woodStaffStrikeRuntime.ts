@@ -1,10 +1,15 @@
 import { type MapSchema } from "@colyseus/schema";
 import { type RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
-import { getItemProgressionBonuses, type ItemProgressionState } from "@mmorpg/shared";
+import {
+  getItemProgressionBonuses,
+  resolveWoodStaffStrikeDamage,
+  type ItemProgressionState,
+} from "@mmorpg/shared";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { MobState } from "../schema/MobState.js";
 import { setMobAggroTarget } from "./mobAi.js";
 import type { DamageType } from "./projectileSkills.js";
+import { recordMobDamage } from "./trainingDummyRuntime.js";
 
 type WoodStaffStrikeTarget =
   | { kind: "player"; entity: BasePlayerState; distance: number }
@@ -50,7 +55,7 @@ export function performWoodStaffStrike(
 
   const baseDamage = Math.max(1, ctx.profile.meleeStrikeDamage);
   const strengthBonus = Math.max(0, player.strength - 1) * 2;
-  const damage = baseDamage + strengthBonus;
+  const damage = resolveWoodStaffStrikeDamage(baseDamage + strengthBonus, bonuses);
 
   if (target.kind === "player") {
     const resolvedDamage = ctx.applyDamageToPlayer(target.entity, damage, "physical");
@@ -58,6 +63,7 @@ export function performWoodStaffStrike(
     if (resolvedDamage > 0) {
       ctx.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${resolvedDamage}`, "#ffd089");
       applyWoodStaffStrikeKnockback(ctx, target.entity, player, bonuses.woodStaffStrikeKnockbackBonusTiles);
+      applyWoodStaffStrikeSlow(target.entity, bonuses.woodStaffStrikeSlowDurationMs);
     }
     if (target.entity.health <= 0) {
       ctx.handlePlayerKilled(target.entity);
@@ -66,11 +72,13 @@ export function performWoodStaffStrike(
   }
 
   target.entity.health = Math.max(0, target.entity.health - damage);
+  recordMobDamage(target.entity, damage);
   setMobAggroTarget(target.entity, player);
   ctx.onCombatLog(`${player.name} hits ${target.entity.name} for ${damage}.`);
   if (damage > 0) {
     ctx.broadcastDamageText(target.entity.x, target.entity.y - 18, `-${damage}`, "#ffd089");
     applyWoodStaffStrikeKnockback(ctx, target.entity, player, bonuses.woodStaffStrikeKnockbackBonusTiles);
+    applyWoodStaffStrikeSlow(target.entity, bonuses.woodStaffStrikeSlowDurationMs);
   }
   if (target.entity.health <= 0) {
     ctx.handleMobDeath(target.entity);
@@ -218,4 +226,12 @@ function applyWoodStaffStrikeKnockback(
     target.targetX = nextX;
     target.targetY = nextY;
   }
+}
+
+function applyWoodStaffStrikeSlow(target: BasePlayerState | MobState, slowDurationMs: number) {
+  if (slowDurationMs <= 0) {
+    return;
+  }
+
+  target.slowEndsAt = Math.max(target.slowEndsAt ?? 0, Date.now() + slowDurationMs);
 }

@@ -149,9 +149,9 @@
       },
       "tutorialMob": null,
       "mobGeneration": {
-        "minSpawnCount": 6,
-        "maxSpawnCount": 18,
-        "spawnRatio": 0.75,
+        "minSpawnCount": 10,
+        "maxSpawnCount": 28,
+        "spawnRatio": 1,
         "skeletonSpawnChance": 0.22,
         "batMinRoomHeight": 8,
         "batMinRoomWidth": 8,

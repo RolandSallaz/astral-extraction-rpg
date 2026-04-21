@@ -27,6 +27,11 @@ import type { DamageType } from "./projectileSkills.js";
 import { tryCreateMobLootChest } from "./chestRuntime.js";
 import { getSegmentEllipseCollisionT } from "./geometry.js";
 import { pushTargetByKnockback as pushTargetByKnockbackRuntime } from "./knockbackRuntime.js";
+import {
+  isTrainingDummy,
+  resetTrainingDummy,
+  shouldResetTrainingDummy,
+} from "./trainingDummyRuntime.js";
 
 const MOB_RESPAWN_MIN_PLAYER_DISTANCE_PX = 8 * 16;
 
@@ -97,6 +102,14 @@ export function updateRoomMobs(
     const previousY = mob.y;
     const previousDead = mob.dead;
 
+    if (shouldResetTrainingDummy(mob, now)) {
+      resetTrainingDummy(mob);
+      clearMobPath(ctx.state.mobPathCache, mob.id);
+      ctx.state.statusEffects.deleteMobBurn(mob.id);
+      markMobSpatialStateDirty(ctx, mob, previousX, previousY, previousDead);
+      continue;
+    }
+
     if (mob.dead) {
       if (mob.respawnAt > 0 && now >= mob.respawnAt) {
         const respawnX = mob.spawnX > 0 ? mob.spawnX : mob.x;
@@ -112,6 +125,15 @@ export function updateRoomMobs(
           ctx.state.statusEffects.deleteMobBurn(mob.id);
         }
       }
+      markMobSpatialStateDirty(ctx, mob, previousX, previousY, previousDead);
+      continue;
+    }
+
+    if (isTrainingDummy(mob)) {
+      mob.aggroTargetId = "";
+      mob.aggroLockedUntil = 0;
+      mob.targetX = mob.spawnX > 0 ? mob.spawnX : mob.x;
+      mob.targetY = mob.spawnY > 0 ? mob.spawnY : mob.y;
       markMobSpatialStateDirty(ctx, mob, previousX, previousY, previousDead);
       continue;
     }
@@ -485,6 +507,26 @@ export function tryRunSkeletonDash(
 }
 
 export function handleMobDeath(ctx: MobRuntimeContext, mob: MobState): void {
+  if (isTrainingDummy(mob)) {
+    mob.dead = true;
+    mob.aggroTargetId = "";
+    mob.aggroLockedUntil = 0;
+    mob.health = 0;
+    mob.burnTicksRemaining = 0;
+    mob.burnEndsAt = 0;
+    mob.poisonTicksRemaining = 0;
+    mob.poisonEndsAt = 0;
+    mob.slowEndsAt = 0;
+    mob.attackCooldownEndsAt = 0;
+    mob.respawnAt = 0;
+    clearMobSkillState(ctx, mob);
+    clearMobPath(ctx.state.mobPathCache, mob.id);
+    ctx.state.statusEffects.deleteMobBurn(mob.id);
+    ctx.spatial.markMobSpatialDirty();
+    ctx.combat.onCombatLog(`${mob.name} breaks apart and reforms shortly after.`);
+    return;
+  }
+
   mob.dead = true;
   mob.aggroTargetId = "";
   mob.aggroLockedUntil = 0;

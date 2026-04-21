@@ -81,5 +81,12 @@
       "hit": "default",
       "death": "death"
     }
+  },
+  "dummy": {
+    "kind": "dummy",
+    "spriteScale": 2,
+    "anchorY": 1,
+    "clips": {},
+    "states": {}
   }
 }

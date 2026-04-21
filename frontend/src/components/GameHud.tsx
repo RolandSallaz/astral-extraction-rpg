@@ -327,6 +327,7 @@ export function GameHud({
     visibleInspectItemView,
   } = useHudViews({
     equipment,
+    equipmentItemProgression,
     container,
     hoveredItem,
     hoveredSkill,

@@ -27,7 +27,9 @@ export interface SkillCastContext {
   ): { x: number; y: number };
   clearPlayerMovement(sessionId: string): void;
   performWoodStaffStrike(player: BasePlayerState, targetX: number, targetY: number): void;
+  performWoodStaffChainStrike(player: BasePlayerState, targetX: number, targetY: number): void;
   performWoodStaffDash(player: BasePlayerState, targetX: number, targetY: number): void;
+  performWoodStaffSlam(player: BasePlayerState): void;
 
   // Fireball-specific helpers
   getOwnerProjectileGemConfig(ownerId: string, skillId: string): ProjectileGemConfig;

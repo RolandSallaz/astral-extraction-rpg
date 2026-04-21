@@ -43,8 +43,18 @@ export function getAvailableSkills(
 
   if (isSameEquipmentItemFamily(equipment.weapon, 'wood_staff')) {
     availableSkills.push('woodStaffStrike');
-    if (getItemProgressionBonuses(equipment.weapon, equipmentItemProgression.weapon).grantsWoodStaffDash) {
+    const bonuses = getItemProgressionBonuses(equipment.weapon, equipmentItemProgression.weapon);
+    if (bonuses.grantsWoodStaffDash) {
       availableSkills.push('woodStaffDash');
+    }
+    if (bonuses.grantsWoodStaffSlam) {
+      availableSkills.push('woodStaffSlam');
+    }
+    if (bonuses.grantsWoodStaffChainStrike) {
+      availableSkills.push('woodStaffChainStrike');
+    }
+    if (bonuses.grantsWoodStaffSpectralVolley) {
+      availableSkills.push('woodStaffSpectralVolley');
     }
   }
 
@@ -101,7 +111,7 @@ export function parseStoredActionBarBindings(
 
       if (
         binding.kind === 'skill' &&
-        ['woodStaffStrike', 'woodStaffDash', 'fireNova', 'fireField'].includes(binding.skillId)
+        ['woodStaffStrike', 'woodStaffChainStrike', 'woodStaffDash', 'woodStaffSlam', 'fireNova', 'fireField'].includes(binding.skillId)
       ) {
         nextBindings[key] = { kind: 'skill', skillId: binding.skillId as SkillId };
         return;

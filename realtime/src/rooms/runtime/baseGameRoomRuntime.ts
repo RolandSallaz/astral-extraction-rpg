@@ -40,9 +40,17 @@ import {
   type WoodStaffStrikeContext,
 } from "./woodStaffStrikeRuntime.js";
 import {
+  performWoodStaffChainStrike as performWoodStaffChainStrikeRuntime,
+  type WoodStaffChainStrikeContext,
+} from "./woodStaffChainStrikeRuntime.js";
+import {
   performWoodStaffDash as performWoodStaffDashRuntime,
   type WoodStaffDashContext,
 } from "./woodStaffDashRuntime.js";
+import {
+  performWoodStaffSlam as performWoodStaffSlamRuntime,
+  type WoodStaffSlamContext,
+} from "./woodStaffSlamRuntime.js";
 
 type ProjectileTarget = { entity: BasePlayerState | MobState; distance: number } | null;
 
@@ -124,7 +132,9 @@ export interface BaseGameRoomRuntime {
   consumableContext(): ConsumableRuntimeContext;
   mobContext(): MobRuntimeContext;
   woodStaffStrikeContext(): WoodStaffStrikeContext;
+  woodStaffChainStrikeContext(): WoodStaffChainStrikeContext;
   woodStaffDashContext(): WoodStaffDashContext;
+  woodStaffSlamContext(): WoodStaffSlamContext;
   projectileContext(): ProjectileRuntimeContext;
   createFireField(player: BasePlayerState, targetX: number, targetY: number, now: number): void;
   createFireTrail(ownerId: string, tileX: number, tileY: number, now: number): void;
@@ -240,6 +250,45 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
     onCombatLog: (text) => bindings.onCombatLog(text),
   });
 
+  const woodStaffSlamContext = (): WoodStaffSlamContext => ({
+    profile: bindings.getProfile(),
+    roomPlayers: bindings.getRoomPlayers(),
+    roomMobs: bindings.getRoomMobs(),
+    applyDamageToPlayer: (player, amount, damageType) => bindings.applyDamageToPlayer(player, amount, damageType),
+    handlePlayerKilled: (player) => bindings.handlePlayerKilled(player),
+    handleMobDeath: (mob) => bindings.handleMobDeath(mob),
+    awardExperience: (playerId, amount) => bindings.awardExperience(playerId, amount),
+    broadcastDamageText: (x, y, text, color) => broadcastDamageText(messageBroadcaster, x, y, text, color),
+    onCombatLog: (text) => bindings.onCombatLog(text),
+  });
+
+  const woodStaffChainStrikeContext = (): WoodStaffChainStrikeContext => ({
+    profile: bindings.getProfile(),
+    roomPlayers: bindings.getRoomPlayers(),
+    roomMobs: bindings.getRoomMobs(),
+    queryNearbyMobs: (x, y, radius) => bindings.queryNearbyMobs(x, y, radius),
+    getPlayerPositionAt: (playerId, at) => bindings.getPlayerPositionAt(playerId, at),
+    applyDamageToPlayer: (player, amount, damageType) => bindings.applyDamageToPlayer(player, amount, damageType),
+    canTeleportTo: (x, y, playerId) => bindings.canTeleportTo(x, y, playerId),
+    canPushTargetTo: (x, y) => {
+      const profile = bindings.getProfile();
+      const tileX = Math.floor(x / profile.tileSize);
+      const tileY = Math.floor(y / profile.tileSize);
+      return (
+        x >= profile.tileSize / 2 &&
+        y >= profile.tileSize / 2 &&
+        x <= bindings.getMapWidthPx() - profile.tileSize / 2 &&
+        y <= bindings.getMapHeightPx() - profile.tileSize / 2 &&
+        !bindings.isBlockedTile(tileX, tileY)
+      );
+    },
+    handlePlayerKilled: (player) => bindings.handlePlayerKilled(player),
+    handleMobDeath: (mob) => bindings.handleMobDeath(mob),
+    awardExperience: (playerId, amount) => bindings.awardExperience(playerId, amount),
+    broadcastDamageText: (x, y, text, color) => broadcastDamageText(messageBroadcaster, x, y, text, color),
+    onCombatLog: (text) => bindings.onCombatLog(text),
+  });
+
   const projectileContext = (): ProjectileRuntimeContext => ({
     state: {
       profile: bindings.getProfile(),
@@ -332,6 +381,16 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
         lagCompensation.at,
         lagCompensation.enabled,
       ),
+    performWoodStaffChainStrike: (candidate, targetX, targetY) =>
+      performWoodStaffChainStrikeRuntime(
+        woodStaffChainStrikeContext(),
+        sessionId,
+        candidate,
+        targetX,
+        targetY,
+        lagCompensation.at,
+        lagCompensation.enabled,
+      ),
     performWoodStaffDash: (candidate, targetX, targetY) =>
       performWoodStaffDashRuntime(
         woodStaffDashContext(),
@@ -339,6 +398,12 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
         candidate,
         targetX,
         targetY,
+      ),
+    performWoodStaffSlam: (candidate) =>
+      performWoodStaffSlamRuntime(
+        woodStaffSlamContext(),
+        sessionId,
+        candidate,
       ),
     getOwnerProjectileGemConfig: (ownerId, skillId) => bindings.getOwnerProjectileGemConfig(ownerId, skillId),
     hasSplitProjectileGem: (ownerId) => bindings.hasSplitProjectileGem(ownerId),
@@ -407,7 +472,9 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
       },
     }),
     woodStaffStrikeContext,
+    woodStaffChainStrikeContext,
     woodStaffDashContext,
+    woodStaffSlamContext,
     projectileContext,
     createFireField,
     createFireTrail,

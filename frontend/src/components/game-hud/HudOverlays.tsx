@@ -208,9 +208,14 @@ export function HudInspectWindow({
               </div>
             </div>
           </div>
-          <div className="mt-3 space-y-1 text-sm leading-5 text-[#dceec9]">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {inspectItemView.lines.map((line) => (
-              <div key={line}>{line}</div>
+              <span
+                key={line}
+                className="rounded border border-[#a8d96e]/25 bg-[#1a3510]/70 px-2 py-0.5 text-[11px] font-semibold text-[#9ecf68]"
+              >
+                {line}
+              </span>
             ))}
           </div>
         </div>
@@ -290,9 +295,14 @@ export function HudItemTooltip({
       <div className="mt-1 text-[10px] uppercase tracking-[0.22em] text-[#bfd8a4]">
         {tooltipView.label}
       </div>
-      <div className="mt-2 space-y-1 text-sm leading-5 text-[#dceec9]">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {tooltipView.lines.map((line) => (
-          <div key={line}>{line}</div>
+          <span
+            key={line}
+            className="rounded border border-[#a8d96e]/25 bg-[#1a3510]/70 px-2 py-0.5 text-[11px] font-semibold text-[#9ecf68]"
+          >
+            {line}
+          </span>
         ))}
       </div>
     </div>
@@ -321,9 +331,14 @@ export function HudSkillTooltip({
       }}
     >
       <div className="font-serif text-lg font-bold text-[#fff1d3]">{tooltipView.name}</div>
-      <div className="mt-2 space-y-1 text-sm leading-5 text-[#ffe0bc]">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         {tooltipView.lines.map((line) => (
-          <div key={line}>{line}</div>
+          <span
+            key={line}
+            className="rounded border border-[#f4b36b]/30 bg-[#1f0e06]/70 px-2 py-0.5 text-[11px] font-semibold text-[#e8a85e]"
+          >
+            {line}
+          </span>
         ))}
       </div>
     </div>

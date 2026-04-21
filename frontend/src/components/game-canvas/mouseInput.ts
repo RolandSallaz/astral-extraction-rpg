@@ -4,7 +4,7 @@ import type { MouseActionSlotKey, MouseSkillBindings, SkillId } from '@/componen
 const ACTION_BAR_STORAGE_KEY = 'mmorpg.ui.action-bar.bindings.v1';
 
 function isStoredMouseSkillId(skillId: string | undefined): skillId is SkillId {
-  return skillId === 'woodStaffStrike' || skillId === 'woodStaffDash' || skillId === 'fireNova' || skillId === 'fireField';
+  return skillId === 'woodStaffStrike' || skillId === 'woodStaffChainStrike' || skillId === 'woodStaffDash' || skillId === 'woodStaffSlam' || skillId === 'fireNova' || skillId === 'fireField';
 }
 
 export function readStoredMouseSkillBindings(): MouseSkillBindings {

@@ -80,6 +80,81 @@ export function createFloatingCombatText({
   });
 }
 
+export function playChainStrikeTrail({
+  scene,
+  startX,
+  startY,
+  endX,
+  endY,
+  tileSize,
+  mapHeight,
+  isWorldPointVisible,
+  getEntitySortDepth,
+  entitySortEffectOffset,
+}: {
+  scene: Phaser.Scene;
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  tileSize: number;
+  mapHeight: number;
+  isWorldPointVisible: (x: number, y: number) => boolean;
+  getEntitySortDepth: (footY: number, mapHeight: number) => number;
+  entitySortEffectOffset: number;
+}) {
+  if (!isWorldPointVisible(startX, startY) && !isWorldPointVisible(endX, endY)) {
+    return;
+  }
+
+  const depth = getEntitySortDepth(endY + tileSize * 0.35, mapHeight) - entitySortEffectOffset - 0.02;
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const distance = Math.hypot(deltaX, deltaY);
+  const trailEndX = distance > 0.001 ? endX - (deltaX / distance) * tileSize * 0.42 : endX;
+  const trailEndY = distance > 0.001 ? endY - (deltaY / distance) * tileSize * 0.42 : endY;
+  const trail = scene.add.graphics().setDepth(depth);
+  trail.lineStyle(18, 0xffe6b5, 0.42);
+  trail.beginPath();
+  trail.moveTo(startX, startY - tileSize * 0.35);
+  trail.lineTo(trailEndX, trailEndY - tileSize * 0.35);
+  trail.strokePath();
+  trail.lineStyle(6, 0xffd089, 0.72);
+  trail.beginPath();
+  trail.moveTo(startX, startY - tileSize * 0.35);
+  trail.lineTo(trailEndX, trailEndY - tileSize * 0.35);
+  trail.strokePath();
+
+  scene.tweens.add({
+    targets: trail,
+    alpha: 0,
+    duration: 260,
+    ease: 'Cubic.Out',
+    onComplete: () => trail.destroy(),
+  });
+
+  const afterimageCount = 3;
+  for (let index = 1; index <= afterimageCount; index += 1) {
+    const t = index / (afterimageCount + 1);
+    const x = Phaser.Math.Linear(startX, endX, t);
+    const y = Phaser.Math.Linear(startY, endY, t);
+    const ghost = scene.add
+      .ellipse(x, y - tileSize * 0.35, tileSize * 0.42, tileSize * 0.88, 0xffd089, 0.22)
+      .setDepth(depth - index)
+      .setVisible(isWorldPointVisible(x, y));
+
+    scene.tweens.add({
+      targets: ghost,
+      alpha: 0,
+      scaleX: 1.35,
+      scaleY: 1.08,
+      duration: 220 + index * 35,
+      ease: 'Quad.Out',
+      onComplete: () => ghost.destroy(),
+    });
+  }
+}
+
 export function playThrownConsumableImpact({
   scene,
   itemId,

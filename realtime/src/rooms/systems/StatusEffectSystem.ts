@@ -6,6 +6,7 @@ import { BurnService } from "../services/BurnService.js";
 import { HealingService, type HealablePlayer } from "../services/HealingService.js";
 import { PoisonService, type PoisonableEntity } from "../services/PoisonService.js";
 import { setMobAggroTarget } from "../runtime/mobAi.js";
+import { recordMobDamage } from "../runtime/trainingDummyRuntime.js";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { GroundEffectState } from "../schema/GroundEffectState.js";
 import type { MobState } from "../schema/MobState.js";
@@ -169,8 +170,9 @@ export class StatusEffectSystem {
       skillBalance: this.context.getSkillBalance(),
       getEntity: (mobId) => this.context.getMob(mobId),
       onTick: (_mobId, mob, damage) => {
-        mob.health = Math.max(0, mob.health - damage);
-        this.context.onCombatLog(`${mob.name} burns for ${damage}.`);
+          mob.health = Math.max(0, mob.health - damage);
+          recordMobDamage(mob, damage);
+          this.context.onCombatLog(`${mob.name} burns for ${damage}.`);
         if (mob.health <= 0) {
           this.context.handleMobDeath(mob);
         }
@@ -199,8 +201,9 @@ export class StatusEffectSystem {
       tickMs: this.context.getProfile().poisonPotionTickMs,
       getEntity: (mobId) => this.context.getMob(mobId) as PoisonableMob | undefined,
       onTick: (_mobId, mob, damage) => {
-        mob.health = Math.max(0, mob.health - damage);
-        this.context.onCombatLog(`${mob.name} suffers ${damage} poison damage.`);
+          mob.health = Math.max(0, mob.health - damage);
+          recordMobDamage(mob, damage);
+          this.context.onCombatLog(`${mob.name} suffers ${damage} poison damage.`);
         if (mob.health <= 0) {
           this.context.handleMobDeath(mob);
         }
@@ -262,8 +265,9 @@ export class StatusEffectSystem {
           continue;
         }
 
-        mob.health = Math.max(0, mob.health - effectDamage);
-        this.applyBurnToMob(mob, effect.skillId === "fireTrail" ? "fireball" : "fireField", effect.ownerId);
+          mob.health = Math.max(0, mob.health - effectDamage);
+          recordMobDamage(mob, effectDamage);
+          this.applyBurnToMob(mob, effect.skillId === "fireTrail" ? "fireball" : "fireField", effect.ownerId);
         if (owner && !owner.dead) {
           setMobAggroTarget(mob, owner);
         }

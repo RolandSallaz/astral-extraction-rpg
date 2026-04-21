@@ -25,6 +25,7 @@ import {
   type ProjectileGemConfig,
 } from "./fireballGems.js";
 import type { ProjectileSystem } from "../systems/ProjectileSystem.js";
+import { recordMobDamage } from "./trainingDummyRuntime.js";
 
 export interface ProjectileStateContext {
   profile: RoomGameplayProfile;
@@ -262,7 +263,8 @@ function applyProjectileSplash(
     if (mob.dead || `mob:${mob.id}` === excludedEntityId) {
       continue;
     }
-    mob.health = Math.max(0, mob.health - splashDamage);
+      mob.health = Math.max(0, mob.health - splashDamage);
+      recordMobDamage(mob, splashDamage);
     ctx.combat.applyProjectileLifesteal(projectile.ownerId, splashDamage);
     if (mob.health <= 0) {
       ctx.combat.markMobSpatialDirty();
@@ -505,7 +507,8 @@ export function updateRoomProjectiles(
         mob.health,
         mob.maxHealth,
       );
-      mob.health = Math.max(0, mob.health - resolvedDamage);
+        mob.health = Math.max(0, mob.health - resolvedDamage);
+        recordMobDamage(mob, resolvedDamage);
       ctx.combat.applyProjectileLifesteal(projectile.ownerId, resolvedDamage);
       if (attacker && !attacker.dead) {
         setMobAggroTarget(mob, attacker);

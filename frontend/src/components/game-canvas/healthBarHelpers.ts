@@ -67,7 +67,7 @@ export function layoutHealthSegments(
 ) {
   const count = Math.max(1, Math.min(segments.length, activeSegmentCount));
   const totalGapWidth = Math.max(0, (count - 1) * HEALTH_SEGMENT_GAP_PX);
-  const segmentWidth = Math.max(1, (HEALTH_BAR_WIDTH_PX - totalGapWidth) / count);
+  const segmentWidth = Math.max(0.35, (HEALTH_BAR_WIDTH_PX - totalGapWidth) / count);
   const startX = centerX - HEALTH_BAR_WIDTH_PX / 2 + segmentWidth / 2;
 
   segments.forEach((segment, index) => {

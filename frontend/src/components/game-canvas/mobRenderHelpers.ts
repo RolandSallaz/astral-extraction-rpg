@@ -25,6 +25,10 @@ export function getMobRenderScale(texture: string) {
     return 2;
   }
 
+  if (texture === "dummy") {
+    return 2;
+  }
+
   return 1;
 }
 
@@ -43,7 +47,7 @@ export function getMobClipTextureKey(spritesheet: string) {
 }
 
 export function getMobVisualKind(texture: string) {
-  return texture === "bat" || texture === "rat" || texture === "skeleton" ? texture : null;
+  return texture === "bat" || texture === "rat" || texture === "skeleton" || texture === "dummy" ? texture : null;
 }
 
 export function toRuntimeAnimationFromMobClip(clip: MobAnimationClipDefinition): SheetAnimation {

@@ -1,4 +1,4 @@
-export const MOB_KINDS = ["rat", "bat", "skeleton"] as const;
+export const MOB_KINDS = ["rat", "bat", "skeleton", "dummy"] as const;
 
 export type MobKind = (typeof MOB_KINDS)[number];
 
@@ -27,6 +27,12 @@ export const MOB_DEFINITIONS: Record<MobKind, MobDefinition> = {
     name: "Skeleton",
     texture: "skeleton",
     lootTableId: "mob_skeleton",
+  },
+  dummy: {
+    kind: "dummy",
+    name: "Training Dummy",
+    texture: "dummy",
+    lootTableId: null,
   },
 };
 

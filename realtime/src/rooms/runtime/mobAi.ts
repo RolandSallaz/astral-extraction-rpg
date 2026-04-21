@@ -32,11 +32,11 @@ const AGGRO_RETARGET_DISTANCE_BUFFER = 32;
 const FORCED_AGGRO_LOCK_MS = 2500;
 
 function resolveMobKind(mob: MobState): MobKind {
-  if (mob.kind === "bat" || mob.kind === "rat" || mob.kind === "skeleton") {
+  if (mob.kind === "bat" || mob.kind === "rat" || mob.kind === "skeleton" || mob.kind === "dummy") {
     return mob.kind;
   }
 
-  if (mob.texture === "bat" || mob.texture === "rat" || mob.texture === "skeleton") {
+  if (mob.texture === "bat" || mob.texture === "rat" || mob.texture === "skeleton" || mob.texture === "dummy") {
     return mob.texture;
   }
 
@@ -76,6 +76,12 @@ export function resetMobToSpawn(mob: MobState) {
   mob.health = mob.maxHealth;
   mob.burnTicksRemaining = 0;
   mob.burnEndsAt = 0;
+  mob.poisonTicksRemaining = 0;
+  mob.poisonEndsAt = 0;
+  mob.slowEndsAt = 0;
+  mob.lastDamagedAt = 0;
+  mob.totalDamageTaken = 0;
+  mob.totalHitsTaken = 0;
   mob.x = spawnX;
   mob.y = spawnY;
   mob.targetX = spawnX;

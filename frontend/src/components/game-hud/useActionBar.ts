@@ -182,7 +182,8 @@ export function useActionBar({
         return;
       }
 
-      const readyAt = skillCooldowns[binding.skillId] ?? 0;
+      const cooldownSkillId = binding.skillId === 'woodStaffChainStrike' ? 'woodStaffStrike' : binding.skillId;
+      const readyAt = skillCooldowns[cooldownSkillId] ?? 0;
       if (readyAt <= Date.now()) {
         onSkillTrigger(binding.skillId);
       }

@@ -65,6 +65,12 @@ import {
 } from "./runtime/mobRuntime.js";
 import { performWoodStaffStrike as performWoodStaffStrikeRuntime } from "./runtime/woodStaffStrikeRuntime.js";
 import {
+  continueWoodStaffChainStrike as continueWoodStaffChainStrikeRuntime,
+  performWoodStaffChainStrike as performWoodStaffChainStrikeRuntime,
+  type PendingWoodStaffChainStrike,
+} from "./runtime/woodStaffChainStrikeRuntime.js";
+import { performWoodStaffSlam as performWoodStaffSlamRuntime } from "./runtime/woodStaffSlamRuntime.js";
+import {
   updateRoomProjectiles,
   spawnProjectile as spawnProjectileRuntime,
   deleteProjectile as deleteProjectileRuntime,
@@ -222,6 +228,7 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected readonly verifiedPlayers = new Map<string, VerifiedPlayer>();
   protected readonly playerEquipmentItemProgression = new Map<string, EquipmentItemProgressionState>();
   protected readonly skillHandlers = createSkillHandlers();
+  protected readonly pendingWoodStaffChainStrikes = new Map<string, PendingWoodStaffChainStrike>();
   private readonly pendingPublishes = new Set<Promise<void>>();
   private readonly lastPersistedProfileSnapshots = new Map<string, string>();
   private mobSpatialDirty = true;
@@ -380,8 +387,28 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       clearPlayerCastState: (player) => this.clearPlayerCastState(player),
       performTeleportScroll: (playerId, player) => this.performTeleportScroll(playerId, player),
     });
+    this.updatePendingWoodStaffChainStrikes(now);
     this.statusEffects.update(now, { includeMobBurns: options.includeMobBurns });
     this.projectileSystem.update(deltaSeconds, now);
+  }
+
+  private updatePendingWoodStaffChainStrikes(now: number) {
+    for (const [ownerId, pending] of this.pendingWoodStaffChainStrikes.entries()) {
+      if (pending.nextAt > now) {
+        continue;
+      }
+
+      const nextPending = continueWoodStaffChainStrikeRuntime(
+        this.runtime.woodStaffChainStrikeContext(),
+        pending,
+      );
+      if (!nextPending || nextPending.remainingHits <= 0) {
+        this.pendingWoodStaffChainStrikes.delete(ownerId);
+        continue;
+      }
+
+      this.pendingWoodStaffChainStrikes.set(ownerId, nextPending);
+    }
   }
 
   // ── Skill casting ────────────────────────────────────────────────
@@ -414,33 +441,58 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
 
-      const lagCompensation = resolveLagCompensatedCastTimingRuntime(this.profile, normalizedMessage, now);
-      const weaponProgression = this.getPlayerWeaponItemProgression(sessionId);
-      const ctx = {
-        ...this.runtime.createSkillCastContext(sessionId, player, now, lagCompensation),
-        weaponProgression,
-        performWoodStaffStrike: (candidate: BasePlayerState, targetX: number, targetY: number) =>
-          this.performWoodStaffStrike(
-            sessionId,
-            candidate,
-            targetX,
-            targetY,
-            lagCompensation.at,
-            lagCompensation.enabled,
-            weaponProgression,
-          ),
-      };
+    const lagCompensation = resolveLagCompensatedCastTimingRuntime(this.profile, normalizedMessage, now);
+    const weaponProgression = this.getPlayerWeaponItemProgression(sessionId);
+    const ctx = {
+      ...this.runtime.createSkillCastContext(sessionId, player, now, lagCompensation),
+      weaponProgression,
+      performWoodStaffStrike: (candidate: BasePlayerState, targetX: number, targetY: number) =>
+        this.performWoodStaffStrike(
+          sessionId,
+          candidate,
+          targetX,
+          targetY,
+          lagCompensation.at,
+          lagCompensation.enabled,
+          weaponProgression,
+        ),
+      performWoodStaffChainStrike: (candidate: BasePlayerState, targetX: number, targetY: number) =>
+        this.performWoodStaffChainStrike(
+          sessionId,
+          candidate,
+          targetX,
+          targetY,
+          lagCompensation.at,
+          lagCompensation.enabled,
+          weaponProgression,
+        ),
+      performWoodStaffSlam: (candidate: BasePlayerState) =>
+        performWoodStaffSlamRuntime(
+          this.runtime.woodStaffSlamContext(),
+          sessionId,
+          candidate,
+          weaponProgression,
+        ),
+    };
 
-      if (skillId === "woodStaffDash" && !getItemProgressionBonuses(player.weaponItem, weaponProgression).grantsWoodStaffDash) {
-        return;
-      }
+    const progressionBonuses = getItemProgressionBonuses(player.weaponItem, weaponProgression);
+
+    if (skillId === "woodStaffDash" && !progressionBonuses.grantsWoodStaffDash) {
+      return;
+    }
+    if (skillId === "woodStaffSlam" && !progressionBonuses.grantsWoodStaffSlam) {
+      return;
+    }
+    if (skillId === "woodStaffChainStrike" && !progressionBonuses.grantsWoodStaffChainStrike) {
+      return;
+    }
 
     let targetX = player.x;
     let targetY = player.y;
     if (handler.needsTarget) {
       const requestedTargetX = normalizedMessage.targetX ?? player.x;
       const requestedTargetY = normalizedMessage.targetY ?? player.y;
-      if (skillId === "woodStaffStrike") {
+      if (skillId === "woodStaffStrike" || skillId === "woodStaffChainStrike") {
         const originX = player.x;
         const originY = player.y - this.profile.playerHitRadius;
         const deltaX = requestedTargetX - originX;
@@ -448,8 +500,12 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
         const distance = Math.hypot(deltaX, deltaY);
         const upRangeBonus = 24;
         const downRangePenalty = 16;
+        const progressionRangeBonus =
+          progressionBonuses.meleeStrikeRangeBonusPx +
+          (skillId === "woodStaffChainStrike" ? progressionBonuses.woodStaffChainStrikeRangeBonusPx : 0);
         const maxRange =
           this.profile.meleeStrikeRange +
+          progressionRangeBonus +
           (deltaY < 0 ? upRangeBonus : deltaY > 0 ? -downRangePenalty : 0);
         if (distance > 0.001 && distance > maxRange) {
           const scale = maxRange / distance;
@@ -593,6 +649,30 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   }
 
   // ── Projectile system ────────────────────────────────────────────
+  protected performWoodStaffChainStrike(
+    ownerId: string,
+    player: BasePlayerState,
+    targetX: number,
+    targetY: number,
+    lagCompensatedAt = Date.now(),
+    lagCompensationEnabled = false,
+    weaponProgression?: ItemProgressionState | null,
+  ) {
+    const pending = performWoodStaffChainStrikeRuntime(
+      this.runtime.woodStaffChainStrikeContext(),
+      ownerId,
+      player,
+      targetX,
+      targetY,
+      lagCompensatedAt,
+      lagCompensationEnabled,
+      weaponProgression,
+    );
+    if (pending) {
+      this.pendingWoodStaffChainStrikes.set(ownerId, pending);
+    }
+  }
+
   protected updateProjectilesShared(deltaSeconds: number, now = Date.now()) {
     updateRoomProjectiles(this.runtime.projectileContext(), deltaSeconds, now);
   }

@@ -9,6 +9,7 @@ import {
   type RealtimeServices,
 } from "../src/services/runtimeServices.js";
 import { connectToRoom } from "./helpers/realtimeJoin.js";
+import { DEFAULT_MOB_BALANCE_CONFIG, type RaidRuntimeState } from "@mmorpg/shared";
 
 async function waitForNextSimulation(room: { waitForNextPatch: () => Promise<unknown> }, ms = 280) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -116,8 +117,8 @@ describe("raid room", () => {
       raidRunId: "raid-profile-health",
       seed: "raid-profile-health-seed",
       templateCode: "crypt",
-      width: 64,
-      height: 64,
+      width: 128,
+      height: 128,
     });
 
     const client = await connectToRoom(colyseus, room, {
@@ -150,6 +151,31 @@ describe("raid room", () => {
     assert.strictEqual(player!.maxHealth, 100);
     assert.notStrictEqual(player!.level, 99);
     assert.notStrictEqual(player!.strength, 99);
+  });
+
+  it("does not let raid join options override server-authoritative health", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-join-health-authority",
+      seed: "raid-join-health-authority-seed",
+      templateCode: "crypt",
+      width: 64,
+      height: 64,
+    });
+
+    const client = await connectToRoom(colyseus, room, {
+      name: "Join Health Raider",
+      raidRunId: "raid-join-health-authority",
+      weaponItem: "wood_staff",
+      health: 1,
+      maxHealth: 1,
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+    assert.strictEqual(player!.health, 100);
+    assert.strictEqual(player!.maxHealth, 100);
   });
 
   it("extracts the player with current loot when using an exit", async () => {
@@ -270,9 +296,121 @@ describe("raid room", () => {
 
     const mobKinds = new Set(Array.from(room.state.mobs.values(), (mob) => mob.kind));
 
-    assert.ok(room.state.mobs.size > 0);
+    assert.ok(room.state.mobs.size >= 10);
     assert.ok(mobKinds.has("bat"));
     assert.ok(Array.from(mobKinds).some((kind) => kind !== "bat"));
+  });
+
+  it("lets raid mobs deal melee damage to players", async () => {
+    assert.ok(DEFAULT_MOB_BALANCE_CONFIG.skeleton.attackDamage > 0);
+
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-mob-melee-damage",
+      seed: "raid-mob-melee-damage-seed",
+      templateCode: "crypt",
+      width: 128,
+      height: 128,
+    });
+
+    const client = await connectToRoom(colyseus, room, {
+      name: "Damage Raider",
+      raidRunId: "raid-mob-melee-damage",
+      weaponItem: "wood_staff",
+      health: 100,
+      maxHealth: 100,
+    });
+
+    await room.waitForNextPatch();
+
+    const player = room.state.players.get(client.sessionId);
+    const mob = Array.from(room.state.mobs.values()).find((candidate) => candidate.attackDamage > 0);
+    assert.ok(player);
+    assert.ok(mob);
+    if (!player || !mob) {
+      assert.fail("Expected player and damaging raid mob to exist");
+    }
+
+    player.health = 100;
+    player.x = mob.x + Math.max(4, mob.attackRange - 4);
+    player.y = mob.y;
+    mob.aggroTargetId = player.id;
+    mob.attackCooldownEndsAt = 0;
+    mob.moveSpeed = 0;
+
+    await waitForNextSimulation(room, 180);
+
+    assert.ok(player.health < 100, `Expected ${mob.kind} melee hit to reduce HP, got ${player.health}`);
+
+    await client.leave();
+  });
+
+  it("refreshes restored raid mob damage from current balance", async () => {
+    const runtimeState: RaidRuntimeState = {
+      status: "forming",
+      expiresAt: Date.now() + 60_000,
+      updatedAt: new Date().toISOString(),
+      mobs: [
+        {
+          id: "restored-skeleton",
+          kind: "skeleton",
+          name: "Skeleton",
+          texture: "skeleton",
+          aggroTargetId: "",
+          aggroLockedUntil: 0,
+          spawnX: 400,
+          spawnY: 400,
+          x: 400,
+          y: 400,
+          targetX: 400,
+          targetY: 400,
+          patrolMinX: 368,
+          patrolMaxX: 432,
+          patrolY: 400,
+          patrolRadiusY: 0,
+          patrolPhase: 0,
+          moveSpeed: 58,
+          aggroRange: 160,
+          leashRange: 240,
+          attackRange: 28,
+          attackDamage: 0,
+          attackCooldownMs: 1100,
+          attackCooldownEndsAt: 0,
+          castingSkillId: "",
+          castStartedAt: 0,
+          castEndsAt: 0,
+          skillLungeStartedAt: 0,
+          skillLungeEndsAt: 0,
+          skillLungeFromX: 0,
+          skillLungeFromY: 0,
+          skillLungeToX: 0,
+          skillLungeToY: 0,
+          experienceReward: 36,
+          health: 52,
+          maxHealth: 52,
+          burnTicksRemaining: 0,
+          burnEndsAt: 0,
+          poisonTicksRemaining: 0,
+          poisonEndsAt: 0,
+          dead: false,
+          respawnAt: 0,
+        },
+      ],
+      chests: [],
+      groundEffects: [],
+    };
+
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-restored-mob-balance",
+      seed: "raid-restored-mob-balance-seed",
+      templateCode: "crypt",
+      runtimeState,
+      width: 64,
+      height: 64,
+    });
+
+    const restoredMob = room.state.mobs.get("restored-skeleton");
+    assert.ok(restoredMob);
+    assert.strictEqual(restoredMob?.attackDamage, DEFAULT_MOB_BALANCE_CONFIG.skeleton.attackDamage);
   });
 
   it("fills non-tutorial raid chests with loot", async () => {
@@ -368,6 +506,38 @@ describe("raid room", () => {
     assert.strictEqual(dealt, 2);
     assert.strictEqual(player!.health, 1);
     assert.strictEqual(player!.dead, false);
+
+    await client.leave();
+  });
+
+  it("defaults raids to regular crypt without tutorial damage protection", async () => {
+    const room = await colyseus.createRoom<RaidRoomState>("raid", {
+      raidRunId: "raid-default-crypt",
+      seed: "raid-default-crypt-seed",
+      width: 64,
+      height: 64,
+    });
+
+    const client = await connectToRoom(colyseus, room, {
+      name: "Mortal Raider",
+      raidRunId: "raid-default-crypt",
+    });
+
+    await room.waitForNextPatch();
+
+    assert.strictEqual(room.state.templateCode, "crypt");
+    assert.strictEqual(room.state.templateName, "Crypt");
+
+    const player = room.state.players.get(client.sessionId);
+    assert.ok(player);
+    player!.health = 3;
+
+    const dealt = (room as unknown as {
+      applyDamageToPlayer: (target: { health: number }, amount: number, damageType: "physical" | "fire") => number;
+    }).applyDamageToPlayer(player!, 999, "physical");
+
+    assert.strictEqual(dealt, 3);
+    assert.strictEqual(player!.health, 0);
 
     await client.leave();
   });

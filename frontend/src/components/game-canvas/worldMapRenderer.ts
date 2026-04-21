@@ -426,6 +426,10 @@ export function renderWorldMap(params: WorldMapRendererParams) {
   };
 
   const placeWorldMob = (mob: MeadowMobAsset) => {
+    if (mob.kind === 'dummy') {
+      return;
+    }
+
     const renderState = resolveMobRenderState(mob.kind, scene.time.now);
     const worldX = mob.spawn.x * tileSize + tileSize / 2;
     const worldY = mob.spawn.y * tileSize + tileSize / 2;

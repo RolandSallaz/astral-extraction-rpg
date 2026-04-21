@@ -5,6 +5,7 @@ import type { MobState } from "../schema/MobState.js";
 import { getSegmentEllipseCollisionT } from "./geometry.js";
 import { setMobAggroTarget } from "./mobAi.js";
 import type { DamageType } from "./projectileSkills.js";
+import { recordMobDamage } from "./trainingDummyRuntime.js";
 
 type WoodStaffDashTarget =
   | { kind: "player"; entity: BasePlayerState; t: number }
@@ -152,6 +153,7 @@ function applyWoodStaffDashDamage(
   }
 
   target.entity.health = Math.max(0, target.entity.health - damage);
+  recordMobDamage(target.entity, damage);
   setMobAggroTarget(target.entity, player);
   ctx.onCombatLog(`${player.name} dashes into ${target.entity.name} for ${damage}.`);
   if (damage > 0) {

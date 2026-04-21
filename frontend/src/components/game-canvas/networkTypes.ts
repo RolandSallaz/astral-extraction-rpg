@@ -16,6 +16,7 @@ export type NetworkPlayerState = {
   healingEndsAt: number;
   woodStaffStrikeCooldownEndsAt: number;
   woodStaffDashCooldownEndsAt: number;
+  woodStaffSlamCooldownEndsAt: number;
   fireballCooldownEndsAt: number;
   fireNovaCooldownEndsAt: number;
   fireFieldCooldownEndsAt: number;
@@ -127,6 +128,7 @@ export type RaidNetworkPlayerState = {
   healingEndsAt?: number;
   woodStaffStrikeCooldownEndsAt?: number;
   woodStaffDashCooldownEndsAt?: number;
+  woodStaffSlamCooldownEndsAt?: number;
   fireballCooldownEndsAt?: number;
   fireNovaCooldownEndsAt?: number;
   fireFieldCooldownEndsAt?: number;

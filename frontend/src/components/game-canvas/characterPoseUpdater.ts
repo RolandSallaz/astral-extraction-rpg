@@ -127,6 +127,12 @@ export function updateCharacterPose(
   let swingProgress = 0;
   let swingTrailStart = 0;
   let swingTrailEnd = 1;
+  let swingTrailRadius = 0;
+  let swingTrailLineWidth = 18;
+  let swingTrailCoreWidth = 8;
+  let isSlamSwing = false;
+  let swingTrailOuterColor = 0xffe6b5;
+  let swingTrailCoreColor = 0xffd089;
   if (swingTarget) {
     const dx = swingTarget.x - character.container.x;
     const dy = swingTarget.y - character.container.y;
@@ -140,7 +146,7 @@ export function updateCharacterPose(
     }
   }
   if (
-    character.currentCastingSkillId === 'woodStaffStrike' &&
+    (character.currentCastingSkillId === 'woodStaffStrike' || character.currentCastingSkillId === 'woodStaffChainStrike') &&
     character.currentWeaponItem === WOOD_STAFF_ITEM_ID &&
     character.currentCastEndsAt > character.currentCastStartedAt
   ) {
@@ -155,6 +161,7 @@ export function updateCharacterPose(
     const strikeCutoff = 0.6;
     swingTrailStart = windupCutoff;
     swingTrailEnd = strikeCutoff;
+    swingTrailRadius = 0;
     const windupDist = 12;
     const strikeDist = 32;
     const windupLift = 26;
@@ -222,6 +229,66 @@ export function updateCharacterPose(
         aimAngleDeg,
         t,
       ) + staffTiltDeg;
+    }
+  } else if (
+    character.currentCastingSkillId === 'woodStaffSlam' &&
+    character.currentWeaponItem === WOOD_STAFF_ITEM_ID &&
+    character.currentCastEndsAt > character.currentCastStartedAt
+  ) {
+    isSwinging = true;
+    isSlamSwing = true;
+    const swingDuration = Math.max(1, character.currentCastEndsAt - character.currentCastStartedAt);
+    swingProgress = Phaser.Math.Clamp(
+      (castNow - character.currentCastStartedAt) / swingDuration,
+      0,
+      1,
+    );
+    const windupCutoff = 0.18;
+    const strikeCutoff = 0.88;
+    swingTrailStart = 0.12;
+    swingTrailEnd = 0.94;
+    swingTrailLineWidth = 22;
+    swingTrailCoreWidth = 10;
+    const profile = isRaidScene ? RAID_GAMEPLAY_PROFILE : WORLD_GAMEPLAY_PROFILE;
+    swingTrailRadius = Math.max(12, profile.tileSize * profile.woodStaffSlamRadiusTiles);
+    const baseAimAngleRad = character.facingX < 0 ? Math.PI : 0;
+    swingAimAngleRad = baseAimAngleRad;
+    handAimAngleDeg = character.facingX < 0 ? 180 : 0;
+    const aimAngleDeg = baseAimAngleRad * (180 / Math.PI);
+    const windupAngleDeg = -120;
+    const fullSweepDeg = 300;
+    const handRadius = 26;
+    const outerRadius = 44;
+    const windupLift = 18;
+    const staffTiltDeg = -10;
+
+    if (swingProgress < windupCutoff) {
+      const t = Math.sin((swingProgress / windupCutoff) * Math.PI * 0.5);
+      const handAngleRad = baseAimAngleRad + (windupAngleDeg * (Math.PI / 180)) * t;
+      const radius = Phaser.Math.Linear(0, handRadius, t);
+      swingOffsetX = Math.cos(handAngleRad) * radius;
+      swingOffsetY = Math.sin(handAngleRad) * radius - windupLift * t;
+      swingAngleDeg = aimAngleDeg + windupAngleDeg * t + staffTiltDeg;
+    } else if (swingProgress < strikeCutoff) {
+      const t = Math.sin(((swingProgress - windupCutoff) / (strikeCutoff - windupCutoff)) * Math.PI * 0.5);
+      const sweepAngleDeg = Phaser.Math.Linear(windupAngleDeg, windupAngleDeg + fullSweepDeg, t);
+      const handAngleRad = baseAimAngleRad + sweepAngleDeg * (Math.PI / 180);
+      const radius = Phaser.Math.Linear(handRadius, outerRadius, Math.sin(t * Math.PI * 0.5));
+      swingOffsetX = Math.cos(handAngleRad) * radius;
+      swingOffsetY = Math.sin(handAngleRad) * radius;
+      swingAngleDeg = aimAngleDeg + sweepAngleDeg + 12 + staffTiltDeg;
+    } else {
+      const t = Math.sin(((swingProgress - strikeCutoff) / (1 - strikeCutoff)) * Math.PI * 0.5);
+      const handAngleRad = baseAimAngleRad + (windupAngleDeg + fullSweepDeg) * (Math.PI / 180);
+      const radius = Phaser.Math.Linear(outerRadius, 0, t);
+      swingOffsetX = Math.cos(handAngleRad) * radius;
+      swingOffsetY = Phaser.Math.Linear(Math.sin(handAngleRad) * radius, 0, t);
+      handAimAngleDeg = Phaser.Math.Linear(character.facingX < 0 ? 180 : 0, 0, t);
+      swingAngleDeg = Phaser.Math.Linear(
+        aimAngleDeg + windupAngleDeg + fullSweepDeg + 12,
+        0,
+        t,
+      );
     }
   }
 
@@ -320,20 +387,28 @@ export function updateCharacterPose(
         1,
       );
       const fade = Math.sin(phaseT * Math.PI);
-      const sweepAngle = Phaser.Math.Linear(startAngle, endAngle, phaseT);
+      const sweepAngle = isSlamSwing
+        ? Phaser.Math.Linear(
+            trailAimAngle - Math.PI * 0.9,
+            trailAimAngle + Math.PI * 0.9,
+            phaseT,
+          )
+        : Phaser.Math.Linear(startAngle, endAngle, phaseT);
 
       trailPoints.length = 0;
       swingTrail.clear();
       swingTrail.setVisible(true);
-      const radius = Math.max(8, profile.meleeStrikeRange);
+      const radius = isSlamSwing
+        ? swingTrailRadius
+        : Math.max(8, profile.meleeStrikeRange);
       const tipX = originX + Math.cos(sweepAngle) * radius;
       const tipY = originY + Math.sin(sweepAngle) * radius;
-      swingTrail.lineStyle(18, 0xffe6b5, 0.55 * fade);
+      swingTrail.lineStyle(swingTrailLineWidth, swingTrailOuterColor, 0.55 * fade);
       swingTrail.beginPath();
       swingTrail.moveTo(originX, originY);
       swingTrail.lineTo(tipX, tipY);
       swingTrail.strokePath();
-      swingTrail.lineStyle(8, 0xffd089, 0.7 * fade);
+      swingTrail.lineStyle(swingTrailCoreWidth, swingTrailCoreColor, 0.7 * fade);
       swingTrail.beginPath();
       swingTrail.moveTo(originX, originY);
       swingTrail.lineTo(tipX, tipY);
