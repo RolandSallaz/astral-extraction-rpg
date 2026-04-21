@@ -7,11 +7,16 @@ import {
   isGemItemId,
   isItemId,
 } from "../items/catalog";
+import {
+  normalizeItemProgressionState,
+  type ItemProgressionState,
+} from "../items/itemProgression";
 
 export const STACK_SEPARATOR = "::";
 export const METADATA_SEPARATOR = "##";
 export const SOCKET_SEPARATOR = "@@";
 export const RAID_UNIDENTIFIED_METADATA_FLAG = "raid_unidentified";
+export const ITEM_PROGRESSION_METADATA_PREFIX = "item_progression=";
 
 export type ParsedInventoryItem = {
   itemId: ItemId;
@@ -21,7 +26,44 @@ export type ParsedInventoryItem = {
   raidUnidentified: boolean;
   socketedGemIds: Array<GemItemId | null>;
   socketedGemCodes: GemItemId[];
+  itemProgression: ItemProgressionState | null;
 };
+
+function encodeItemProgressionMetadata(progression: ItemProgressionState | null | undefined) {
+  if (!progression) {
+    return null;
+  }
+
+  if (progression.level <= 1 && progression.selectedUpgradeIds.length === 0) {
+    return null;
+  }
+
+  const selected = progression.selectedUpgradeIds.join("+");
+  return `${ITEM_PROGRESSION_METADATA_PREFIX}${progression.level}~${selected}`;
+}
+
+function decodeItemProgressionMetadata(
+  itemId: ItemId,
+  metadataFlags: string[],
+): ItemProgressionState | null {
+  const encoded = metadataFlags.find((flag) => flag.startsWith(ITEM_PROGRESSION_METADATA_PREFIX));
+  if (!encoded) {
+    return null;
+  }
+
+  const rawValue = encoded.slice(ITEM_PROGRESSION_METADATA_PREFIX.length);
+  const [rawLevel, rawSelected] = rawValue.split("~", 2);
+  const parsedLevel = Number.parseInt(rawLevel ?? "1", 10);
+  const selectedUpgradeIds = (rawSelected ?? "")
+    .split("+")
+    .map((candidate) => candidate.trim())
+    .filter((candidate) => candidate.length > 0);
+
+  return normalizeItemProgressionState(itemId, {
+    level: Number.isFinite(parsedLevel) ? parsedLevel as ItemProgressionState["level"] : 1,
+    selectedUpgradeIds: selectedUpgradeIds as ItemProgressionState["selectedUpgradeIds"],
+  });
+}
 
 export function normalizeSocketedGemIds(
   itemId: ItemId,
@@ -44,11 +86,20 @@ export function serializeInventoryItem(
   itemId: ItemId,
   quantity = 1,
   socketedGemIds?: Array<string | null> | null,
-  options?: { raidUnidentified?: boolean },
+  options?: { raidUnidentified?: boolean; itemProgression?: ItemProgressionState | null },
 ) {
   const item = ITEM_DEFINITIONS[itemId];
   const normalizedSocketedGemIds = normalizeSocketedGemIds(itemId, socketedGemIds);
-  const metadataSuffix = options?.raidUnidentified ? `${METADATA_SEPARATOR}${RAID_UNIDENTIFIED_METADATA_FLAG}` : "";
+  const metadataFlags = [
+    ...(options?.raidUnidentified ? [RAID_UNIDENTIFIED_METADATA_FLAG] : []),
+  ];
+  const encodedProgression = encodeItemProgressionMetadata(
+    normalizeItemProgressionState(itemId, options?.itemProgression ?? null),
+  );
+  if (encodedProgression) {
+    metadataFlags.push(encodedProgression);
+  }
+  const metadataSuffix = metadataFlags.length > 0 ? `${METADATA_SEPARATOR}${metadataFlags.join(",")}` : "";
 
   if (!item.stackable || quantity <= 1) {
     if (normalizedSocketedGemIds.length === 0) {
@@ -100,6 +151,7 @@ export function parseInventoryItem(value: string | null | undefined): ParsedInve
             .map((candidate) => candidate.trim() || null),
         )
       : [];
+  const itemProgression = decodeItemProgressionMetadata(baseId, metadataFlags);
 
   return {
     itemId: baseId,
@@ -109,6 +161,7 @@ export function parseInventoryItem(value: string | null | undefined): ParsedInve
     raidUnidentified: metadataFlags.includes(RAID_UNIDENTIFIED_METADATA_FLAG),
     socketedGemIds,
     socketedGemCodes: socketedGemIds.filter((gemId): gemId is GemItemId => gemId !== null),
+    itemProgression,
   };
 }
 
@@ -128,6 +181,7 @@ export function normalizeInventoryEntry(value: string | null | undefined) {
 
   return serializeInventoryItem(parsed.itemId, parsed.quantity, parsed.socketedGemIds, {
     raidUnidentified: parsed.raidUnidentified,
+    itemProgression: parsed.itemProgression,
   });
 }
 
@@ -137,7 +191,9 @@ export function identifyInventoryEntry(value: string | null | undefined) {
     return EMPTY_ITEM_SLOT;
   }
 
-  return serializeInventoryItem(parsed.itemId, parsed.quantity, parsed.socketedGemIds);
+  return serializeInventoryItem(parsed.itemId, parsed.quantity, parsed.socketedGemIds, {
+    itemProgression: parsed.itemProgression,
+  });
 }
 
 export function revealMatchedRaidUnidentifiedInventoryEntries(

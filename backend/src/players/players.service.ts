@@ -57,6 +57,7 @@ export class PlayersService {
       await this.playerInventoryService.syncPlayerItems(
         player.id,
         input.equipment ?? this.playerSerializer.buildEquipmentState(player),
+        input.equipmentItemProgression ?? this.playerSerializer.buildEquipmentItemProgressionState(player),
         input.inventory ?? this.playerSerializer.buildInventoryState(player),
       );
     }

@@ -1,4 +1,5 @@
 import { FIREBALL_BASE_CAST_TIME_MS } from "@mmorpg/shared/skills/fireball";
+import { GEMS_ENABLED } from "@mmorpg/shared/items/catalog";
 import {
   AREA_GEM_ID,
   CAST_SPEED_GEM_ID,
@@ -111,10 +112,18 @@ export type ProjectileGemConfig = {
 };
 
 export function hasWeaponGem(player: WeaponGemCarrier | undefined, gemItemId: string) {
+  if (!GEMS_ENABLED) {
+    return false;
+  }
+
   return countWeaponGems(player, gemItemId) > 0;
 }
 
 export function countWeaponGems(player: WeaponGemCarrier | undefined, gemItemId: string) {
+  if (!GEMS_ENABLED) {
+    return 0;
+  }
+
   let count = 0;
   if (player?.weaponGemItem1 === gemItemId) {
     count += 1;
@@ -132,6 +141,10 @@ export function countWeaponGems(player: WeaponGemCarrier | undefined, gemItemId:
 }
 
 export function hasAnyWeaponGem(player: WeaponGemCarrier | undefined, gemItemId: string) {
+  if (!GEMS_ENABLED) {
+    return false;
+  }
+
   return (
     player?.weaponGemItem1 === gemItemId ||
     player?.weaponGemItem2 === gemItemId ||

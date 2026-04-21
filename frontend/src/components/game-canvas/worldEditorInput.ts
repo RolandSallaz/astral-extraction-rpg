@@ -2,7 +2,7 @@
 
 import type { MutableRefObject } from 'react';
 import type Phaser from 'phaser';
-import type { MouseActionSlotKey } from '@/components/GameHud';
+import type { MouseActionSlotKey } from '@/components/game-hud/types';
 
 type WorldEditorMode = 'tile' | 'sprite' | 'mob' | 'spawn' | 'trader';
 

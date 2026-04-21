@@ -1,14 +1,19 @@
 import type { MapSchema } from "@colyseus/schema";
 import type { SkillBalanceConfig } from "@mmorpg/shared";
 import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
-import type { DamageType } from "../projectileSkills.js";
+import type { DamageType } from "../runtime/projectileSkills.js";
 import { BurnService } from "../services/BurnService.js";
 import { HealingService, type HealablePlayer } from "../services/HealingService.js";
-import { setMobAggroTarget } from "../mobAi.js";
+import { PoisonService, type PoisonableEntity } from "../services/PoisonService.js";
+import { setMobAggroTarget } from "../runtime/mobAi.js";
+import { recordMobDamage } from "../runtime/trainingDummyRuntime.js";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { GroundEffectState } from "../schema/GroundEffectState.js";
 import type { MobState } from "../schema/MobState.js";
 import { applyRoomBurnToEntity, updateRoomBurningEntities, updateRoomHealingTargets } from "../runtime/statusRuntime.js";
+
+type PoisonablePlayer = BasePlayerState & PoisonableEntity;
+type PoisonableMob = MobState & PoisonableEntity;
 
 type StatusEffectContext = {
   getProfile: () => RoomGameplayProfile;
@@ -30,14 +35,18 @@ type StatusEffectContext = {
 export class StatusEffectSystem {
   private readonly playerBurns = new BurnService();
   private readonly mobBurns = new BurnService();
+  private readonly playerPoisons = new PoisonService();
+  private readonly mobPoisons = new PoisonService();
   private readonly playerHealing = new HealingService();
 
   constructor(private readonly context: StatusEffectContext) {}
 
   update(now: number, options: { includeMobBurns?: boolean } = {}) {
     this.updateBurningPlayers(now);
+    this.updatePoisonedPlayers(now);
     if (options.includeMobBurns) {
       this.updateBurningMobs(now);
+      this.updatePoisonedMobs(now);
     }
     this.updateHealingPlayers(now);
     this.updateGroundEffects(now);
@@ -52,6 +61,28 @@ export class StatusEffectSystem {
     now = Date.now(),
   ) {
     this.playerHealing.start(playerId, totalTicks, tickMs, durationMs, player, now);
+  }
+
+  startPlayerPoison(
+    playerId: string,
+    totalTicks: number,
+    tickMs: number,
+    damagePerTick: number,
+    player: PoisonablePlayer,
+    now = Date.now(),
+  ) {
+    this.playerPoisons.start(playerId, player, totalTicks, tickMs, damagePerTick, now);
+  }
+
+  startMobPoison(
+    mobId: string,
+    totalTicks: number,
+    tickMs: number,
+    damagePerTick: number,
+    mob: PoisonableMob,
+    now = Date.now(),
+  ) {
+    this.mobPoisons.start(mobId, mob, totalTicks, tickMs, damagePerTick, now);
   }
 
   applyBurnToPlayer(player: BasePlayerState, sourceSkill: keyof SkillBalanceConfig, ownerId?: string) {
@@ -80,23 +111,37 @@ export class StatusEffectSystem {
     });
   }
 
+  clearPlayerPoison(playerId: string) {
+    this.playerPoisons.delete(playerId);
+    const player = this.context.getPlayer(playerId);
+    if (player) {
+      (player as PoisonablePlayer).poisonTicksRemaining = 0;
+      (player as PoisonablePlayer).poisonEndsAt = 0;
+    }
+  }
+
   deletePlayerEffects(playerId: string) {
     this.playerBurns.delete(playerId);
+    this.playerPoisons.delete(playerId);
     this.playerHealing.delete(playerId);
   }
 
   deleteMobBurn(mobId: string) {
     this.mobBurns.delete(mobId);
+    this.mobPoisons.delete(mobId);
   }
 
   movePlayerEffects(fromId: string, toId: string) {
     this.playerBurns.move(fromId, toId);
+    this.playerPoisons.move(fromId, toId);
     this.playerHealing.move(fromId, toId);
   }
 
   clearAll() {
     this.playerBurns.clear();
     this.mobBurns.clear();
+    this.playerPoisons.clear();
+    this.mobPoisons.clear();
     this.playerHealing.clear();
   }
 
@@ -125,8 +170,40 @@ export class StatusEffectSystem {
       skillBalance: this.context.getSkillBalance(),
       getEntity: (mobId) => this.context.getMob(mobId),
       onTick: (_mobId, mob, damage) => {
-        mob.health = Math.max(0, mob.health - damage);
-        this.context.onCombatLog(`${mob.name} burns for ${damage}.`);
+          mob.health = Math.max(0, mob.health - damage);
+          recordMobDamage(mob, damage);
+          this.context.onCombatLog(`${mob.name} burns for ${damage}.`);
+        if (mob.health <= 0) {
+          this.context.handleMobDeath(mob);
+        }
+      },
+    });
+  }
+
+  private updatePoisonedPlayers(now: number) {
+    this.playerPoisons.update({
+      now,
+      tickMs: this.context.getProfile().poisonPotionTickMs,
+      getEntity: (playerId) => this.context.getPlayer(playerId) as PoisonablePlayer | undefined,
+      onTick: (_playerId, player, damage) => {
+        const resolvedDamage = this.context.applyDamageToPlayer(player, damage, "physical");
+        this.context.onCombatLog(`${player.name} suffers ${resolvedDamage} poison damage.`);
+        if (player.health <= 0) {
+          this.context.handlePlayerKilled(player);
+        }
+      },
+    });
+  }
+
+  private updatePoisonedMobs(now: number) {
+    this.mobPoisons.update({
+      now,
+      tickMs: this.context.getProfile().poisonPotionTickMs,
+      getEntity: (mobId) => this.context.getMob(mobId) as PoisonableMob | undefined,
+      onTick: (_mobId, mob, damage) => {
+          mob.health = Math.max(0, mob.health - damage);
+          recordMobDamage(mob, damage);
+          this.context.onCombatLog(`${mob.name} suffers ${damage} poison damage.`);
         if (mob.health <= 0) {
           this.context.handleMobDeath(mob);
         }
@@ -188,8 +265,9 @@ export class StatusEffectSystem {
           continue;
         }
 
-        mob.health = Math.max(0, mob.health - effectDamage);
-        this.applyBurnToMob(mob, effect.skillId === "fireTrail" ? "fireball" : "fireField", effect.ownerId);
+          mob.health = Math.max(0, mob.health - effectDamage);
+          recordMobDamage(mob, effectDamage);
+          this.applyBurnToMob(mob, effect.skillId === "fireTrail" ? "fireball" : "fireField", effect.ownerId);
         if (owner && !owner.dead) {
           setMobAggroTarget(mob, owner);
         }

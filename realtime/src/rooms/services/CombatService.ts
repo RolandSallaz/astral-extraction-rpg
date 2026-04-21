@@ -4,12 +4,13 @@
  * return results without mutating shared room state.
  */
 
-import { type DamageType } from "../projectileSkills.js";
+import { type DamageType } from "../runtime/projectileSkills.js";
 import {
   getSharedDamageTakenMultiplier,
   applyHealingMultiplier,
-} from "../projectileSkills.js";
-import { type ArmorGemCarrier } from "../armorGems.js";
+} from "../runtime/projectileSkills.js";
+import { type ArmorGemCarrier } from "../runtime/armorGems.js";
+import type { BasePlayerState } from "../schema/BasePlayerState.js";
 
 export type DamageablePlayer = ArmorGemCarrier & {
   id: string;
@@ -19,6 +20,8 @@ export type DamageablePlayer = ArmorGemCarrier & {
   bodyItem?: string;
   burnTicksRemaining: number;
   burnEndsAt: number;
+  poisonTicksRemaining: number;
+  poisonEndsAt: number;
   healingTicksRemaining: number;
   healingEndsAt: number;
 };
@@ -34,12 +37,14 @@ export function applyDamageToPlayer(
   amount: number,
   damageType: DamageType,
   itemFireResistance: Map<string, number>,
-  options?: { minimumHealth?: number },
+  options?: { minimumHealth?: number; fireResistancePotionPercent?: number },
 ) {
   const multiplier = getSharedDamageTakenMultiplier(
     player,
     damageType,
     itemFireResistance,
+    (player as BasePlayerState).fireResistanceBuffEndsAt,
+    options?.fireResistancePotionPercent ?? 0,
   );
   const resolvedDamage = Math.max(0, Math.round(amount * multiplier));
   const minimumHealth = options?.minimumHealth ?? 0;
@@ -62,6 +67,8 @@ export function killPlayer(
   if ("moveY" in player) player.moveY = 0;
   player.burnTicksRemaining = 0;
   player.burnEndsAt = 0;
+  player.poisonTicksRemaining = 0;
+  player.poisonEndsAt = 0;
   player.healingTicksRemaining = 0;
   player.healingEndsAt = 0;
 }

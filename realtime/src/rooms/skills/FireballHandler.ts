@@ -1,7 +1,7 @@
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { SkillHandler, SkillCastContext } from "./SkillHandler.js";
-import { getFireballCooldownMs } from "../fireballGems.js";
-import { buildFireballCastPlan } from "../projectileSkills.js";
+import { getFireballCooldownMs } from "../runtime/fireballGems.js";
+import { buildFireballCastPlan } from "../runtime/projectileSkills.js";
 
 export const FireballHandler: SkillHandler = {
   skillId: "fireball",

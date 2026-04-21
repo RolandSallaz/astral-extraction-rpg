@@ -1,7 +1,7 @@
 import assert from "assert";
 import { MobState } from "../src/rooms/schema/MobState.js";
-import { getMobDesiredTargetPosition, resolveMobAggroTarget, setMobAggroTarget } from "../src/rooms/mobAi.js";
-import { hasGridLineOfSight } from "../src/rooms/mobPathing.js";
+import { getMobDesiredTargetPosition, resolveMobAggroTarget, setMobAggroTarget } from "../src/rooms/runtime/mobAi.js";
+import { hasGridLineOfSight } from "../src/rooms/runtime/mobPathing.js";
 
 describe("mob AI aggro", () => {
   it("does not acquire a player through a blocking wall", () => {

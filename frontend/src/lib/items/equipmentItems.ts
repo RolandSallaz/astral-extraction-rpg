@@ -1,5 +1,6 @@
 import {
   ITEM_DEFINITIONS as SHARED_ITEM_DEFINITIONS,
+  GEMS_ENABLED,
   getInventoryItemId,
   getInventoryItemQuantity,
   identifyAllRaidUnidentifiedInventoryEntries,
@@ -15,7 +16,7 @@ import {
   type GemItemId,
   type GemType,
   type ItemId,
-  type ItemTier,
+  type ItemProgressionState,
   type MiscItemId,
   type QuestItemId,
   type SharedItemDefinition,
@@ -31,7 +32,7 @@ export type {
   GemItemId,
   GemType,
   ItemId,
-  ItemTier,
+  ItemProgressionState,
   MiscItemId,
   QuestItemId,
 };
@@ -76,56 +77,11 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     name: 'Wood Staff',
     value: 90,
     slot: 'weapon',
-    tier: 1,
     socketType: 'weapon',
     tooltipStats: ['Melee weapon', 'Astral catalyst', '1 gem socket'],
     textureKey: 'item-wood-staff',
     texturePath: '/items/equipment/wood_staff.png',
     socketCount: 1,
-    iconScale: 0.9,
-    compactIconScale: 0.9,
-    equippedAnchorHand: 'right',
-    equippedOffsetX: 0,
-    equippedOffsetY: 1,
-    equippedOriginX: 0.5,
-    equippedOriginY: 0.78,
-    worldRotationDeg: 0,
-    worldScale: 1.35,
-  },
-  wood_staff_t2: {
-    id: 'wood_staff_t2',
-    type: 'equipment',
-    name: 'Wood Staff (Rare)',
-    value: 90,
-    slot: 'weapon',
-    tier: 2,
-    socketType: 'weapon',
-    tooltipStats: ['Melee weapon', 'Astral catalyst', '2 gem sockets', 'Rare chest drop'],
-    textureKey: 'item-wood-staff-t2',
-    texturePath: '/items/equipment/wood_staff.png',
-    socketCount: 2,
-    iconScale: 0.9,
-    compactIconScale: 0.9,
-    equippedAnchorHand: 'right',
-    equippedOffsetX: 0,
-    equippedOffsetY: 1,
-    equippedOriginX: 0.5,
-    equippedOriginY: 0.78,
-    worldRotationDeg: 0,
-    worldScale: 1.35,
-  },
-  wood_staff_t3: {
-    id: 'wood_staff_t3',
-    type: 'equipment',
-    name: 'Wood Staff (Very Rare)',
-    value: 90,
-    slot: 'weapon',
-    tier: 3,
-    socketType: 'weapon',
-    tooltipStats: ['Melee weapon', 'Astral catalyst', '3 gem sockets', 'Very rare chest drop'],
-    textureKey: 'item-wood-staff-t3',
-    texturePath: '/items/equipment/wood_staff.png',
-    socketCount: 3,
     iconScale: 0.9,
     compactIconScale: 0.9,
     equippedAnchorHand: 'right',
@@ -142,42 +98,11 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     name: 'Fire Robe',
     value: 120,
     slot: 'body',
-    tier: 1,
     socketType: 'armor',
     tooltipStats: ['Body armor', '1 gem socket'],
     textureKey: 'item-fire-robe',
     texturePath: '/character/equipment/fire_robe/fire_robe_idle.png',
     socketCount: 1,
-    iconScale: 0.9,
-    compactIconScale: 0.9,
-  },
-  fire_robe_t2: {
-    id: 'fire_robe_t2',
-    type: 'equipment',
-    name: 'Fire Robe (Rare)',
-    value: 120,
-    slot: 'body',
-    tier: 2,
-    socketType: 'armor',
-    tooltipStats: ['Body armor', '2 gem sockets', 'Rare chest drop'],
-    textureKey: 'item-fire-robe-t2',
-    texturePath: '/character/equipment/fire_robe/fire_robe_idle.png',
-    socketCount: 2,
-    iconScale: 0.9,
-    compactIconScale: 0.9,
-  },
-  fire_robe_t3: {
-    id: 'fire_robe_t3',
-    type: 'equipment',
-    name: 'Fire Robe (Very Rare)',
-    value: 120,
-    slot: 'body',
-    tier: 3,
-    socketType: 'armor',
-    tooltipStats: ['Body armor', '3 gem sockets', 'Very rare chest drop'],
-    textureKey: 'item-fire-robe-t3',
-    texturePath: '/character/equipment/fire_robe/fire_robe_idle.png',
-    socketCount: 3,
     iconScale: 0.9,
     compactIconScale: 0.9,
   },
@@ -538,7 +463,72 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
     value: 12,
     tooltipStats: ['Restores 20 HP over 10s', 'Cooldown: 20s', 'Stacks to 5'],
     textureKey: 'item-healing-potion',
-    texturePath: '/pack/potion and poison asset pack/Crimson Health Elixir.png',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  poison_potion: {
+    id: 'poison_potion',
+    type: 'consumable',
+    name: 'Poison Potion',
+    value: 14,
+    tooltipStats: ['Poisons targets for 18 damage over 6s', 'Thrown only', 'Cooldown: 16s', 'Stacks to 5'],
+    textureKey: 'item-poison-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  slow_potion: {
+    id: 'slow_potion',
+    type: 'consumable',
+    name: 'Slow Potion',
+    value: 16,
+    tooltipStats: ['Slows targets by 40% for 5s', 'Thrown only', 'Cooldown: 18s', 'Stacks to 5'],
+    textureKey: 'item-slow-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  antidote: {
+    id: 'antidote',
+    type: 'consumable',
+    name: 'Antidote',
+    value: 10,
+    tooltipStats: ['Instantly removes poison', 'Cooldown: 10s', 'Stacks to 5'],
+    textureKey: 'item-antidote',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  speed_potion: {
+    id: 'speed_potion',
+    type: 'consumable',
+    name: 'Speed Potion',
+    value: 18,
+    tooltipStats: ['Increases speed by 40% for 8s', 'Cooldown: 30s', 'Stacks to 5'],
+    textureKey: 'item-speed-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
+    stackable: true,
+    maxStack: 5,
+    iconScale: 0.9,
+    compactIconScale: 0.9,
+  },
+  fire_resistance_potion: {
+    id: 'fire_resistance_potion',
+    type: 'consumable',
+    name: 'Fire Resistance Potion',
+    value: 20,
+    tooltipStats: ['Reduces fire damage by 50% for 12s', 'Cooldown: 30s', 'Stacks to 5'],
+    textureKey: 'item-fire-resistance-potion',
+    texturePath: '/sprites/consumables/healing-potion-white.png',
     stackable: true,
     maxStack: 5,
     iconScale: 0.9,
@@ -663,9 +653,12 @@ const RAW_ITEM_DEFINITIONS: Record<ItemId, RawItemDefinition> = {
   },
 };
 
-type ItemVisualOverride = Pick<ItemDefinition, 'texturePath' | 'iconTint'>;
+type ItemVisualOverride = Partial<Pick<ItemDefinition, 'texturePath' | 'iconTint'>>;
 
 const ITEM_VISUAL_OVERRIDES: Partial<Record<ItemId, ItemVisualOverride>> = {
+  healing_potion: {
+    iconTint: '#db4d5d',
+  },
   fire_trail_gem: {
     texturePath: '/sprites/gems/round-faceted-white.png',
     iconTint: '#ff8a3d',
@@ -789,7 +782,6 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = Object.fromEntri
         value: sharedDefinition.value,
         iconPath: visualOverride?.texturePath ?? sharedDefinition.iconPath,
         slot: sharedDefinition.slot,
-        tier: sharedDefinition.tier,
         socketType: sharedDefinition.socketType,
         gemType: sharedDefinition.gemType,
         socketableInto: sharedDefinition.socketableInto,
@@ -805,6 +797,7 @@ export const ITEM_DEFINITIONS: Record<ItemId, ItemDefinition> = Object.fromEntri
 
 export const EQUIPMENT_ITEMS = ITEM_DEFINITIONS as Record<ItemId, ItemDefinition>;
 export {
+  GEMS_ENABLED,
   getInventoryItemId,
   getInventoryItemQuantity,
   identifyAllRaidUnidentifiedInventoryEntries,
@@ -823,6 +816,20 @@ export function getItemIconTint(itemId: ItemId | string | null | undefined) {
   }
 
   return ITEM_DEFINITIONS[itemId as ItemId].iconTint ?? null;
+}
+
+export function getItemIconTintValue(itemId: ItemId | string | null | undefined) {
+  const tint = getItemIconTint(itemId);
+  if (!tint) {
+    return null;
+  }
+
+  const normalizedTint = tint.trim().replace(/^#/, '');
+  if (!/^[0-9a-fA-F]{6}$/.test(normalizedTint)) {
+    return null;
+  }
+
+  return Number.parseInt(normalizedTint, 16);
 }
 
 export function getEquipmentGemSlotId(slot: BaseEquipmentSlot, index: number): EquipmentSlot {
@@ -844,4 +851,3 @@ export function getBaseEquipmentSlot(slot: EquipmentSlot): BaseEquipmentSlot | n
 
   return slot as BaseEquipmentSlot;
 }
-

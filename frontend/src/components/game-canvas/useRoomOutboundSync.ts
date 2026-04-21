@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, type MutableRefObject, type RefObject } from 'react';
-import type { EquipmentState } from '@mmorpg/shared/player/contracts';
+import type { EquipmentItemProgressionState, EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { QuestLog } from '@mmorpg/shared/quests/core';
 import type {
   AdminUpdateMobBalanceMessage,
@@ -35,6 +35,7 @@ type PlayerProfileSnapshot = {
   playerQuests: QuestLog;
   playerInventory: Array<string | null>;
   playerEquipment: EquipmentState;
+  playerEquipmentItemProgression: EquipmentItemProgressionState;
 };
 
 type UseConsumableRequest = {
@@ -66,12 +67,18 @@ type UseRoomOutboundSyncParams = {
   lastSentRespawnNonceRef: MutableRefObject<number>;
   fireNovaCastNonce: number;
   woodStaffStrikeCastNonce: number;
+  woodStaffChainStrikeCastNonce: number;
+  woodStaffDashCastNonce: number;
+  woodStaffSlamCastNonce: number;
   sessionTokenRef: MutableRefObject<string | null>;
   contentVersionRef: MutableRefObject<string>;
   estimatedOneWayLatencyMsRef: MutableRefObject<number>;
   lastPointerWorldRef: MutableRefObject<{ x: number; y: number }>;
   skillCooldownsRef: MutableRefObject<{
     woodStaffStrike?: number;
+    woodStaffChainStrike?: number;
+    woodStaffDash?: number;
+    woodStaffSlam?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
@@ -102,6 +109,9 @@ export function useRoomOutboundSync({
   lastSentRespawnNonceRef,
   fireNovaCastNonce,
   woodStaffStrikeCastNonce,
+  woodStaffChainStrikeCastNonce,
+  woodStaffDashCastNonce,
+  woodStaffSlamCastNonce,
   sessionTokenRef,
   contentVersionRef,
   estimatedOneWayLatencyMsRef,
@@ -121,6 +131,7 @@ export function useRoomOutboundSync({
     createWorldProfileMessage,
     playerProfile.playerAgility,
     playerProfile.playerEquipment,
+    playerProfile.playerEquipmentItemProgression,
     playerProfile.playerExperience,
     playerProfile.playerHealth,
     playerProfile.playerIntellect,
@@ -234,7 +245,24 @@ export function useRoomOutboundSync({
   }, [activeRoomName, fireNovaCastNonce, createTimedCastSkillMessage, estimatedOneWayLatencyMsRef, roomRef]);
 
   useEffect(() => {
-    if (woodStaffStrikeCastNonce <= 0) {
+    if (woodStaffSlamCastNonce <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if ((skillCooldownsRef.current.woodStaffSlam ?? 0) > now) {
+      return;
+    }
+
+    const castSkillMessage = createTimedCastSkillMessage(
+      { skillId: 'woodStaffSlam' },
+      estimatedOneWayLatencyMsRef.current,
+    );
+    roomRef.current?.send('castSkill', castSkillMessage);
+  }, [activeRoomName, woodStaffSlamCastNonce, createTimedCastSkillMessage, estimatedOneWayLatencyMsRef, roomRef, skillCooldownsRef]);
+
+  useEffect(() => {
+    if (woodStaffChainStrikeCastNonce <= 0) {
       return;
     }
 
@@ -250,7 +278,42 @@ export function useRoomOutboundSync({
     const target = lastPointerWorldRef.current;
     const castSkillMessage = createTimedCastSkillMessage(
       {
-        skillId: 'woodStaffStrike',
+        skillId: 'woodStaffChainStrike',
+        targetX: target.x,
+        targetY: target.y,
+      },
+      estimatedOneWayLatencyMsRef.current,
+    );
+    roomRef.current.send('castSkill', castSkillMessage);
+  }, [
+    activeRoomName,
+    woodStaffChainStrikeCastNonce,
+    createTimedCastSkillMessage,
+    estimatedOneWayLatencyMsRef,
+    lastPointerWorldRef,
+    roomRef,
+    skillCooldownsRef,
+  ]);
+
+  useEffect(() => {
+    if (woodStaffStrikeCastNonce <= 0 && woodStaffDashCastNonce <= 0) {
+      return;
+    }
+
+    if (!roomRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    const skillId = woodStaffDashCastNonce > woodStaffStrikeCastNonce ? 'woodStaffDash' : 'woodStaffStrike';
+    if ((skillCooldownsRef.current[skillId] ?? 0) > now) {
+      return;
+    }
+
+    const target = lastPointerWorldRef.current;
+    const castSkillMessage = createTimedCastSkillMessage(
+      {
+        skillId,
         targetX: target.x,
         targetY: target.y,
       },
@@ -260,6 +323,7 @@ export function useRoomOutboundSync({
   }, [
     activeRoomName,
     woodStaffStrikeCastNonce,
+    woodStaffDashCastNonce,
     createTimedCastSkillMessage,
     estimatedOneWayLatencyMsRef,
     lastPointerWorldRef,

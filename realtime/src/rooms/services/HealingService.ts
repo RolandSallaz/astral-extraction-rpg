@@ -5,8 +5,8 @@
  * updateHealingTargets loops.
  */
 
-import { applyHealingMultiplier } from "../projectileSkills.js";
-import { type ArmorGemCarrier } from "../armorGems.js";
+import { applyHealingMultiplier } from "../runtime/projectileSkills.js";
+import { type ArmorGemCarrier } from "../runtime/armorGems.js";
 
 export type HealablePlayer = ArmorGemCarrier & {
   x: number;

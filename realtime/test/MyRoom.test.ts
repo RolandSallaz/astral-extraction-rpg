@@ -3,16 +3,18 @@ import { ColyseusTestServer, boot } from "@colyseus/testing";
 import { createAppConfig } from "../src/app.config.js";
 import { MyRoomState } from "../src/rooms/schema/MyRoomState.js";
 import { MobState } from "../src/rooms/schema/MobState.js";
-import { WORLD_GAMEPLAY_PROFILE } from "../src/rooms/sharedGameplay.js";
+import { WORLD_GAMEPLAY_PROFILE } from "../src/rooms/runtime/sharedGameplay.js";
 import { loadWorldDefinition } from "../src/rooms/worldDefinition.js";
 import { connectToRoom } from "./helpers/realtimeJoin.js";
 import {
   SKELETON_DASH_SKILL,
   SKELETON_DASH_SKILL_ID,
 } from "@mmorpg/shared/mobs/skills";
+import { recordMobDamage } from "../src/rooms/runtime/trainingDummyRuntime.js";
 
 const RAT_ID = "rat-scout";
 const BAT_ID = "bat-stalker";
+const DUMMY_ID = "training-dummy-near-spawn";
 
 async function waitForNextSimulation(room: { waitForNextPatch: () => Promise<unknown> }, ms = 280) {
   await new Promise((resolve) => setTimeout(resolve, ms));
@@ -107,6 +109,33 @@ function createTestSkeleton(id: string, x: number, y: number) {
   return skeleton;
 }
 
+function createTestDummy(id: string, x: number, y: number) {
+  const dummy = new MobState();
+  dummy.id = id;
+  dummy.kind = "dummy";
+  dummy.texture = "dummy";
+  dummy.name = "Training Dummy";
+  dummy.x = x;
+  dummy.y = y;
+  dummy.targetX = x;
+  dummy.targetY = y;
+  dummy.spawnX = x;
+  dummy.spawnY = y;
+  dummy.patrolMinX = x;
+  dummy.patrolMaxX = x;
+  dummy.patrolY = y;
+  dummy.moveSpeed = 0;
+  dummy.aggroRange = 0;
+  dummy.leashRange = 0;
+  dummy.attackRange = 0;
+  dummy.attackDamage = 0;
+  dummy.attackCooldownMs = 0;
+  dummy.health = 500;
+  dummy.maxHealth = 500;
+  dummy.experienceReward = 0;
+  return dummy;
+}
+
 describe("world room", () => {
   let colyseus: ColyseusTestServer<ReturnType<typeof createAppConfig>>;
 
@@ -193,7 +222,7 @@ describe("world room", () => {
     assert.strictEqual(stoppedPlayer?.lastProcessedInput, 8);
   });
 
-  it("loads the world lobby without legacy starter mobs", async () => {
+  it("loads the world lobby with the training dummy near spawn", async () => {
     const room = await colyseus.createRoom<MyRoomState>("world", { worldOwner: "tester" });
     await connectToRoom(colyseus, room, {
       worldOwner: "tester",
@@ -202,11 +231,50 @@ describe("world room", () => {
 
     await room.waitForNextPatch();
 
-    const rat = room.state.mobs.get(RAT_ID);
-    const bat = room.state.mobs.get(BAT_ID);
-    assert.strictEqual(rat, undefined);
-    assert.strictEqual(bat, undefined);
-    assert.strictEqual(room.state.mobs.size, 0);
+    const dummy = room.state.mobs.get(DUMMY_ID);
+    assert.ok(dummy);
+    assert.strictEqual(dummy?.kind, "dummy");
+    assert.strictEqual(room.state.mobs.size, 3);
+  });
+
+  it("resets the training dummy 3 seconds after the last hit", async () => {
+    const testDummyId = "test-training-dummy";
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    await connectToRoom(colyseus, room, {
+      name: "Dummy Tester",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+
+    const dummy = createTestDummy(testDummyId, 20 * 32 + 16, 14 * 32 + 16);
+    room.state.mobs.set(testDummyId, dummy);
+    await room.waitForNextPatch();
+
+    const serverDummy = room.state.mobs.get(testDummyId);
+    assert.ok(serverDummy);
+    serverDummy!.health = Math.max(0, serverDummy!.health - 40);
+    recordMobDamage(serverDummy!, 40);
+    await room.waitForNextPatch();
+
+    const damagedDummy = room.state.mobs.get(testDummyId);
+    assert.ok(damagedDummy);
+    assert.ok((damagedDummy?.health ?? 0) < (damagedDummy?.maxHealth ?? 0));
+    assert.ok((damagedDummy?.lastDamagedAt ?? 0) > 0);
+
+    damagedDummy!.x += 24;
+    damagedDummy!.y += 12;
+
+    await waitForNextSimulation(room, 3200);
+
+    const resetDummy = room.state.mobs.get(testDummyId);
+    assert.ok(resetDummy);
+    assert.strictEqual(resetDummy?.x, resetDummy?.spawnX);
+    assert.strictEqual(resetDummy?.y, resetDummy?.spawnY);
+    assert.strictEqual(resetDummy?.health, resetDummy?.maxHealth);
+    assert.strictEqual(resetDummy?.totalDamageTaken, 0);
+    assert.strictEqual(resetDummy?.totalHitsTaken, 0);
+    assert.strictEqual(resetDummy?.lastDamagedAt, 0);
   });
 
   it("spawns a rat mob with balance-driven health and patrol movement", async () => {
@@ -291,7 +359,7 @@ describe("world room", () => {
     player.y = skeleton.y;
     const startingHealth = player.health;
 
-    await waitForNextSimulation(room, 180);
+    await waitForNextSimulation(room, 720);
 
     assert.strictEqual(skeleton.castingSkillId, SKELETON_DASH_SKILL_ID);
     assert.strictEqual(skeleton.castEndsAt - skeleton.castStartedAt, SKELETON_DASH_SKILL.castMs);
@@ -459,7 +527,7 @@ describe("world room", () => {
       targetY: serverRat.y,
     });
 
-    await waitForNextSimulation(room, 180);
+    await waitForNextSimulation(room, 720);
 
     const updatedPlayer = room.state.players.get(attacker.sessionId);
     const updatedRat = room.state.mobs.get(RAT_ID);
@@ -473,6 +541,316 @@ describe("world room", () => {
     assert.strictEqual(updatedRat?.x, initialRatX);
     assert.strictEqual(updatedRat?.y, initialRatY);
     assert.strictEqual(updatedRat?.aggroTargetId, attacker.sessionId);
+  });
+
+  it("casts wood staff slam on nearby mobs when unlocked", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Slam Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 5,
+          selectedUpgradeIds: [
+            "wood_staff_range_2",
+            "wood_staff_cooldown_3",
+            "wood_staff_knockback_4",
+            "wood_staff_nova_5",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+    await spawnStaticWorldMobsForTest(room);
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const serverRat = room.state.mobs.get(RAT_ID);
+    assert.ok(serverPlayer);
+    assert.ok(serverRat);
+
+    if (!serverPlayer || !serverRat) {
+      assert.fail("Expected player and target mob to exist");
+    }
+
+    serverPlayer.x = serverRat.x - 24;
+    serverPlayer.y = serverRat.y;
+    const initialHealth = serverRat.health;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffSlam",
+    });
+
+    await waitForNextSimulation(room, 720);
+
+    const updatedPlayer = room.state.players.get(attacker.sessionId);
+    const updatedRat = room.state.mobs.get(RAT_ID);
+    assert.ok(updatedPlayer);
+    assert.ok(updatedRat);
+    assert.ok((updatedPlayer?.woodStaffSlamCooldownEndsAt ?? 0) > Date.now());
+    assert.ok((updatedRat?.health ?? initialHealth) < initialHealth);
+  });
+
+  it("casts chain strike on multiple nearby mobs when unlocked", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Chain Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 10,
+          selectedUpgradeIds: [
+            "wood_staff_range_2",
+            "wood_staff_cooldown_3",
+            "wood_staff_knockback_4",
+            "wood_staff_dash_5",
+            "wood_staff_rapid_6",
+            "wood_staff_mastery_7",
+            "wood_staff_echo_8",
+            "wood_staff_ruin_9",
+            "wood_staff_chain_10",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+    await spawnStaticWorldMobsForTest(room);
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const serverRat = room.state.mobs.get(RAT_ID);
+    const serverBat = room.state.mobs.get(BAT_ID);
+    assert.ok(serverPlayer);
+    assert.ok(serverRat);
+    assert.ok(serverBat);
+
+    if (!serverPlayer || !serverRat || !serverBat) {
+      assert.fail("Expected player and chain targets to exist");
+    }
+
+    serverPlayer.x = serverRat.x - 20;
+    serverPlayer.y = serverRat.y;
+    const initialPlayerX = serverPlayer.x;
+    const initialPlayerY = serverPlayer.y;
+    const initialRatHealth = serverRat.health;
+    const initialBatHealth = serverBat.health;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffChainStrike",
+      targetX: serverRat.x,
+      targetY: serverRat.y,
+    });
+
+    await waitForNextSimulation(room, 720);
+
+    const updatedPlayer = room.state.players.get(attacker.sessionId);
+    const updatedRat = room.state.mobs.get(RAT_ID);
+    const updatedBat = room.state.mobs.get(BAT_ID);
+    assert.ok(updatedPlayer);
+    assert.ok(updatedRat);
+    assert.ok(updatedBat);
+    assert.ok((updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0) > 0);
+    assert.ok((updatedRat?.health ?? initialRatHealth) < initialRatHealth);
+    assert.ok((updatedBat?.health ?? initialBatHealth) < initialBatHealth);
+    assert.ok(Math.hypot((updatedPlayer?.x ?? initialPlayerX) - initialPlayerX, (updatedPlayer?.y ?? initialPlayerY) - initialPlayerY) > 8);
+  });
+
+  it("repeats chain strike on the same target when no nearby targets exist", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Solo Chain Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 10,
+          selectedUpgradeIds: [
+            "wood_staff_range_2",
+            "wood_staff_cooldown_3",
+            "wood_staff_knockback_4",
+            "wood_staff_dash_5",
+            "wood_staff_rapid_6",
+            "wood_staff_mastery_7",
+            "wood_staff_echo_8",
+            "wood_staff_ruin_9",
+            "wood_staff_chain_10",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+    await spawnStaticWorldMobsForTest(room);
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const serverRat = room.state.mobs.get(RAT_ID);
+    const serverBat = room.state.mobs.get(BAT_ID);
+    assert.ok(serverPlayer);
+    assert.ok(serverRat);
+    assert.ok(serverBat);
+
+    if (!serverPlayer || !serverRat || !serverBat) {
+      assert.fail("Expected player and chain targets to exist");
+    }
+
+    serverPlayer.x = serverRat.x - 20;
+    serverPlayer.y = serverRat.y;
+    serverBat.x = serverRat.x + 512;
+    serverBat.y = serverRat.y + 512;
+    serverBat.targetX = serverBat.x;
+    serverBat.targetY = serverBat.y;
+    const initialRatHealth = serverRat.health;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffChainStrike",
+      targetX: serverRat.x,
+      targetY: serverRat.y,
+    });
+
+    await waitForNextSimulation(room, 720);
+
+    const updatedRat = room.state.mobs.get(RAT_ID);
+    const updatedBat = room.state.mobs.get(BAT_ID);
+    assert.ok(updatedRat);
+    assert.ok(updatedBat);
+    assert.ok((updatedRat?.health ?? initialRatHealth) <= initialRatHealth - 2);
+    assert.strictEqual(updatedBat?.health, serverBat.maxHealth);
+  });
+
+  it("applies chain strike branch upgrades for range, search radius, and extra bounce", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Extended Chain Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 13,
+          selectedUpgradeIds: [
+            "wood_staff_range_2",
+            "wood_staff_chain_10",
+            "wood_staff_chain_jump_11",
+            "wood_staff_chain_reach_12",
+            "wood_staff_chain_seek_13",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    assert.ok(serverPlayer);
+    if (!serverPlayer) {
+      assert.fail("Expected player to exist");
+    }
+
+    const baseX = 20 * 32 + 16;
+    const baseY = 14 * 32 + 16;
+    const rat = createTestRat(`${RAT_ID}-extended`, baseX, baseY);
+    const bat = createTestBat(`${BAT_ID}-extended`, baseX + 125, baseY);
+    const skeleton = createTestSkeleton("chain-skeleton-extended", baseX + 250, baseY);
+    const dummy = createTestDummy("chain-dummy-extended", baseX + 375, baseY);
+    for (const mob of [rat, bat, skeleton, dummy]) {
+      mob.moveSpeed = 0;
+      mob.aggroRange = 0;
+    }
+    room.state.mobs.clear();
+    room.state.mobs.set(rat.id, rat);
+    room.state.mobs.set(bat.id, bat);
+    room.state.mobs.set(skeleton.id, skeleton);
+    room.state.mobs.set(dummy.id, dummy);
+    await room.waitForNextPatch();
+
+    serverPlayer.x = rat.x - 65;
+    serverPlayer.y = rat.y;
+
+    const initialHealthById = new Map(
+      [rat, bat, skeleton, dummy].map((mob) => [mob.id, mob.health]),
+    );
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffChainStrike",
+      targetX: rat.x,
+      targetY: rat.y,
+    });
+
+    await waitForNextSimulation(room, 1250);
+
+    for (const mobId of initialHealthById.keys()) {
+      const updatedMob = room.state.mobs.get(mobId);
+      assert.ok(updatedMob);
+      assert.ok((updatedMob?.health ?? 0) < (initialHealthById.get(mobId) ?? 0), `${mobId} should be hit by extended chain strike`);
+    }
+  });
+
+  it("can refund chain strike bounces after chained hits deal damage", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Refund Chain Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 14,
+          selectedUpgradeIds: [
+            "wood_staff_chain_10",
+            "wood_staff_chain_refund_14",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+    await spawnStaticWorldMobsForTest(room);
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const serverRat = room.state.mobs.get(RAT_ID);
+    const serverBat = room.state.mobs.get(BAT_ID);
+    assert.ok(serverPlayer);
+    assert.ok(serverRat);
+    assert.ok(serverBat);
+
+    if (!serverPlayer || !serverRat || !serverBat) {
+      assert.fail("Expected player and chain targets to exist");
+    }
+
+    serverPlayer.x = serverRat.x - 20;
+    serverPlayer.y = serverRat.y;
+    serverBat.x = serverRat.x + 512;
+    serverBat.y = serverRat.y + 512;
+    serverBat.targetX = serverBat.x;
+    serverBat.targetY = serverBat.y;
+    const initialRatHealth = serverRat.health;
+    const originalRandom = Math.random;
+    Math.random = () => 0.1;
+    try {
+      attacker.send("castSkill", {
+        skillId: "woodStaffChainStrike",
+        targetX: serverRat.x,
+        targetY: serverRat.y,
+      });
+
+      await waitForNextSimulation(room, 1850);
+    } finally {
+      Math.random = originalRandom;
+    }
+
+    const updatedRat = room.state.mobs.get(RAT_ID);
+    assert.ok(updatedRat);
+    assert.ok((updatedRat?.health ?? initialRatHealth) <= initialRatHealth - 4);
   });
 
   it("rewinds recent player positions for lag-compensated wood staff strikes", async () => {
@@ -991,6 +1369,72 @@ describe("world room", () => {
     const payload = await healingTextPromise;
     assert.strictEqual(payload.text, "+2");
     assert.strictEqual(payload.color, "#6dff8f");
+  });
+
+  it("broadcasts a thrown healing potion event to all room clients", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const thrower = await connectToRoom(colyseus, room, {
+      name: "Thrower",
+      inventory: ["healing_potion::1"],
+    });
+    const ally = await connectToRoom(colyseus, room, {
+      name: "Potion Ally",
+    });
+
+    await room.waitForNextPatch();
+
+    const throwerPlayer = room.state.players.get(thrower.sessionId);
+    const allyPlayer = room.state.players.get(ally.sessionId);
+    assert.ok(throwerPlayer);
+    assert.ok(allyPlayer);
+
+    if (!throwerPlayer || !allyPlayer) {
+      assert.fail("Expected both players to exist");
+    }
+
+    throwerPlayer.x = 320;
+    throwerPlayer.y = 320;
+    allyPlayer.x = 384;
+    allyPlayer.y = 320;
+    allyPlayer.health = 60;
+
+    const targetX = 384;
+    const targetY = 320;
+    const waitForThrownMessage = (client: typeof thrower) =>
+      Promise.race([
+        new Promise<Record<string, unknown>>((resolve) => {
+          client.onMessage("thrownConsumable", (payload) => resolve(payload as Record<string, unknown>));
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("thrownConsumable not received")), 1200),
+        ),
+      ]);
+
+    const selfPayloadPromise = waitForThrownMessage(thrower);
+    const allyPayloadPromise = waitForThrownMessage(ally);
+
+    thrower.send("useConsumable", {
+      source: "inventory",
+      slotIndex: 0,
+      mode: "throw",
+      targetX,
+      targetY,
+    });
+
+    const [selfPayload, allyPayload] = await Promise.all([selfPayloadPromise, allyPayloadPromise]);
+    await room.waitForNextPatch();
+
+    assert.deepStrictEqual(allyPayload, selfPayload);
+    assert.strictEqual(selfPayload.itemId, "healing_potion");
+    assert.strictEqual(selfPayload.sourcePlayerId, thrower.sessionId);
+    assert.strictEqual(selfPayload.targetX, targetX);
+    assert.strictEqual(selfPayload.targetY, targetY);
+    assert.ok(typeof selfPayload.startX === "number");
+    assert.ok(typeof selfPayload.startY === "number");
+    assert.ok(typeof selfPayload.durationMs === "number");
+    assert.ok((selfPayload.durationMs as number) >= 180);
+    assert.ok((allyPlayer.healingTicksRemaining ?? 0) > 0);
+    assert.strictEqual(room.state.players.get(thrower.sessionId)?.inventory[0], "");
   });
 
   it("removes a disconnected player after the offline grace period expires", async () => {

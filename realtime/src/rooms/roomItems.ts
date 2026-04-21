@@ -1,6 +1,11 @@
 import {
   EMPTY_ITEM_SLOT,
   HEALING_POTION_ID,
+  POISON_POTION_ID,
+  SLOW_POTION_ID,
+  ANTIDOTE_ID,
+  SPEED_POTION_ID,
+  FIRE_RESISTANCE_POTION_ID,
   TELEPORT_SCROLL_ID,
   isItemId,
   normalizeInventoryEntry,
@@ -10,7 +15,16 @@ import {
   type ParsedInventoryItem,
 } from "@mmorpg/shared";
 
-export { EMPTY_ITEM_SLOT, HEALING_POTION_ID, TELEPORT_SCROLL_ID };
+export {
+  EMPTY_ITEM_SLOT,
+  HEALING_POTION_ID,
+  POISON_POTION_ID,
+  SLOW_POTION_ID,
+  ANTIDOTE_ID,
+  SPEED_POTION_ID,
+  FIRE_RESISTANCE_POTION_ID,
+  TELEPORT_SCROLL_ID,
+};
 
 export function parseRoomInventoryEntry(value: string | null | undefined): ParsedInventoryItem | null {
   return parseInventoryItem(value);

@@ -1,1 +1,47 @@
-[]
+[
+  {
+    "id": "training-dummy-near-spawn",
+    "kind": "dummy",
+    "spawn": {
+      "x": 18,
+      "y": 11
+    },
+    "patrol": {
+      "minX": 18,
+      "maxX": 18,
+      "y": 11,
+      "radiusY": 0,
+      "phase": 0
+    }
+  },
+  {
+    "id": "training-dummy-near-spawn-2",
+    "kind": "dummy",
+    "spawn": {
+      "x": 20,
+      "y": 11
+    },
+    "patrol": {
+      "minX": 20,
+      "maxX": 20,
+      "y": 11,
+      "radiusY": 0,
+      "phase": 0
+    }
+  },
+  {
+    "id": "training-dummy-near-spawn-3",
+    "kind": "dummy",
+    "spawn": {
+      "x": 22,
+      "y": 11
+    },
+    "patrol": {
+      "minX": 22,
+      "maxX": 22,
+      "y": 11,
+      "radiusY": 0,
+      "phase": 0
+    }
+  }
+]

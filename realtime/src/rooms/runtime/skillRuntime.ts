@@ -1,4 +1,4 @@
-import { type ArmorGemCarrier } from "../armorGems.js";
+import { type ArmorGemCarrier } from "./armorGems.js";
 import {
   canProjectileLeaveTrail as getCanProjectileLeaveTrail,
   canProjectileShatter as getCanProjectileShatter,
@@ -10,17 +10,17 @@ import {
   isProjectileReturningEnabled as getIsProjectileReturningEnabled,
   type ProjectileGemConfig,
   type WeaponGemCarrier,
-} from "../fireballGems.js";
+} from "./fireballGems.js";
 import {
   applyHealingMultiplier,
   getSharedFireballCastTimeMs,
-} from "../projectileSkills.js";
+} from "./projectileSkills.js";
 import { type ProjectileState, type ProjectileServerData } from "../schema/ProjectileState.js";
 import { type SkillBalanceConfig } from "@mmorpg/shared";
 import {
   getProjectileDamageScale as getSharedProjectileDamageScale,
   getProjectileDirectDamage as getSharedProjectileDirectDamage,
-} from "../sharedGameplay.js";
+} from "./sharedGameplay.js";
 
 export type ProjectileRuntimePlayer = WeaponGemCarrier &
   ArmorGemCarrier & {

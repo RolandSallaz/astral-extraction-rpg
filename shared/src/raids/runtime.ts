@@ -37,6 +37,8 @@ export type SerializedRaidMobState = {
   maxHealth: number;
   burnTicksRemaining: number;
   burnEndsAt: number;
+  poisonTicksRemaining: number;
+  poisonEndsAt: number;
   dead: boolean;
   respawnAt: number;
 };

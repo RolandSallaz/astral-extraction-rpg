@@ -9,6 +9,7 @@ import type {
   RaidExitStateMessage,
   RealtimeChatMessage,
   RespawnedMessage,
+  ThrownConsumableMessage,
 } from '@mmorpg/shared/realtime/contracts';
 import type { MobBalanceConfig, SkillBalanceConfig } from '@mmorpg/shared';
 
@@ -27,6 +28,7 @@ type RoomSyncHandlers = {
   syncProjectilesFromRoom: () => void;
   updateRaidVisibility: (force?: boolean) => void;
   createFloatingDamageText: (x: number, y: number, text: string, color?: string) => void;
+  playThrownConsumable: (payload: ThrownConsumableMessage) => void;
 };
 
 type UseRoomInboundSyncParams = {
@@ -144,6 +146,27 @@ export function useRoomInboundSync({
         }
 
         handlers.createFloatingDamageText(payload.x, payload.y, payload.text, payload.color ?? '#ff5959');
+      });
+
+      room.onMessage('thrownConsumable', (payload: ThrownConsumableMessage) => {
+        if (
+          typeof payload?.itemId !== 'string' ||
+          typeof payload?.startX !== 'number' ||
+          typeof payload?.startY !== 'number' ||
+          typeof payload?.targetX !== 'number' ||
+          typeof payload?.targetY !== 'number' ||
+          typeof payload?.durationMs !== 'number' ||
+          !Number.isFinite(payload.startX) ||
+          !Number.isFinite(payload.startY) ||
+          !Number.isFinite(payload.targetX) ||
+          !Number.isFinite(payload.targetY) ||
+          !Number.isFinite(payload.durationMs) ||
+          payload.durationMs <= 0
+        ) {
+          return;
+        }
+
+        handlers.playThrownConsumable(payload);
       });
 
       room.onMessage('raidExited', (payload: RaidExitStateMessage) => {

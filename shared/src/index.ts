@@ -2,6 +2,7 @@ export * from "./balance/skillBalance";
 export * from "./balance/mobBalance";
 export * from "./balance/itemBalance";
 export * from "./items/catalog";
+export * from "./items/itemProgression";
 export * from "./inventory/codec";
 export * from "./player/contracts";
 export * from "./player/visuals";

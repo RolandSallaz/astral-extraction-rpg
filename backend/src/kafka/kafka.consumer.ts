@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Kafka, logLevel } from 'kafkajs';
-import type { EquipmentState, InventoryState, QuestLog, RaidRuntimeState } from '@mmorpg/shared';
+import type { EquipmentItemProgressionState, EquipmentState, InventoryState, QuestLog, RaidRuntimeState } from '@mmorpg/shared';
 import { PlayersService } from '../players/players.service';
 import { UpdatePlayerDto } from '../players/dto/update-player.dto';
 import { RaidsService } from '../raids/raids.service';
@@ -8,6 +8,7 @@ import { RaidsService } from '../raids/raids.service';
 type PlayerProfileUpdatedEvent = {
   playerId: string;
   equipment?: EquipmentState;
+  equipmentItemProgression?: EquipmentItemProgressionState;
   inventory?: InventoryState;
   gold?: number;
   quests?: QuestLog;
@@ -142,6 +143,9 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
     }
     if (payload.inventory) {
       update.inventory = payload.inventory;
+    }
+    if (payload.equipmentItemProgression) {
+      update.equipmentItemProgression = payload.equipmentItemProgression;
     }
     if (typeof payload.gold === 'number') {
       update.gold = payload.gold;

@@ -1,3 +1,4 @@
+import { getItemProgressionBonuses } from "@mmorpg/shared";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { SkillHandler, SkillCastContext } from "./SkillHandler.js";
 
@@ -14,7 +15,8 @@ export const WoodStaffStrikeHandler: SkillHandler = {
   },
 
   getCooldownMs(ctx: SkillCastContext) {
-    return ctx.profile.meleeStrikeCooldownMs;
+    const bonuses = getItemProgressionBonuses(ctx.player.weaponItem, ctx.weaponProgression);
+    return Math.max(0, ctx.profile.meleeStrikeCooldownMs + bonuses.meleeStrikeCooldownDeltaMs);
   },
 
   getCastTimeMs() {

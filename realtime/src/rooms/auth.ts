@@ -6,7 +6,13 @@
  * must originate from the backend - never from client options.
  */
 
-import { INVENTORY_SIZE, canonicalizeItemId } from "@mmorpg/shared";
+import {
+  GEMS_ENABLED,
+  INVENTORY_SIZE,
+  canonicalizeItemId,
+  normalizeItemProgressionState,
+  type EquipmentItemProgressionState,
+} from "@mmorpg/shared";
 import { normalizeRoomInventorySlots } from "./roomItems.js";
 
 const BACKEND_BASE_URL =
@@ -38,6 +44,7 @@ export type VerifiedPlayer = {
     "weapon-gem-3"?: string;
   };
   inventory: Array<string | null>;
+  equipmentItemProgression: EquipmentItemProgressionState;
   position: { x: number; y: number };
 };
 
@@ -69,6 +76,7 @@ export async function verifySessionToken(
     character: {
       equipment: VerifiedPlayer["equipment"];
       inventory: VerifiedPlayer["inventory"];
+      equipmentItemProgression?: VerifiedPlayer["equipmentItemProgression"];
       position: VerifiedPlayer["position"];
       health: number;
       maxHealth: number;
@@ -93,6 +101,7 @@ export async function verifySessionToken(
     intellect: data.character.intellect,
     equipment: data.character.equipment ?? {},
     inventory: data.character.inventory ?? [],
+    equipmentItemProgression: data.character.equipmentItemProgression ?? {},
     position: data.character.position ?? { x: 0, y: 0 },
   };
 }
@@ -149,15 +158,15 @@ export function applyVerifiedProfile(
   player.bodyItem = canonicalBodyItem;
   player.headItem = canonicalHeadItem;
   player.weaponItem = canonicalWeaponItem;
-  player.headGemItem1 = verified.equipment["head-gem-1"] ?? "";
-  player.headGemItem2 = verified.equipment["head-gem-2"] ?? "";
-  player.headGemItem3 = verified.equipment["head-gem-3"] ?? "";
-  player.bodyGemItem1 = verified.equipment["body-gem-1"] ?? "";
-  player.bodyGemItem2 = verified.equipment["body-gem-2"] ?? "";
-  player.bodyGemItem3 = verified.equipment["body-gem-3"] ?? "";
-  player.weaponGemItem1 = verified.equipment["weapon-gem-1"] ?? "";
-  player.weaponGemItem2 = verified.equipment["weapon-gem-2"] ?? "";
-  player.weaponGemItem3 = verified.equipment["weapon-gem-3"] ?? "";
+  player.headGemItem1 = GEMS_ENABLED ? verified.equipment["head-gem-1"] ?? "" : "";
+  player.headGemItem2 = GEMS_ENABLED ? verified.equipment["head-gem-2"] ?? "" : "";
+  player.headGemItem3 = GEMS_ENABLED ? verified.equipment["head-gem-3"] ?? "" : "";
+  player.bodyGemItem1 = GEMS_ENABLED ? verified.equipment["body-gem-1"] ?? "" : "";
+  player.bodyGemItem2 = GEMS_ENABLED ? verified.equipment["body-gem-2"] ?? "" : "";
+  player.bodyGemItem3 = GEMS_ENABLED ? verified.equipment["body-gem-3"] ?? "" : "";
+  player.weaponGemItem1 = GEMS_ENABLED ? verified.equipment["weapon-gem-1"] ?? "" : "";
+  player.weaponGemItem2 = GEMS_ENABLED ? verified.equipment["weapon-gem-2"] ?? "" : "";
+  player.weaponGemItem3 = GEMS_ENABLED ? verified.equipment["weapon-gem-3"] ?? "" : "";
 
   if (player.inventory) {
     const normalizedInventory = normalizeRoomInventorySlots(verified.inventory ?? [], INVENTORY_SIZE);
@@ -165,5 +174,12 @@ export function applyVerifiedProfile(
     normalizedInventory.forEach((value) => {
       player.inventory?.push(value);
     });
+  }
+
+  if (verified.equipmentItemProgression.weapon) {
+    verified.equipmentItemProgression.weapon = normalizeItemProgressionState(
+      canonicalWeaponItem,
+      verified.equipmentItemProgression.weapon,
+    ) ?? undefined;
   }
 }

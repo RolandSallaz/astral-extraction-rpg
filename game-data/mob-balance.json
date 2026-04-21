@@ -25,8 +25,18 @@
     "aggroRange": 160,
     "leashRange": 240,
     "attackRange": 28,
-    "attackDamage": 0,
+    "attackDamage": 9,
     "attackCooldownMs": 1100,
     "experienceReward": 36
+  },
+  "dummy": {
+    "maxHealth": 500,
+    "moveSpeed": 0,
+    "aggroRange": 0,
+    "leashRange": 0,
+    "attackRange": 0,
+    "attackDamage": 0,
+    "attackCooldownMs": 0,
+    "experienceReward": 0
   }
 }

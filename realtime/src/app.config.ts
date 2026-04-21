@@ -4,9 +4,12 @@ import {
     monitor,
     playground,
 } from "colyseus";
+import { Encoder } from "@colyseus/schema";
 
 import { MyRoom } from "./rooms/MyRoom.js";
 import { RaidRoom } from "./rooms/RaidRoom.js";
+
+Encoder.BUFFER_SIZE = 256 * 1024;
 
 export function createAppConfig() {
     return defineServer({

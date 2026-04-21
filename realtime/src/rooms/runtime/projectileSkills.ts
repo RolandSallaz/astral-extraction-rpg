@@ -42,7 +42,7 @@ export type PendingAftershock = {
   triggerAt: number;
 };
 
-import type { ProjectileServerData } from "./schema/ProjectileState.js";
+import type { ProjectileServerData } from "../schema/ProjectileState.js";
 
 /**
  * Union of schema (visual) fields and server-only combat fields.
@@ -80,10 +80,16 @@ export function getSharedDamageTakenMultiplier(
   player: CombatGemPlayer | undefined,
   damageType: DamageType,
   itemFireResistance: Map<string, number>,
+  fireResistanceBuffEndsAt = 0,
+  fireResistancePotionPercent = 0,
 ) {
   const armorGemConfig = getArmorGemConfig(player);
   if (damageType === "fire") {
-    return getFireDamageTakenMultiplier(player?.bodyItem, itemFireResistance) * armorGemConfig.damageTakenMultiplier;
+    let multiplier = getFireDamageTakenMultiplier(player?.bodyItem, itemFireResistance) * armorGemConfig.damageTakenMultiplier;
+    if (fireResistanceBuffEndsAt > Date.now()) {
+      multiplier *= 1 - Math.max(0, Math.min(100, fireResistancePotionPercent)) / 100;
+    }
+    return multiplier;
   }
 
   return armorGemConfig.damageTakenMultiplier;

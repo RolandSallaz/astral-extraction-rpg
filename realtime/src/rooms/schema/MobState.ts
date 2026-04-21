@@ -40,6 +40,12 @@ export class MobState extends Schema {
   @type("number") maxHealth = 100;
   @type("number") burnTicksRemaining = 0;
   @type("number") burnEndsAt = 0;
+  @type("number") poisonTicksRemaining = 0;
+  @type("number") poisonEndsAt = 0;
+  @type("number") slowEndsAt = 0;
+  @type("number") lastDamagedAt = 0;
+  @type("number") totalDamageTaken = 0;
+  @type("number") totalHitsTaken = 0;
   @type("boolean") dead = false;
   @type("number") respawnAt = 0;
 }

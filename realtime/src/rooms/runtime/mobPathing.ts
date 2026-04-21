@@ -1,4 +1,4 @@
-import { MobState } from "./schema/MobState.js";
+import { MobState } from "../schema/MobState.js";
 
 export type GridPoint = {
   x: number;

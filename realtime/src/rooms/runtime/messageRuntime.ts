@@ -1,4 +1,4 @@
-import { Room } from "colyseus";
+import type { ThrownConsumableMessage } from "@mmorpg/shared/realtime/contracts";
 
 type DamageTextPayload = {
   x: number;
@@ -7,13 +7,24 @@ type DamageTextPayload = {
   color: string;
 };
 
+export interface RoomMessageBroadcaster {
+  broadcast(type: string, payload: unknown): void;
+}
+
 export function broadcastDamageText(
-  room: Room,
+  broadcaster: RoomMessageBroadcaster,
   x: number,
   y: number,
   text: string,
   color = "#ff5959",
 ) {
   const payload: DamageTextPayload = { x, y, text, color };
-  room.broadcast("damageText", payload);
+  broadcaster.broadcast("damageText", payload);
+}
+
+export function broadcastThrownConsumable(
+  broadcaster: RoomMessageBroadcaster,
+  payload: ThrownConsumableMessage,
+) {
+  broadcaster.broadcast("thrownConsumable", payload);
 }

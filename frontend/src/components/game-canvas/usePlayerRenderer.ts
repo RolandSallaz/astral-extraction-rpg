@@ -3,6 +3,7 @@
 import { useCallback, type MutableRefObject } from 'react';
 import type { EquipmentState } from '@mmorpg/shared/player/contracts';
 import type { EquipmentItemId } from '@mmorpg/shared/items/catalog';
+import { GEMS_ENABLED } from '@mmorpg/shared/items/catalog';
 
 type RealtimeRoomState = {
   players?: Map<string, {
@@ -22,6 +23,8 @@ type RealtimeRoomState = {
     healingTicksRemaining?: number;
     healingEndsAt?: number;
     woodStaffStrikeCooldownEndsAt?: number;
+    woodStaffDashCooldownEndsAt?: number;
+    woodStaffSlamCooldownEndsAt?: number;
     fireballCooldownEndsAt?: number;
     fireNovaCooldownEndsAt?: number;
     fireFieldCooldownEndsAt?: number;
@@ -144,6 +147,8 @@ type PositionSyncAccessors = {
   setLastSyncedPosition: (x: number, y: number, at: number) => void;
 };
 
+const PLAYER_DASH_VISUAL_MS = 220;
+
 type UsePlayerRendererParams = {
   scene: Phaser.Scene;
   Phaser: typeof import('phaser');
@@ -179,12 +184,18 @@ type UsePlayerRendererParams = {
   playerProgressChangeRef: MutableRefObject<((payload: { level: number; experience: number }) => void) | undefined>;
   skillCooldownsRef: MutableRefObject<{
     woodStaffStrike?: number;
+    woodStaffChainStrike?: number;
+    woodStaffDash?: number;
+    woodStaffSlam?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
   }>;
   skillCooldownsChangeRef: MutableRefObject<((payload: {
     woodStaffStrike: number;
+    woodStaffChainStrike: number;
+    woodStaffDash: number;
+    woodStaffSlam: number;
     fireball: number;
     fireNova: number;
     fireField: number;
@@ -206,6 +217,7 @@ type UsePlayerRendererParams = {
     authoritativeY: number,
   ) => void;
   hideStatusIcon: (icon: StatusIconVisual) => void;
+  playChainStrikeTrail?: (startX: number, startY: number, endX: number, endY: number) => void;
 };
 
 export function usePlayerRenderer() {
@@ -303,6 +315,7 @@ export function usePlayerRenderer() {
         reconcileRaidLocalCharacter,
         reconcileWorldLocalCharacter,
         hideStatusIcon,
+        playChainStrikeTrail,
       } = params;
 
       if (!room?.state.players) {
@@ -328,15 +341,15 @@ export function usePlayerRenderer() {
           body: toEquipmentItemId(networkPlayer.bodyItem ?? '') ?? undefined,
           head: toEquipmentItemId(networkPlayer.headItem ?? '') ?? undefined,
           weapon: toEquipmentItemId(networkPlayer.weaponItem ?? '') ?? undefined,
-          'head-gem-1': networkPlayer.headGemItem1 ? (networkPlayer.headGemItem1 as EquipmentState['head-gem-1']) : undefined,
-          'head-gem-2': networkPlayer.headGemItem2 ? (networkPlayer.headGemItem2 as EquipmentState['head-gem-2']) : undefined,
-          'head-gem-3': networkPlayer.headGemItem3 ? (networkPlayer.headGemItem3 as EquipmentState['head-gem-3']) : undefined,
-          'body-gem-1': networkPlayer.bodyGemItem1 ? (networkPlayer.bodyGemItem1 as EquipmentState['body-gem-1']) : undefined,
-          'body-gem-2': networkPlayer.bodyGemItem2 ? (networkPlayer.bodyGemItem2 as EquipmentState['body-gem-2']) : undefined,
-          'body-gem-3': networkPlayer.bodyGemItem3 ? (networkPlayer.bodyGemItem3 as EquipmentState['body-gem-3']) : undefined,
-          'weapon-gem-1': networkPlayer.weaponGemItem1 ? (networkPlayer.weaponGemItem1 as EquipmentState['weapon-gem-1']) : undefined,
-          'weapon-gem-2': networkPlayer.weaponGemItem2 ? (networkPlayer.weaponGemItem2 as EquipmentState['weapon-gem-2']) : undefined,
-          'weapon-gem-3': networkPlayer.weaponGemItem3 ? (networkPlayer.weaponGemItem3 as EquipmentState['weapon-gem-3']) : undefined,
+          'head-gem-1': GEMS_ENABLED && networkPlayer.headGemItem1 ? (networkPlayer.headGemItem1 as EquipmentState['head-gem-1']) : undefined,
+          'head-gem-2': GEMS_ENABLED && networkPlayer.headGemItem2 ? (networkPlayer.headGemItem2 as EquipmentState['head-gem-2']) : undefined,
+          'head-gem-3': GEMS_ENABLED && networkPlayer.headGemItem3 ? (networkPlayer.headGemItem3 as EquipmentState['head-gem-3']) : undefined,
+          'body-gem-1': GEMS_ENABLED && networkPlayer.bodyGemItem1 ? (networkPlayer.bodyGemItem1 as EquipmentState['body-gem-1']) : undefined,
+          'body-gem-2': GEMS_ENABLED && networkPlayer.bodyGemItem2 ? (networkPlayer.bodyGemItem2 as EquipmentState['body-gem-2']) : undefined,
+          'body-gem-3': GEMS_ENABLED && networkPlayer.bodyGemItem3 ? (networkPlayer.bodyGemItem3 as EquipmentState['body-gem-3']) : undefined,
+          'weapon-gem-1': GEMS_ENABLED && networkPlayer.weaponGemItem1 ? (networkPlayer.weaponGemItem1 as EquipmentState['weapon-gem-1']) : undefined,
+          'weapon-gem-2': GEMS_ENABLED && networkPlayer.weaponGemItem2 ? (networkPlayer.weaponGemItem2 as EquipmentState['weapon-gem-2']) : undefined,
+          'weapon-gem-3': GEMS_ENABLED && networkPlayer.weaponGemItem3 ? (networkPlayer.weaponGemItem3 as EquipmentState['weapon-gem-3']) : undefined,
         };
 
         if (!character) {
@@ -372,7 +385,42 @@ export function usePlayerRenderer() {
             character.targetX,
             character.targetY,
           );
-          if (distance > 64) {
+          const isChainStrikeDisplacement =
+            distance > 24 &&
+            distance <= tileSize * 5 &&
+            (
+              character.currentCastingSkillId === 'woodStaffChainStrike' ||
+              networkPlayer.castingSkillId === 'woodStaffChainStrike'
+            );
+          const isDashDisplacement =
+            distance > 64 &&
+            distance <= tileSize * 5 &&
+            (
+              character.currentCastingSkillId === 'woodStaffDash' ||
+              networkPlayer.castingSkillId === 'woodStaffDash'
+            );
+          if (isChainStrikeDisplacement) {
+            playChainStrikeTrail?.(
+              character.container.x,
+              character.container.y,
+              character.targetX,
+              character.targetY,
+            );
+            character.container.setPosition(character.targetX, character.targetY);
+            character.interpPrevX = character.targetX;
+            character.interpPrevY = character.targetY;
+            character.interpPrevAt = now;
+            character.interpNextX = character.targetX;
+            character.interpNextY = character.targetY;
+            character.interpNextAt = now;
+          } else if (isDashDisplacement) {
+            character.interpPrevX = character.container.x;
+            character.interpPrevY = character.container.y;
+            character.interpPrevAt = now;
+            character.interpNextX = character.targetX;
+            character.interpNextY = character.targetY;
+            character.interpNextAt = now + PLAYER_DASH_VISUAL_MS;
+          } else if (distance > 64) {
             character.container.setPosition(character.targetX, character.targetY);
             character.interpPrevX = character.targetX;
             character.interpPrevY = character.targetY;
@@ -423,15 +471,26 @@ export function usePlayerRenderer() {
             networkPlayer.healingEndsAt ?? 0,
           );
         }
+        const previousCastingSkillId = character.currentCastingSkillId;
+        const previousCastStartedAt = character.currentCastStartedAt;
+        const nextCastingSkillId = networkPlayer.castingSkillId ?? '';
+        const nextCastStartedAt = networkPlayer.castStartedAt ?? 0;
+        const didStartServerDashCast =
+          nextCastingSkillId === 'woodStaffDash' &&
+          (
+            previousCastingSkillId !== 'woodStaffDash' ||
+            previousCastStartedAt !== nextCastStartedAt
+          );
+
         if (
-          character.currentCastingSkillId !== (networkPlayer.castingSkillId ?? '') ||
-          character.currentCastStartedAt !== (networkPlayer.castStartedAt ?? 0) ||
+          character.currentCastingSkillId !== nextCastingSkillId ||
+          character.currentCastStartedAt !== nextCastStartedAt ||
           character.currentCastEndsAt !== (networkPlayer.castEndsAt ?? 0)
         ) {
           applyCastingToCharacterVisual(
             character,
-            networkPlayer.castingSkillId ?? '',
-            networkPlayer.castStartedAt ?? 0,
+            nextCastingSkillId,
+            nextCastStartedAt,
             networkPlayer.castEndsAt ?? 0,
           );
         }
@@ -450,21 +509,30 @@ export function usePlayerRenderer() {
             level: networkPlayer.level ?? latestProfileRef.current.playerLevel,
             experience: networkPlayer.experience ?? latestProfileRef.current.playerExperience,
           });
-          const nextCooldowns = {
-            woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
-            fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
-            fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
-            fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
+            const nextCooldowns = {
+              woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffChainStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
+              woodStaffSlam: networkPlayer.woodStaffSlamCooldownEndsAt ?? 0,
+              fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
+              fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
+              fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
           };
           skillCooldownsRef.current = nextCooldowns;
           skillCooldownsChangeRef.current?.(nextCooldowns);
           if (isRaidScene) {
+            if (didStartServerDashCast) {
+              movementState.setPendingRaidInputs([]);
+            }
             movementState.setLastProcessedRaidInput(networkPlayer.lastProcessedInput ?? 0);
             const nextPending = movementState
               .getPendingRaidInputs()
               .filter((input) => input.sequence > movementState.getLastProcessedRaidInput());
             movementState.setPendingRaidInputs(nextPending);
           } else {
+            if (didStartServerDashCast) {
+              movementState.setPendingWorldInputs([]);
+            }
             movementState.setLastProcessedWorldInput(networkPlayer.lastProcessedInput ?? 0);
             const nextPending = movementState
               .getPendingWorldInputs()
@@ -482,16 +550,22 @@ export function usePlayerRenderer() {
             level: networkPlayer.level ?? latestProfileRef.current.playerLevel,
             experience: networkPlayer.experience ?? latestProfileRef.current.playerExperience,
           });
-          const nextCooldowns = {
-            woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
-            fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
-            fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
-            fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
+            const nextCooldowns = {
+              woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffChainStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
+              woodStaffSlam: networkPlayer.woodStaffSlamCooldownEndsAt ?? 0,
+              fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
+              fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
+              fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
           };
           skillCooldownsRef.current = nextCooldowns;
           skillCooldownsChangeRef.current?.(nextCooldowns);
 
           if (isRaidScene) {
+            if (didStartServerDashCast) {
+              movementState.setPendingRaidInputs([]);
+            }
             const processedInput = networkPlayer.lastProcessedInput ?? 0;
             if (processedInput > movementState.getLastProcessedRaidInput()) {
               movementState.setLastProcessedRaidInput(processedInput);
@@ -508,6 +582,9 @@ export function usePlayerRenderer() {
               getLastRaidTilesHeight() || raidHeight,
             );
           } else {
+            if (didStartServerDashCast) {
+              movementState.setPendingWorldInputs([]);
+            }
             const processedInput = networkPlayer.lastProcessedInput ?? 0;
             if (processedInput > movementState.getLastProcessedWorldInput()) {
               movementState.setLastProcessedWorldInput(processedInput);

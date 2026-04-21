@@ -6,11 +6,24 @@ import { GameChat } from '@/components/GameChat';
 import { GameHud, type ContainerView, type MouseSkillBindings, type SkillId } from '@/components/GameHud';
 import { ItemIcon } from '@/components/ItemIcon';
 import { HudWindow } from '@/components/ui/HudWindow';
-import { WorkbenchWindow, type WorkbenchTab } from '@/components/WorkbenchWindow';
 import {
+  WorkbenchWindow,
+  type WorkbenchTab,
+  type WorkbenchUpgradeableWeaponView,
+} from '@/components/WorkbenchWindow';
+import {
+  applyItemProgressionChoice,
+  createBaseItemProgressionState,
+  getItemProgressionBonuses,
+  getItemProgressionChoice,
+  getItemProgressionChoicesForLevel,
+  normalizeItemProgressionState,
   DEFAULT_MOB_BALANCE_CONFIG,
   DEFAULT_SKILL_BALANCE_CONFIG,
   isSameEquipmentItemFamily,
+  type ItemProgressionId,
+  type ItemProgressionLevel,
+  type ItemProgressionTier,
   type MobBalanceConfig,
   type SkillBalanceConfig,
 } from '@mmorpg/shared';
@@ -33,6 +46,7 @@ import {
   createEmptyInventory,
   createStarterEquipment,
   type CharacterProfile,
+  type EquipmentItemProgressionState,
   type EquipmentState,
   type InventoryState,
 } from '@/lib/playerProfile';
@@ -52,7 +66,6 @@ import {
   getSealedRelicQuestProgress,
   getIntroductionQuestSteps,
   getSealedRelicQuestSteps,
-  hasSocketedWeaponGem,
   hasTutorialChestBeenLooted,
   SEALED_RELIC_ITEM_ID,
   SEALED_RELIC_QUEST_ID,
@@ -114,7 +127,7 @@ type AuthFormState = {
 };
 
 type SkillCooldownState = Partial<Record<SkillId, number>>;
-type ConsumableCooldownState = Partial<Record<'healing_potion', number>>;
+type ConsumableCooldownState = Partial<Record<'healing_potion' | 'poison_potion' | 'slow_potion' | 'antidote' | 'speed_potion' | 'fire_resistance_potion' | 'teleport_scroll', number>>;
 type AdminTabId = 'skills' | 'balance' | 'mobs' | 'items' | 'world' | 'assets' | 'system';
 type ActiveRoomTarget = {
   name: 'world' | 'raid';
@@ -357,7 +370,7 @@ const PERSONAL_STORAGE_ROWS = 5;
 const PERSONAL_STORAGE_SIZE = PERSONAL_STORAGE_COLUMNS * PERSONAL_STORAGE_ROWS;
 const PERSONAL_STORAGE_STORAGE_KEY = 'mmorpg.personal-storage.v1';
 const RAID_DEADLINE_MS = 15 * 60 * 1000;
-const ADMIN_ITEM_DEFINITIONS = Object.values(ITEM_DEFINITIONS);
+const ADMIN_ITEM_DEFINITIONS = Object.values(ITEM_DEFINITIONS).filter((item) => item.type !== 'gem');
 const TRADER_WINDOW_POSITION_STORAGE_KEY = 'mmorpg.ui.trader.position.v1';
 const PARTY_POLL_INTERVAL_MS = 2000;
 const EMPTY_MOUSE_SKILL_BINDINGS: MouseSkillBindings = {
@@ -409,11 +422,6 @@ function getTraderOffers(trader: WorldTraderInteraction): TraderOffer[] {
       { itemId: 'wood', quantity: 1 },
       { itemId: 'wood_staff' },
       { itemId: 'healing_potion', quantity: 1 },
-      { itemId: 'fire_trail_gem' },
-      { itemId: 'fire_return_gem' },
-      { itemId: 'fire_range_gem' },
-      { itemId: 'cast_speed_gem' },
-      { itemId: 'critical_gem' },
     ];
   }
 
@@ -1074,6 +1082,17 @@ function loadStoredActiveRoomTarget(): ActiveRoomTarget | null {
       return null;
     }
 
+    if (
+      parsed.name === 'raid' &&
+      (
+        typeof parsed.options?.deadlineAt !== 'number' ||
+        parsed.options.deadlineAt <= Date.now()
+      )
+    ) {
+      window.localStorage.removeItem(ACTIVE_ROOM_TARGET_STORAGE_KEY);
+      return null;
+    }
+
     return {
       name: parsed.name,
       options: parsed.options,
@@ -1133,6 +1152,7 @@ function createResetCharacter(current: CharacterProfile): CharacterProfile {
     ...current,
     equipment: createStarterEquipment(),
     inventory: createEmptyInventory(),
+    equipmentItemProgression: {},
     position: { x: 0, y: 0 },
     health: 0,
     maxHealth: 100,
@@ -1201,11 +1221,61 @@ function getTraderOfferPrice(
   return getResolvedItemValue(offer.itemId, itemBalanceConfig, offer.quantity ?? 1);
 }
 
+type WorkbenchUpgradeTarget =
+  | { key: string; source: 'equipment'; slot: 'weapon' }
+  | { key: string; source: 'inventory'; slotIndex: number };
+
+function createWorkbenchEquipmentWeaponKey() {
+  return 'equipment:weapon';
+}
+
+function createWorkbenchInventoryWeaponKey(slotIndex: number) {
+  return `inventory:${slotIndex}`;
+}
+
+function parseWorkbenchUpgradeTarget(key: string | null | undefined): WorkbenchUpgradeTarget | null {
+  if (!key) {
+    return null;
+  }
+
+  if (key === createWorkbenchEquipmentWeaponKey()) {
+    return {
+      key,
+      source: 'equipment',
+      slot: 'weapon',
+    };
+  }
+
+  if (!key.startsWith('inventory:')) {
+    return null;
+  }
+
+  const slotIndex = Number.parseInt(key.slice('inventory:'.length), 10);
+  if (!Number.isInteger(slotIndex) || slotIndex < 0) {
+    return null;
+  }
+
+  return {
+    key,
+    source: 'inventory',
+    slotIndex,
+  };
+}
+
 function normalizeCharacterProfile(character: CharacterProfile): CharacterProfile {
+  const equipmentItemProgression = Object.fromEntries(
+    Object.entries(character.equipmentItemProgression ?? {}).flatMap(([slot, progression]) => {
+      const itemId = character.equipment[slot as keyof EquipmentState];
+      const normalized = normalizeItemProgressionState(itemId, progression);
+      return normalized ? [[slot, normalized]] : [];
+    }),
+  ) as EquipmentItemProgressionState;
+
   return {
     ...character,
     gold: typeof character.gold === 'number' ? Math.max(0, Math.floor(character.gold)) : 250,
     quests: character.quests ?? {},
+    equipmentItemProgression,
   };
 }
 
@@ -1480,6 +1550,7 @@ export default function Home() {
     endsAt: number;
   } | null>(null);
   const [workbenchTab, setWorkbenchTab] = useState<WorkbenchTab>('craft');
+  const [selectedUpgradeableWeaponKey, setSelectedUpgradeableWeaponKey] = useState<string | null>(null);
   const [workbenchPendingPickup, setWorkbenchPendingPickup] = useState<{
     recipeId: 'wood_staff';
     itemId: ItemId;
@@ -1503,6 +1574,9 @@ export default function Home() {
   const [pendingRaidWorldRespawn, setPendingRaidWorldRespawn] = useState(false);
   const [fireNovaCastNonce, setFireNovaCastNonce] = useState(0);
   const [woodStaffStrikeCastNonce, setWoodStaffStrikeCastNonce] = useState(0);
+  const [woodStaffChainStrikeCastNonce, setWoodStaffChainStrikeCastNonce] = useState(0);
+  const [woodStaffDashCastNonce, setWoodStaffDashCastNonce] = useState(0);
+  const [woodStaffSlamCastNonce, setWoodStaffSlamCastNonce] = useState(0);
   const [useConsumableRequest, setUseConsumableRequest] = useState<{
     source: 'inventory' | 'container';
     slotIndex: number;
@@ -1682,10 +1756,19 @@ export default function Home() {
         ? new Date(lastStartedRaid.startedAt).getTime() + RAID_DEADLINE_MS
         : null;
 
-  const activatePendingRaid = (pendingRaid: NonNullable<PartyView['pendingRaid']>) => {
+  const activatePendingRaid = async (pendingRaid: NonNullable<PartyView['pendingRaid']>) => {
     const deadlineAt = pendingRaid.startedAt
       ? new Date(pendingRaid.startedAt).getTime() + RAID_DEADLINE_MS
       : Date.now() + RAID_DEADLINE_MS;
+    if (deadlineAt <= Date.now()) {
+      const nextParty = await ackPendingRaidJoin(pendingRaid.raidRunId);
+      setParty(nextParty);
+      setActiveRoomTarget({ name: 'world' });
+      setLobbyActionMessage('Raid expired. Returned to world.');
+      setLobbyActionError('');
+      return false;
+    }
+
     setActiveRoomTarget({
       name: 'raid',
       options: {
@@ -1693,7 +1776,36 @@ export default function Home() {
         deadlineAt,
       },
     });
+    return true;
   };
+
+  useEffect(() => {
+    if (
+      authStatus !== 'ready' ||
+      activeRoomTarget.name !== 'raid' ||
+      !raidDeadlineAt ||
+      raidDeadlineAt > Date.now()
+    ) {
+      return;
+    }
+
+    const raidRunId = typeof activeRoomTarget.options?.raidRunId === 'string'
+      ? activeRoomTarget.options.raidRunId
+      : undefined;
+    setActiveRoomTarget({ name: 'world' });
+    setPendingRaidWorldRespawn(false);
+    setLobbyActionMessage('Raid expired. Returned to world.');
+    setLobbyActionError('');
+    if (raidRunId) {
+      void ackPendingRaidJoin(raidRunId)
+        .then((nextParty) => {
+          setParty(nextParty);
+        })
+        .catch((error) => {
+          console.error('Failed to acknowledge expired raid', error);
+        });
+    }
+  }, [activeRoomTarget.name, activeRoomTarget.options, authStatus, raidDeadlineAt]);
 
   const refreshLobbyState = async (questOverride?: IntroductionQuestProgress | null) => {
     const [nextParty, nextTemplates] = await Promise.all([
@@ -2160,9 +2272,11 @@ export default function Home() {
         activeRoomTarget.name !== 'raid' &&
         !pendingRaidWorldRespawn
       ) {
-        activatePendingRaid(nextParty.pendingRaid);
-        setLobbyActionMessage('Party entered raid.');
-        setLobbyActionError('');
+        const activated = await activatePendingRaid(nextParty.pendingRaid);
+        if (activated) {
+          setLobbyActionMessage('Party entered raid.');
+          setLobbyActionError('');
+        }
       }
     };
 
@@ -2412,6 +2526,10 @@ export default function Home() {
     setPartyJoinCode('');
     setIsDead(false);
     setFireNovaCastNonce(0);
+    setWoodStaffStrikeCastNonce(0);
+    setWoodStaffChainStrikeCastNonce(0);
+    setWoodStaffDashCastNonce(0);
+    setWoodStaffSlamCastNonce(0);
     chatSenderRef.current = null;
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(ACTIVE_ROOM_TARGET_STORAGE_KEY);
@@ -2585,16 +2703,24 @@ export default function Home() {
       Boolean(payload?.exitId) &&
       hasInventoryItem(extractedInventory, SEALED_RELIC_ITEM_ID);
     setCharacter((current) =>
-      current
+          current
         ? (() => {
+            const nextEquipment = payload?.equipment ? payload.equipment : current.equipment;
             const nextCharacterBase = {
               ...current,
               health: typeof payload?.health === 'number' ? payload.health : current.health,
               maxHealth: typeof payload?.maxHealth === 'number' ? payload.maxHealth : current.maxHealth,
               level: typeof payload?.level === 'number' ? payload.level : current.level,
               experience: typeof payload?.experience === 'number' ? payload.experience : current.experience,
-              equipment: payload?.equipment ? payload.equipment : current.equipment,
+              equipment: nextEquipment,
               inventory: payload?.inventory ? payload.inventory : current.inventory,
+              equipmentItemProgression: Object.fromEntries(
+                Object.entries(current.equipmentItemProgression ?? {}).flatMap(([slot, progression]) => {
+                  const itemId = nextEquipment[slot as keyof EquipmentState];
+                  const normalized = normalizeItemProgressionState(itemId, progression);
+                  return normalized ? [[slot, normalized]] : [];
+                }),
+              ) as EquipmentItemProgressionState,
             };
             const withIntroductionQuest = updateIntroductionQuestProgress(
               nextCharacterBase,
@@ -2673,15 +2799,19 @@ export default function Home() {
     return () => window.clearTimeout(timeout);
   }, [activeRoomTarget.name, authStatus, pendingRaidWorldRespawn]);
 
-  const handleEquipmentChange = (equipment: EquipmentState) => {
+  const handleEquipmentChange = (
+    equipment: EquipmentState,
+    equipmentItemProgression: EquipmentItemProgressionState,
+  ) => {
     setCharacter((current) =>
       current
-        ? {
-            ...current,
-            equipment,
-          }
-        : null,
-    );
+          ? {
+              ...current,
+              equipment,
+              equipmentItemProgression,
+            }
+          : null,
+      );
   };
 
   const handleInventoryChange = (inventory: InventoryState) => {
@@ -2817,6 +2947,7 @@ export default function Home() {
     setWorkbenchStatus('');
     setWorkbenchPendingPickup(null);
     setWorkbenchTab('craft');
+    setSelectedUpgradeableWeaponKey(null);
     setActiveWorkbench(workbench);
   };
 
@@ -2894,6 +3025,138 @@ export default function Home() {
     );
     setWorkbenchPendingPickup(null);
     setWorkbenchStatus('Craft collected.');
+  };
+
+  const handleWorkbenchApplyUpgradeChoice = (choiceId: string) => {
+    const upgradeTarget = parseWorkbenchUpgradeTarget(resolvedSelectedUpgradeableWeaponKey);
+    if (!character || !upgradeTarget) {
+      return;
+    }
+
+    if (upgradeTarget.source === 'equipment') {
+      const weaponItemId = character.equipment.weapon;
+      const nextProgression = applyItemProgressionChoice(
+        weaponItemId,
+        character.equipmentItemProgression.weapon,
+        choiceId,
+      );
+      const selectedChoice = getItemProgressionChoice(weaponItemId, choiceId);
+
+      if (!nextProgression || nextProgression.level === (character.equipmentItemProgression.weapon?.level ?? 1)) {
+        setWorkbenchStatus('This upgrade is not available right now.');
+        return;
+      }
+
+      setCharacter((current) =>
+        current
+          ? {
+              ...current,
+              equipmentItemProgression: {
+                ...current.equipmentItemProgression,
+                weapon: nextProgression,
+              },
+            }
+          : current,
+      );
+      setWorkbenchStatus(selectedChoice ? `${selectedChoice.title} applied.` : 'Upgrade applied.');
+      return;
+    }
+
+    const inventoryItemValue = character.inventory[upgradeTarget.slotIndex];
+    const parsedItem = parseInventoryItem(inventoryItemValue);
+    if (!parsedItem) {
+      setWorkbenchStatus('Weapon not found.');
+      return;
+    }
+
+    const nextProgression = applyItemProgressionChoice(
+      parsedItem.itemId,
+      parsedItem.itemProgression,
+      choiceId,
+    );
+    const selectedChoice = getItemProgressionChoice(parsedItem.itemId, choiceId);
+
+    if (!nextProgression || nextProgression.level === (parsedItem.itemProgression?.level ?? 1)) {
+      setWorkbenchStatus('This upgrade is not available right now.');
+      return;
+    }
+
+    const nextInventory = [...character.inventory];
+    nextInventory[upgradeTarget.slotIndex] = serializeInventoryItem(
+      parsedItem.itemId,
+      parsedItem.quantity,
+      parsedItem.socketedGemIds,
+      {
+        raidUnidentified: parsedItem.raidUnidentified,
+        itemProgression: nextProgression,
+      },
+    );
+
+    setCharacter((current) =>
+      current
+        ? {
+            ...current,
+            inventory: nextInventory,
+          }
+        : current,
+    );
+    setWorkbenchStatus(selectedChoice ? `${selectedChoice.title} applied.` : 'Upgrade applied.');
+  };
+
+  const handleWorkbenchResetUpgrades = () => {
+    const upgradeTarget = parseWorkbenchUpgradeTarget(resolvedSelectedUpgradeableWeaponKey);
+    if (!character || !upgradeTarget) {
+      return;
+    }
+
+    if (upgradeTarget.source === 'equipment') {
+      if (!character.equipmentItemProgression.weapon) {
+        setWorkbenchStatus('This weapon has no upgrades to reset.');
+        return;
+      }
+
+      setCharacter((current) =>
+        current
+          ? {
+              ...current,
+              equipmentItemProgression: {
+                ...current.equipmentItemProgression,
+                weapon: createBaseItemProgressionState(),
+              },
+            }
+          : current,
+      );
+      setWorkbenchStatus('Weapon upgrades reset.');
+      return;
+    }
+
+    const inventoryItemValue = character.inventory[upgradeTarget.slotIndex];
+    const parsedItem = parseInventoryItem(inventoryItemValue);
+    if (!parsedItem?.itemProgression || parsedItem.itemProgression.selectedUpgradeIds.length === 0) {
+      setWorkbenchStatus('This weapon has no upgrades to reset.');
+      return;
+    }
+
+    const nextInventory = [...character.inventory];
+    nextInventory[upgradeTarget.slotIndex] = serializeInventoryItem(
+      parsedItem.itemId,
+      parsedItem.quantity,
+      parsedItem.socketedGemIds,
+      {
+        raidUnidentified: parsedItem.raidUnidentified,
+        itemProgression: createBaseItemProgressionState(),
+      },
+    );
+
+    setCharacter((current) =>
+      current
+        ? {
+            ...current,
+            inventory: nextInventory,
+          }
+        : current,
+    );
+    setWorkbenchStatus('Weapon upgrades reset.');
   };
 
   const handleAcceptIntroductionQuest = () => {
@@ -3135,6 +3398,28 @@ export default function Home() {
     if (skillId === 'woodStaffStrike') {
       setWoodStaffStrikeCastNonce((current) => current + 1);
       setActiveSkillTargeting(null);
+      return;
+    }
+
+    if (skillId === 'woodStaffChainStrike') {
+      setWoodStaffChainStrikeCastNonce((current) => current + 1);
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    if (skillId === 'woodStaffDash') {
+      setWoodStaffDashCastNonce((current) => current + 1);
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    if (skillId === 'woodStaffSlam') {
+      setWoodStaffSlamCastNonce((current) => current + 1);
+      setActiveSkillTargeting(null);
+      return;
+    }
+
+    if (skillId !== 'fireball' && skillId !== 'fireField') {
       return;
     }
 
@@ -3862,8 +4147,7 @@ export default function Home() {
   const questObjectiveTarget = shouldGuideIntroductionUi
     ? null
     : getQuestObjectiveTarget(activeRoomTarget, introductionQuest);
-  const showSocketingHint =
-    introductionQuest.status === 'active' && introductionQuest.currentStepId === 'socket_gem';
+  const showSocketingHint = false;
   const workbenchWoodCount = character
     ? getCombinedItemCount(character.inventory, personalStorageSlots, 'wood')
     : 0;
@@ -3888,6 +4172,164 @@ export default function Home() {
         ),
       )
     : 0;
+  const buildStatLines = (itemId: string, choiceId: string, choiceLevel: number): string[] => {
+    const bonuses = getItemProgressionBonuses(itemId, {
+      level: choiceLevel as ItemProgressionLevel,
+      selectedUpgradeIds: [choiceId as ItemProgressionId],
+    });
+    const lines: string[] = [];
+    if (bonuses.meleeStrikeRangeBonusPx !== 0) lines.push(`Strike range +${bonuses.meleeStrikeRangeBonusPx}px`);
+    if (bonuses.meleeStrikeCooldownDeltaMs !== 0) {
+      const s = bonuses.meleeStrikeCooldownDeltaMs / 1000;
+      lines.push(`Strike cooldown ${s > 0 ? '+' : ''}${s.toFixed(2)}s`);
+    }
+    if (bonuses.meleeStrikeDamageFlatBonus !== 0) lines.push(`Strike damage +${bonuses.meleeStrikeDamageFlatBonus}`);
+    if (bonuses.meleeStrikeDamageMultiplierBonus !== 0) lines.push(`Strike damage +${Math.round(bonuses.meleeStrikeDamageMultiplierBonus * 100)}%`);
+    if (bonuses.woodStaffStrikeKnockbackBonusTiles !== 0) lines.push(`Knockback +${bonuses.woodStaffStrikeKnockbackBonusTiles} tiles`);
+    if (bonuses.woodStaffStrikeSlowDurationMs !== 0) lines.push(`Slow on hit ${(bonuses.woodStaffStrikeSlowDurationMs / 1000).toFixed(1)}s`);
+    if (bonuses.woodStaffStrikeAoeSplashEnabled) lines.push('AoE splash 50%');
+    if (bonuses.woodStaffStrikeHealOnHit !== 0) lines.push(`Heal on hit +${bonuses.woodStaffStrikeHealOnHit} HP`);
+    if (bonuses.woodStaffChainStrikeBonusHits !== 0) lines.push(`Chain Strike +${bonuses.woodStaffChainStrikeBonusHits} hit`);
+    if (bonuses.woodStaffChainStrikeRangeBonusPx !== 0) lines.push(`Chain start range +${bonuses.woodStaffChainStrikeRangeBonusPx}px`);
+    if (bonuses.woodStaffChainStrikeBounceRadiusBonusPx !== 0) lines.push(`Chain search radius +${bonuses.woodStaffChainStrikeBounceRadiusBonusPx}px`);
+    if (bonuses.woodStaffChainStrikeRefundChance !== 0) lines.push(`Chain bounce refund ${Math.round(bonuses.woodStaffChainStrikeRefundChance * 100)}%`);
+    if (bonuses.grantsWoodStaffDash) lines.push('Unlocks Wood Staff Dash');
+    if (bonuses.grantsWoodStaffSlam) lines.push('Unlocks Wood Staff Slam');
+    if (bonuses.grantsWoodStaffChainStrike) lines.push('Unlocks Chain Strike');
+    if (bonuses.grantsWoodStaffSpectralVolley) lines.push('Unlocks Spectral Volley');
+    return lines;
+  };
+  const workbenchProgressionTiers: ItemProgressionTier[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+  const workbenchMaxProgressionLevel = 14;
+
+  const upgradeableWeapons: WorkbenchUpgradeableWeaponView[] = character
+    ? (() => {
+        const weapons: WorkbenchUpgradeableWeaponView[] = [];
+        const equippedWeaponId = character.equipment.weapon;
+        const equippedWeaponProgression = normalizeItemProgressionState(
+          equippedWeaponId,
+          character.equipmentItemProgression.weapon,
+        );
+
+        if (equippedWeaponId && equippedWeaponProgression) {
+          const nextLevel = Math.min(workbenchMaxProgressionLevel, equippedWeaponProgression.level + 1) as ItemProgressionTier;
+          weapons.push({
+            key: createWorkbenchEquipmentWeaponKey(),
+            sourceLabel: 'Equipped',
+            title: ITEM_DEFINITIONS[equippedWeaponId as ItemId]?.name ?? equippedWeaponId,
+            subtitle: getItemProgressionBonuses(equippedWeaponId, equippedWeaponProgression).grantsWoodStaffDash
+              ? 'Weapon slot • dash unlocked'
+              : 'Weapon slot',
+            level: equippedWeaponProgression.level,
+            selectedUpgrades: equippedWeaponProgression.selectedUpgradeIds
+              .map((upgradeId) => getItemProgressionChoice(equippedWeaponId, upgradeId))
+              .filter((choice): choice is NonNullable<typeof choice> => Boolean(choice))
+              .map((choice) => ({
+                id: choice.id,
+                level: choice.level,
+                title: choice.title,
+                description: choice.description,
+                isPlaceholder: choice.isPlaceholder,
+              })),
+            selectedUpgradeTitles: equippedWeaponProgression.selectedUpgradeIds
+              .map((upgradeId) => getItemProgressionChoice(equippedWeaponId, upgradeId)?.title ?? null)
+              .filter((title): title is string => Boolean(title)),
+            nextChoices:
+              equippedWeaponProgression.level >= workbenchMaxProgressionLevel
+                ? []
+                : getItemProgressionChoicesForLevel(equippedWeaponId, nextLevel).map((choice) => ({
+                    id: choice.id,
+                    level: choice.level,
+                    title: choice.title,
+                    description: choice.description,
+                    isPlaceholder: choice.isPlaceholder,
+                    isAvailable: true,
+                    statLines: buildStatLines(equippedWeaponId, choice.id, choice.level),
+                  })),
+            allTierChoices: workbenchProgressionTiers.map((tier) => ({
+              tier,
+              choices: getItemProgressionChoicesForLevel(equippedWeaponId, tier).map((choice) => ({
+                id: choice.id,
+                level: choice.level,
+                title: choice.title,
+                description: choice.description,
+                isPlaceholder: choice.isPlaceholder,
+                isAvailable: equippedWeaponProgression.level < workbenchMaxProgressionLevel && tier === equippedWeaponProgression.level + 1,
+                statLines: buildStatLines(equippedWeaponId, choice.id, choice.level),
+              })),
+            })),
+          });
+        }
+
+        character.inventory.forEach((value, slotIndex) => {
+          const parsed = parseInventoryItem(value);
+          const normalized = normalizeItemProgressionState(parsed?.itemId, parsed?.itemProgression);
+          if (!parsed || !normalized) {
+            return;
+          }
+
+          const nextLevel = Math.min(workbenchMaxProgressionLevel, normalized.level + 1) as ItemProgressionTier;
+          weapons.push({
+            key: createWorkbenchInventoryWeaponKey(slotIndex),
+            sourceLabel: `Inventory slot ${slotIndex + 1}`,
+            title: ITEM_DEFINITIONS[parsed.itemId]?.name ?? parsed.itemId,
+            subtitle: getItemProgressionBonuses(parsed.itemId, normalized).grantsWoodStaffDash
+              ? 'Backpack • dash unlocked'
+              : 'Backpack weapon',
+            level: normalized.level,
+            selectedUpgrades: normalized.selectedUpgradeIds
+              .map((upgradeId) => getItemProgressionChoice(parsed.itemId, upgradeId))
+              .filter((choice): choice is NonNullable<typeof choice> => Boolean(choice))
+              .map((choice) => ({
+                id: choice.id,
+                level: choice.level,
+                title: choice.title,
+                description: choice.description,
+                isPlaceholder: choice.isPlaceholder,
+              })),
+            selectedUpgradeTitles: normalized.selectedUpgradeIds
+              .map((upgradeId) => getItemProgressionChoice(parsed.itemId, upgradeId)?.title ?? null)
+              .filter((title): title is string => Boolean(title)),
+            nextChoices:
+              normalized.level >= workbenchMaxProgressionLevel
+                ? []
+                : getItemProgressionChoicesForLevel(parsed.itemId, nextLevel).map((choice) => ({
+                    id: choice.id,
+                    level: choice.level,
+                    title: choice.title,
+                    description: choice.description,
+                    isPlaceholder: choice.isPlaceholder,
+                    isAvailable: true,
+                    statLines: buildStatLines(parsed.itemId, choice.id, choice.level),
+                  })),
+            allTierChoices: workbenchProgressionTiers.map((tier) => ({
+              tier,
+              choices: getItemProgressionChoicesForLevel(parsed.itemId, tier).map((choice) => ({
+                id: choice.id,
+                level: choice.level,
+                title: choice.title,
+                description: choice.description,
+                isPlaceholder: choice.isPlaceholder,
+                isAvailable: normalized.level < workbenchMaxProgressionLevel && tier === normalized.level + 1,
+                statLines: buildStatLines(parsed.itemId, choice.id, choice.level),
+              })),
+            })),
+          });
+        });
+
+        return weapons;
+      })()
+    : [];
+  const resolvedSelectedUpgradeableWeaponKey =
+    selectedUpgradeableWeaponKey && upgradeableWeapons.some((weapon) => weapon.key === selectedUpgradeableWeaponKey)
+      ? selectedUpgradeableWeaponKey
+      : (upgradeableWeapons[0]?.key ?? null);
+
+  useEffect(() => {
+    if (resolvedSelectedUpgradeableWeaponKey !== selectedUpgradeableWeaponKey) {
+      setSelectedUpgradeableWeaponKey(resolvedSelectedUpgradeableWeaponKey);
+    }
+  }, [resolvedSelectedUpgradeableWeaponKey, selectedUpgradeableWeaponKey]);
 
   useEffect(() => {
     if (!shouldGuideIntroductionTraderUi) {
@@ -4111,16 +4553,13 @@ export default function Home() {
         if (quest.currentStepId === 'loot_chest' && hasTutorialChestBeenLooted(tutorialChestSlots)) {
           return {
             ...quest,
-            currentStepId: 'socket_gem',
+            currentStepId: 'kill_rat',
             activeRaidRunId: currentRaidRunId,
+            killRatExperienceBaseline: current.experience,
           };
         }
 
-        if (
-          quest.currentStepId === 'socket_gem' &&
-          isSameEquipmentItemFamily(current.equipment.weapon, 'wood_staff') &&
-          hasSocketedWeaponGem(current.equipment)
-        ) {
+        if (quest.currentStepId === 'socket_gem') {
           return {
             ...quest,
             currentStepId: 'kill_rat',
@@ -4350,7 +4789,7 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,#a7d97c_0%,transparent_38%),linear-gradient(180deg,#7bc652_0%,#4d8d2b_100%)] opacity-90" />
 
       <MinimapPanel minimap={minimap} raidDeadlineAt={raidDeadlineAt} />
-      <section className="hidden pointer-events-none absolute left-5 top-5 z-10 max-w-sm rounded-2xl border border-[#d9efbd]/40 bg-[#17320d]/55 p-4 backdrop-blur-sm">
+      <section className="hidden">
         <h1 className="font-serif text-3xl font-bold tracking-wide">
           {username}
         </h1>
@@ -4701,6 +5140,7 @@ export default function Home() {
           }}
           debugCollisionEnabled={playerRole === 'admin' && worldEditorDebug.showCollisionOverlay}
           playerEquipment={character.equipment}
+          playerEquipmentItemProgression={character.equipmentItemProgression}
           playerInventory={character.inventory}
           playerName={username}
           playerPosition={character.position}
@@ -4838,6 +5278,9 @@ export default function Home() {
           respawnRequestNonce={respawnRequestNonce}
           fireNovaCastNonce={fireNovaCastNonce}
           woodStaffStrikeCastNonce={woodStaffStrikeCastNonce}
+          woodStaffChainStrikeCastNonce={woodStaffChainStrikeCastNonce}
+          woodStaffDashCastNonce={woodStaffDashCastNonce}
+          woodStaffSlamCastNonce={woodStaffSlamCastNonce}
           useConsumableRequest={useConsumableRequest}
           skillEffectOverrides={skillEffectOverrides}
           skillBalanceConfig={skillBalanceConfig}
@@ -4894,6 +5337,7 @@ export default function Home() {
 
       <GameHud
         equipment={character.equipment}
+        equipmentItemProgression={character.equipmentItemProgression}
         inventory={character.inventory ?? createEmptyInventory()}
         container={activeContainer}
         itemBalanceConfig={itemBalanceConfig}
@@ -5468,7 +5912,13 @@ export default function Home() {
         status={workbenchStatus}
         onCraft={handleWorkbenchCraftWoodStaff}
         onCollect={handleWorkbenchCollect}
+        upgradeableWeapons={upgradeableWeapons}
+        selectedUpgradeableWeaponKey={resolvedSelectedUpgradeableWeaponKey}
+        onSelectUpgradeableWeapon={setSelectedUpgradeableWeaponKey}
+        onApplyUpgradeChoice={handleWorkbenchApplyUpgradeChoice}
+        onResetUpgrades={handleWorkbenchResetUpgrades}
         onClose={() => {
+          setSelectedUpgradeableWeaponKey(null);
           setActiveWorkbench(null);
         }}
       />

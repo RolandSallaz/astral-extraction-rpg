@@ -1,4 +1,5 @@
 import { createEquipmentStateSnapshot, type BaseProfileMessage } from "@mmorpg/shared/realtime/contracts";
+import { GEMS_ENABLED } from "@mmorpg/shared/items/catalog";
 import { type BasePlayerState } from "../schema/BasePlayerState.js";
 
 type RoomProfilePlayer = BasePlayerState & {
@@ -13,12 +14,16 @@ type RoomProfilePlayer = BasePlayerState & {
   intellect: number;
   burnTicksRemaining: number;
   burnEndsAt: number;
+  poisonTicksRemaining: number;
+  poisonEndsAt: number;
   healingTicksRemaining: number;
   healingEndsAt: number;
   fireballCooldownEndsAt: number;
   fireNovaCooldownEndsAt: number;
   fireFieldCooldownEndsAt: number;
   woodStaffStrikeCooldownEndsAt: number;
+  woodStaffDashCooldownEndsAt: number;
+  woodStaffSlamCooldownEndsAt: number;
   castingSkillId: string;
   castStartedAt: number;
   castEndsAt: number;
@@ -42,6 +47,8 @@ type RoomProfilePatchOptions = {
   defaultName?: string;
   defaultRole?: string;
   roleTransform?: (value: string) => string;
+  allowVitalsSync?: boolean;
+  allowStatsSync?: boolean;
   allowEquipmentSync?: boolean;
   defaultWeaponItem?: string;
 };
@@ -77,12 +84,16 @@ function applyOptionalFloor(
 export function initializeRoomPlayerTransientState(player: RoomProfilePlayer) {
   player.burnTicksRemaining = 0;
   player.burnEndsAt = 0;
+  player.poisonTicksRemaining = 0;
+  player.poisonEndsAt = 0;
   player.healingTicksRemaining = 0;
   player.healingEndsAt = 0;
   player.fireballCooldownEndsAt = 0;
   player.fireNovaCooldownEndsAt = 0;
   player.fireFieldCooldownEndsAt = 0;
   player.woodStaffStrikeCooldownEndsAt = 0;
+  player.woodStaffDashCooldownEndsAt = 0;
+  player.woodStaffSlamCooldownEndsAt = 0;
   player.castingSkillId = "";
   player.castStartedAt = 0;
   player.castEndsAt = 0;
@@ -109,39 +120,43 @@ export function applyRoomProfilePatch(
     player.role = options.defaultRole;
   }
 
-  const nextHealth = applyOptionalFloor(profile?.health, 0);
-  if (nextHealth !== null) {
-    player.health = nextHealth;
+  if (options.allowVitalsSync !== false) {
+    const nextHealth = applyOptionalFloor(profile?.health, 0);
+    if (nextHealth !== null) {
+      player.health = nextHealth;
+    }
+
+    const nextMaxHealth = applyOptionalFloor(profile?.maxHealth, 1);
+    if (nextMaxHealth !== null) {
+      player.maxHealth = nextMaxHealth;
+    }
   }
 
-  const nextMaxHealth = applyOptionalFloor(profile?.maxHealth, 1);
-  if (nextMaxHealth !== null) {
-    player.maxHealth = nextMaxHealth;
-  }
+  if (options.allowStatsSync !== false) {
+    const nextLevel = applyOptionalFloor(profile?.level, 1);
+    if (nextLevel !== null) {
+      player.level = nextLevel;
+    }
 
-  const nextLevel = applyOptionalFloor(profile?.level, 1);
-  if (nextLevel !== null) {
-    player.level = nextLevel;
-  }
+    const nextExperience = applyOptionalFloor(profile?.experience, 0);
+    if (nextExperience !== null) {
+      player.experience = nextExperience;
+    }
 
-  const nextExperience = applyOptionalFloor(profile?.experience, 0);
-  if (nextExperience !== null) {
-    player.experience = nextExperience;
-  }
+    const nextStrength = applyOptionalFloor(profile?.strength, 1);
+    if (nextStrength !== null) {
+      player.strength = nextStrength;
+    }
 
-  const nextStrength = applyOptionalFloor(profile?.strength, 1);
-  if (nextStrength !== null) {
-    player.strength = nextStrength;
-  }
+    const nextAgility = applyOptionalFloor(profile?.agility, 1);
+    if (nextAgility !== null) {
+      player.agility = nextAgility;
+    }
 
-  const nextAgility = applyOptionalFloor(profile?.agility, 1);
-  if (nextAgility !== null) {
-    player.agility = nextAgility;
-  }
-
-  const nextIntellect = applyOptionalFloor(profile?.intellect, 1);
-  if (nextIntellect !== null) {
-    player.intellect = nextIntellect;
+    const nextIntellect = applyOptionalFloor(profile?.intellect, 1);
+    if (nextIntellect !== null) {
+      player.intellect = nextIntellect;
+    }
   }
 
   if (options.allowEquipmentSync !== false) {
@@ -149,15 +164,15 @@ export function applyRoomProfilePatch(
     player.bodyItem = nextEquipment.body ?? player.bodyItem;
     player.headItem = nextEquipment.head ?? player.headItem;
     player.weaponItem = nextEquipment.weapon ?? player.weaponItem;
-    player.headGemItem1 = nextEquipment["head-gem-1"] ?? player.headGemItem1;
-    player.headGemItem2 = nextEquipment["head-gem-2"] ?? player.headGemItem2;
-    player.headGemItem3 = nextEquipment["head-gem-3"] ?? player.headGemItem3;
-    player.bodyGemItem1 = nextEquipment["body-gem-1"] ?? player.bodyGemItem1;
-    player.bodyGemItem2 = nextEquipment["body-gem-2"] ?? player.bodyGemItem2;
-    player.bodyGemItem3 = nextEquipment["body-gem-3"] ?? player.bodyGemItem3;
-    player.weaponGemItem1 = nextEquipment["weapon-gem-1"] ?? player.weaponGemItem1;
-    player.weaponGemItem2 = nextEquipment["weapon-gem-2"] ?? player.weaponGemItem2;
-    player.weaponGemItem3 = nextEquipment["weapon-gem-3"] ?? player.weaponGemItem3;
+    player.headGemItem1 = GEMS_ENABLED ? nextEquipment["head-gem-1"] ?? player.headGemItem1 : "";
+    player.headGemItem2 = GEMS_ENABLED ? nextEquipment["head-gem-2"] ?? player.headGemItem2 : "";
+    player.headGemItem3 = GEMS_ENABLED ? nextEquipment["head-gem-3"] ?? player.headGemItem3 : "";
+    player.bodyGemItem1 = GEMS_ENABLED ? nextEquipment["body-gem-1"] ?? player.bodyGemItem1 : "";
+    player.bodyGemItem2 = GEMS_ENABLED ? nextEquipment["body-gem-2"] ?? player.bodyGemItem2 : "";
+    player.bodyGemItem3 = GEMS_ENABLED ? nextEquipment["body-gem-3"] ?? player.bodyGemItem3 : "";
+    player.weaponGemItem1 = GEMS_ENABLED ? nextEquipment["weapon-gem-1"] ?? player.weaponGemItem1 : "";
+    player.weaponGemItem2 = GEMS_ENABLED ? nextEquipment["weapon-gem-2"] ?? player.weaponGemItem2 : "";
+    player.weaponGemItem3 = GEMS_ENABLED ? nextEquipment["weapon-gem-3"] ?? player.weaponGemItem3 : "";
   } else if (!player.weaponItem && options.defaultWeaponItem) {
     player.weaponItem = options.defaultWeaponItem;
   }
@@ -181,6 +196,8 @@ export function applyRoomZeroHealthState(
   player.dead = true;
   player.burnTicksRemaining = 0;
   player.burnEndsAt = 0;
+  player.poisonTicksRemaining = 0;
+  player.poisonEndsAt = 0;
   player.healingTicksRemaining = 0;
   player.healingEndsAt = 0;
   options.resetMovement?.();

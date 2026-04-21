@@ -65,12 +65,14 @@ export type IntroductionQuestStepDefinition = QuestStepDefinition & {
 };
 
 export function getIntroductionQuestSteps(locale: Locale): IntroductionQuestStepDefinition[] {
-  return QUEST_STEP_CONTENT[INTRODUCTION_QUEST_ID].map((step) => ({
-    id: step.id as IntroductionQuestStepId,
-    title: pickLocale(locale, step.title),
-    description: pickLocale(locale, step.description),
-    shortLabel: pickLocale(locale, step.shortLabel),
-  }));
+  return QUEST_STEP_CONTENT[INTRODUCTION_QUEST_ID]
+    .filter((step) => step.id !== 'socket_gem')
+    .map((step) => ({
+      id: step.id as IntroductionQuestStepId,
+      title: pickLocale(locale, step.title),
+      description: pickLocale(locale, step.description),
+      shortLabel: pickLocale(locale, step.shortLabel),
+    }));
 }
 
 export type SealedRelicQuestStepDefinition = QuestStepDefinition & {
@@ -168,8 +170,7 @@ export function hasTutorialChestBeenLooted(chestSlots?: Array<string | null> | n
   }
 
   const hasStaff = chestSlots.some((value) => isSameEquipmentItemFamily(parseInventoryItem(value)?.itemId, 'wood_staff'));
-  const hasGem = chestSlots.some((value) => parseInventoryItem(value)?.itemId === 'fire_trail_gem');
-  return !hasStaff && !hasGem;
+  return !hasStaff;
 }
 
 export function hasSocketedWeaponGem(equipment: EquipmentState) {

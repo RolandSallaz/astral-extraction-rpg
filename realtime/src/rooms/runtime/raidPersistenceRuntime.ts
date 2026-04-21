@@ -44,6 +44,8 @@ function createMobState(serialized: RaidRuntimeState["mobs"][number]) {
   mob.maxHealth = serialized.maxHealth;
   mob.burnTicksRemaining = serialized.burnTicksRemaining;
   mob.burnEndsAt = serialized.burnEndsAt;
+  mob.poisonTicksRemaining = serialized.poisonTicksRemaining;
+  mob.poisonEndsAt = serialized.poisonEndsAt;
   mob.dead = serialized.dead;
   mob.respawnAt = serialized.respawnAt;
   return mob;
@@ -126,6 +128,8 @@ export function serializeRaidRuntimeState(options: {
       maxHealth: mob.maxHealth,
       burnTicksRemaining: mob.burnTicksRemaining,
       burnEndsAt: mob.burnEndsAt,
+      poisonTicksRemaining: mob.poisonTicksRemaining,
+      poisonEndsAt: mob.poisonEndsAt,
       dead: mob.dead,
       respawnAt: mob.respawnAt,
     })),

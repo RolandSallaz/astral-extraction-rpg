@@ -1,8 +1,10 @@
-import { INVENTORY_SIZE, type EquipmentSlot, type EquippableItemId } from "../items/catalog";
+import { INVENTORY_SIZE, type BaseEquipmentSlot, type EquipmentSlot, type EquippableItemId } from "../items/catalog";
+import type { ItemProgressionState } from "../items/itemProgression";
 import type { QuestLog } from "../quests/core";
 
 export type EquipmentState = Partial<Record<EquipmentSlot, EquippableItemId>>;
 export type InventoryState = Array<string | null>;
+export type EquipmentItemProgressionState = Partial<Record<BaseEquipmentSlot, ItemProgressionState>>;
 
 export type CharacterPosition = {
   x: number;
@@ -32,6 +34,7 @@ export type CharacterTimestamps = {
 export type CharacterProfile = {
   equipment: EquipmentState;
   inventory: InventoryState;
+  equipmentItemProgression: EquipmentItemProgressionState;
   position: CharacterPosition;
 } & CharacterResources & CharacterProgression & CharacterTimestamps;
 
@@ -49,6 +52,7 @@ export function createStarterProfile(): CharacterProfile {
   return {
     equipment: createStarterEquipment(),
     inventory: createEmptyInventory(),
+    equipmentItemProgression: {},
     gold: 250,
     position: {
       x: 0,
