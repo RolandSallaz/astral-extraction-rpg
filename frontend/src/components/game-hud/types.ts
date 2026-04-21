@@ -2,7 +2,7 @@
 
 import type { ConsumableItemId, EquipmentSlot } from '@/lib/items/equipmentItems';
 
-export type SkillId = 'woodStaffStrike' | 'woodStaffDash' | 'woodStaffSlam' | 'woodStaffChainStrike' | 'woodStaffSpectralVolley' | 'fireball' | 'fireNova' | 'fireField';
+export type SkillId = 'woodStaffStrike' | 'woodStaffDash' | 'woodStaffSlam' | 'woodStaffChainStrike' | 'woodStaffSpectralVolley' | 'woodStaffStormIncarnate' | 'woodStaffVoidFracture' | 'fireball' | 'fireNova' | 'fireField';
 
 export type SkillCooldownState = Partial<Record<SkillId, number>>;
 

@@ -26,8 +26,13 @@ export class BasePlayerState extends Schema {
   @type("number") fireNovaCooldownEndsAt = 0;
   @type("number") fireFieldCooldownEndsAt = 0;
   @type("number") woodStaffStrikeCooldownEndsAt = 0;
+  @type("number") woodStaffChainStrikeCooldownEndsAt = 0;
   @type("number") woodStaffDashCooldownEndsAt = 0;
   @type("number") woodStaffSlamCooldownEndsAt = 0;
+  @type("number") woodStaffSpectralVolleyCooldownEndsAt = 0;
+  @type("number") woodStaffStormIncarnateCooldownEndsAt = 0;
+  @type("number") woodStaffVoidFractureCooldownEndsAt = 0;
+  @type("number") stormIncarnateEndsAt = 0;
   @type("string") castingSkillId = "";
   @type("number") castStartedAt = 0;
   @type("number") castEndsAt = 0;

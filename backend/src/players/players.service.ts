@@ -53,7 +53,7 @@ export class PlayersService {
   }
 
   async updatePlayer(player: PlayerEntity, input: UpdatePlayerDto) {
-    if (input.equipment || input.inventory) {
+    if (input.equipment || input.inventory || input.equipmentItemProgression) {
       await this.playerInventoryService.syncPlayerItems(
         player.id,
         input.equipment ?? this.playerSerializer.buildEquipmentState(player),

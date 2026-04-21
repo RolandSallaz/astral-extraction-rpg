@@ -23,11 +23,16 @@ type RealtimeRoomState = {
     healingTicksRemaining?: number;
     healingEndsAt?: number;
     woodStaffStrikeCooldownEndsAt?: number;
+    woodStaffChainStrikeCooldownEndsAt?: number;
     woodStaffDashCooldownEndsAt?: number;
     woodStaffSlamCooldownEndsAt?: number;
+    woodStaffSpectralVolleyCooldownEndsAt?: number;
+    woodStaffStormIncarnateCooldownEndsAt?: number;
+    woodStaffVoidFractureCooldownEndsAt?: number;
     fireballCooldownEndsAt?: number;
     fireNovaCooldownEndsAt?: number;
     fireFieldCooldownEndsAt?: number;
+    stormIncarnateEndsAt?: number;
     castingSkillId?: string;
     castStartedAt?: number;
     castEndsAt?: number;
@@ -103,6 +108,7 @@ type CharacterVisual = {
   currentHealingEndsAt: number;
   currentHealingStartedAt: number;
   currentHealingDurationMs: number;
+  currentStormIncarnateEndsAt: number;
   currentCastingSkillId: string;
   currentCastStartedAt: number;
   currentCastEndsAt: number;
@@ -187,6 +193,9 @@ type UsePlayerRendererParams = {
     woodStaffChainStrike?: number;
     woodStaffDash?: number;
     woodStaffSlam?: number;
+    woodStaffSpectralVolley?: number;
+    woodStaffStormIncarnate?: number;
+    woodStaffVoidFracture?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
@@ -196,6 +205,9 @@ type UsePlayerRendererParams = {
     woodStaffChainStrike: number;
     woodStaffDash: number;
     woodStaffSlam: number;
+    woodStaffSpectralVolley: number;
+    woodStaffStormIncarnate: number;
+    woodStaffVoidFracture: number;
     fireball: number;
     fireNova: number;
     fireField: number;
@@ -471,6 +483,7 @@ export function usePlayerRenderer() {
             networkPlayer.healingEndsAt ?? 0,
           );
         }
+        character.currentStormIncarnateEndsAt = networkPlayer.stormIncarnateEndsAt ?? 0;
         const previousCastingSkillId = character.currentCastingSkillId;
         const previousCastStartedAt = character.currentCastStartedAt;
         const nextCastingSkillId = networkPlayer.castingSkillId ?? '';
@@ -511,9 +524,12 @@ export function usePlayerRenderer() {
           });
             const nextCooldowns = {
               woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
-              woodStaffChainStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffChainStrike: networkPlayer.woodStaffChainStrikeCooldownEndsAt ?? 0,
               woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
               woodStaffSlam: networkPlayer.woodStaffSlamCooldownEndsAt ?? 0,
+              woodStaffSpectralVolley: networkPlayer.woodStaffSpectralVolleyCooldownEndsAt ?? 0,
+              woodStaffStormIncarnate: networkPlayer.woodStaffStormIncarnateCooldownEndsAt ?? 0,
+              woodStaffVoidFracture: networkPlayer.woodStaffVoidFractureCooldownEndsAt ?? 0,
               fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
               fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
               fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,
@@ -552,9 +568,12 @@ export function usePlayerRenderer() {
           });
             const nextCooldowns = {
               woodStaffStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
-              woodStaffChainStrike: networkPlayer.woodStaffStrikeCooldownEndsAt ?? 0,
+              woodStaffChainStrike: networkPlayer.woodStaffChainStrikeCooldownEndsAt ?? 0,
               woodStaffDash: networkPlayer.woodStaffDashCooldownEndsAt ?? 0,
               woodStaffSlam: networkPlayer.woodStaffSlamCooldownEndsAt ?? 0,
+              woodStaffSpectralVolley: networkPlayer.woodStaffSpectralVolleyCooldownEndsAt ?? 0,
+              woodStaffStormIncarnate: networkPlayer.woodStaffStormIncarnateCooldownEndsAt ?? 0,
+              woodStaffVoidFracture: networkPlayer.woodStaffVoidFractureCooldownEndsAt ?? 0,
               fireball: networkPlayer.fireballCooldownEndsAt ?? 0,
               fireNova: networkPlayer.fireNovaCooldownEndsAt ?? 0,
               fireField: networkPlayer.fireFieldCooldownEndsAt ?? 0,

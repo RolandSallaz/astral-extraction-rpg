@@ -70,6 +70,9 @@ type UseRoomOutboundSyncParams = {
   woodStaffChainStrikeCastNonce: number;
   woodStaffDashCastNonce: number;
   woodStaffSlamCastNonce: number;
+  woodStaffSpectralVolleyCastNonce: number;
+  woodStaffStormIncarnateCastNonce: number;
+  woodStaffVoidFractureCastNonce: number;
   sessionTokenRef: MutableRefObject<string | null>;
   contentVersionRef: MutableRefObject<string>;
   estimatedOneWayLatencyMsRef: MutableRefObject<number>;
@@ -79,6 +82,9 @@ type UseRoomOutboundSyncParams = {
     woodStaffChainStrike?: number;
     woodStaffDash?: number;
     woodStaffSlam?: number;
+    woodStaffSpectralVolley?: number;
+    woodStaffStormIncarnate?: number;
+    woodStaffVoidFracture?: number;
     fireball?: number;
     fireNova?: number;
     fireField?: number;
@@ -112,6 +118,9 @@ export function useRoomOutboundSync({
   woodStaffChainStrikeCastNonce,
   woodStaffDashCastNonce,
   woodStaffSlamCastNonce,
+  woodStaffSpectralVolleyCastNonce,
+  woodStaffStormIncarnateCastNonce,
+  woodStaffVoidFractureCastNonce,
   sessionTokenRef,
   contentVersionRef,
   estimatedOneWayLatencyMsRef,
@@ -262,6 +271,88 @@ export function useRoomOutboundSync({
   }, [activeRoomName, woodStaffSlamCastNonce, createTimedCastSkillMessage, estimatedOneWayLatencyMsRef, roomRef, skillCooldownsRef]);
 
   useEffect(() => {
+    if (woodStaffSpectralVolleyCastNonce <= 0) {
+      return;
+    }
+
+    if (!roomRef.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if ((skillCooldownsRef.current.woodStaffSpectralVolley ?? 0) > now) {
+      return;
+    }
+
+    const target = lastPointerWorldRef.current;
+    const castSkillMessage = createTimedCastSkillMessage(
+      {
+        skillId: 'woodStaffSpectralVolley',
+        targetX: target.x,
+        targetY: target.y,
+      },
+      estimatedOneWayLatencyMsRef.current,
+    );
+    roomRef.current.send('castSkill', castSkillMessage);
+  }, [
+    activeRoomName,
+    woodStaffSpectralVolleyCastNonce,
+    createTimedCastSkillMessage,
+    estimatedOneWayLatencyMsRef,
+    lastPointerWorldRef,
+    roomRef,
+    skillCooldownsRef,
+  ]);
+
+  useEffect(() => {
+    if (woodStaffStormIncarnateCastNonce <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if ((skillCooldownsRef.current.woodStaffStormIncarnate ?? 0) > now) {
+      return;
+    }
+
+    const castSkillMessage = createTimedCastSkillMessage(
+      { skillId: 'woodStaffStormIncarnate' },
+      estimatedOneWayLatencyMsRef.current,
+    );
+    roomRef.current?.send('castSkill', castSkillMessage);
+  }, [
+    activeRoomName,
+    woodStaffStormIncarnateCastNonce,
+    createTimedCastSkillMessage,
+    estimatedOneWayLatencyMsRef,
+    roomRef,
+    skillCooldownsRef,
+  ]);
+
+  useEffect(() => {
+    if (woodStaffVoidFractureCastNonce <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    if ((skillCooldownsRef.current.woodStaffVoidFracture ?? 0) > now) {
+      return;
+    }
+
+    const castSkillMessage = createTimedCastSkillMessage(
+      { skillId: 'woodStaffVoidFracture' },
+      estimatedOneWayLatencyMsRef.current,
+    );
+    roomRef.current?.send('castSkill', castSkillMessage);
+  }, [
+    activeRoomName,
+    woodStaffVoidFractureCastNonce,
+    createTimedCastSkillMessage,
+    estimatedOneWayLatencyMsRef,
+    roomRef,
+    skillCooldownsRef,
+  ]);
+
+  useEffect(() => {
     if (woodStaffChainStrikeCastNonce <= 0) {
       return;
     }
@@ -271,7 +362,7 @@ export function useRoomOutboundSync({
     }
 
     const now = Date.now();
-    if ((skillCooldownsRef.current.woodStaffStrike ?? 0) > now) {
+    if ((skillCooldownsRef.current.woodStaffChainStrike ?? 0) > now) {
       return;
     }
 

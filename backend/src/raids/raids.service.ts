@@ -111,7 +111,7 @@ export class RaidsService {
         height: run.height,
         isActive: true,
       }),
-      partyId: run.party?.id ?? null,
+      partyId: run.partyId ?? null,
       generatedLayout: null,
       runtimeState: run.runtimeState ?? null,
       startedAt: run.startedAt?.toISOString() ?? null,

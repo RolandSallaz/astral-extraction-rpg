@@ -1,4 +1,5 @@
 import { isSameEquipmentItemFamily } from "../items/catalog";
+import { WOOD_STAFF_CHAIN_STRIKE_COOLDOWN_MS } from "../items/itemProgression";
 
 /**
  * Skill system interface.
@@ -13,6 +14,9 @@ export type SkillId =
   | "woodStaffDash"
   | "woodStaffSlam"
   | "woodStaffChainStrike"
+  | "woodStaffSpectralVolley"
+  | "woodStaffStormIncarnate"
+  | "woodStaffVoidFracture"
   | "fireball"
   | "fireNova"
   | "fireField";
@@ -62,7 +66,7 @@ export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
     category: "melee",
     name: "Wood Staff Chain Strike",
     requiredWeapon: "wood_staff",
-    baseCooldownMs: 800,
+    baseCooldownMs: WOOD_STAFF_CHAIN_STRIKE_COOLDOWN_MS,
     spawnsProjectile: false,
   },
   fireball: {
@@ -87,6 +91,30 @@ export const SKILL_REGISTRY: Record<SkillId, SkillDefinition> = {
     name: "Fire Field",
     requiredWeapon: "wood_staff",
     baseCooldownMs: 12000,
+    spawnsProjectile: false,
+  },
+  woodStaffSpectralVolley: {
+    id: "woodStaffSpectralVolley",
+    category: "projectile",
+    name: "Spectral Volley",
+    requiredWeapon: "wood_staff",
+    baseCooldownMs: 3000,
+    spawnsProjectile: true,
+  },
+  woodStaffStormIncarnate: {
+    id: "woodStaffStormIncarnate",
+    category: "nova",
+    name: "Storm Incarnate",
+    requiredWeapon: "wood_staff",
+    baseCooldownMs: 30000,
+    spawnsProjectile: false,
+  },
+  woodStaffVoidFracture: {
+    id: "woodStaffVoidFracture",
+    category: "nova",
+    name: "Void Fracture",
+    requiredWeapon: "wood_staff",
+    baseCooldownMs: 25000,
     spawnsProjectile: false,
   },
 };

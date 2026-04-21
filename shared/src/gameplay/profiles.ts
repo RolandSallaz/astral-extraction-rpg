@@ -41,6 +41,14 @@ export type RoomGameplayProfile = {
   woodStaffSlamDamage: number;
   woodStaffSlamCooldownMs: number;
   woodStaffSlamRadiusTiles: number;
+  woodStaffStormIncarnateCooldownMs: number;
+  woodStaffStormIncarnateDurationMs: number;
+  woodStaffStormIncarnateStrikeIntervalMs: number;
+  woodStaffStormIncarnateAutoRangeTiles: number;
+  woodStaffVoidFractureCooldownMs: number;
+  woodStaffVoidFractureRadiusTiles: number;
+  woodStaffVoidFractureDamageMultiplier: number;
+  woodStaffVoidFractureStunMs: number;
   fireballCooldownMs: number;
   fireNovaProjectileCount: number;
   fireNovaCooldownMs: number;
@@ -118,6 +126,14 @@ const COMMON_GAMEPLAY: Omit<
   woodStaffSlamDamage: 14,
   woodStaffSlamCooldownMs: 6000,
   woodStaffSlamRadiusTiles: 1.5,
+  woodStaffStormIncarnateCooldownMs: 30000,
+  woodStaffStormIncarnateDurationMs: 5000,
+  woodStaffStormIncarnateStrikeIntervalMs: 400,
+  woodStaffStormIncarnateAutoRangeTiles: 3,
+  woodStaffVoidFractureCooldownMs: 25000,
+  woodStaffVoidFractureRadiusTiles: 2.5,
+  woodStaffVoidFractureDamageMultiplier: 3.5,
+  woodStaffVoidFractureStunMs: 1500,
   fireballCooldownMs: 1000,
   fireNovaProjectileCount: 12,
   fireNovaCooldownMs: 10000,

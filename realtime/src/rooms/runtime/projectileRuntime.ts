@@ -12,6 +12,7 @@ import { setMobAggroTarget } from "./mobAi.js";
 import {
   applyGemConfigToProjectile,
   buildOnHitProjectileEffects,
+  shouldProjectileApplyBurn,
   shouldProjectileDealDirectDamage,
   type DamageType,
 } from "./projectileSkills.js";
@@ -114,6 +115,7 @@ export function spawnProjectile(
   lifetime: number,
   damageScale = 1,
   sizeScale = 1,
+  serverDataOverrides?: Partial<ProjectileServerData>,
 ): void {
   const p = ctx.state.profile;
   const gemConfig = ctx.skills.getOwnerProjectileGemConfig(ownerId, skillId);
@@ -138,6 +140,9 @@ export function spawnProjectile(
     damageScale,
     sizeScale,
   });
+  if (serverDataOverrides) {
+    Object.assign(serverData, serverDataOverrides);
+  }
   ctx.state.roomProjectiles.set(projectile.id, projectile);
   ctx.state.projectileServerData.set(projectile.id, serverData);
 }
@@ -460,7 +465,9 @@ export function updateRoomProjectiles(
       if (isCritical && finalDamage > 0) {
         ctx.combat.broadcastDamageText(player.x, player.y - 18, `-${finalDamage}`);
       }
-      ctx.combat.applyBurnToPlayer(player, ctx.skills.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
+      if (shouldProjectileApplyBurn(projectile.skillId)) {
+        ctx.combat.applyBurnToPlayer(player, ctx.skills.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
+      }
       ctx.combat.pushTargetByKnockback(projectile.x, projectile.y, player, sd.knockbackDistance, (nx, ny) => {
         player.x = Math.max(tileSize / 2, Math.min(widthPx - tileSize / 2, nx));
         player.y = Math.max(tileSize / 2, Math.min(heightPx - tileSize / 2, ny));
@@ -517,7 +524,9 @@ export function updateRoomProjectiles(
       if (isCritical && resolvedDamage > 0) {
         ctx.combat.broadcastDamageText(mob.x, mob.y - 18, `-${resolvedDamage}`);
       }
-      ctx.combat.applyBurnToMob(mob, ctx.skills.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
+      if (shouldProjectileApplyBurn(projectile.skillId)) {
+        ctx.combat.applyBurnToMob(mob, ctx.skills.getSkillBalanceKey(projectile.skillId), projectile.ownerId);
+      }
       ctx.combat.pushTargetByKnockback(projectile.x, projectile.y, mob, sd.knockbackDistance, (nx, ny) => {
         mob.x = nx;
         mob.y = ny;

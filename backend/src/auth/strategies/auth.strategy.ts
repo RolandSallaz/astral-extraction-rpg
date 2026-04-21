@@ -18,6 +18,7 @@ export class AuthStrategy {
       throw new UnauthorizedException('Session expired.');
     }
 
+    this.playerSessionsService.touchPlayerActivity(player.id, token);
     return player;
   }
 

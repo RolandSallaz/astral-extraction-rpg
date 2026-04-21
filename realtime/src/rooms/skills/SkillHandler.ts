@@ -3,6 +3,7 @@ import type { RoomGameplayProfile } from "@mmorpg/shared/gameplay/profiles";
 import type { ItemProgressionState } from "@mmorpg/shared";
 import type { ProjectileGemConfig } from "../runtime/fireballGems.js";
 import type { BurstSpawnRequest } from "../runtime/projectileSkills.js";
+import type { ProjectileServerData } from "../schema/ProjectileState.js";
 
 /**
  * Narrow interface that skill handlers receive instead of the entire room.
@@ -30,6 +31,9 @@ export interface SkillCastContext {
   performWoodStaffChainStrike(player: BasePlayerState, targetX: number, targetY: number): void;
   performWoodStaffDash(player: BasePlayerState, targetX: number, targetY: number): void;
   performWoodStaffSlam(player: BasePlayerState): void;
+  performWoodStaffStormIncarnate(player: BasePlayerState): void;
+  performWoodStaffVoidFracture(player: BasePlayerState): void;
+  readonly woodStaffVoidFractureCooldownReductionMs: number;
 
   // Fireball-specific helpers
   getOwnerProjectileGemConfig(ownerId: string, skillId: string): ProjectileGemConfig;
@@ -44,6 +48,7 @@ export interface SkillCastContext {
     lifetime: number,
     damageScale?: number,
     sizeScale?: number,
+    serverDataOverrides?: Partial<ProjectileServerData>,
   ): void;
   queueBurstSpawns(bursts: BurstSpawnRequest[]): void;
 

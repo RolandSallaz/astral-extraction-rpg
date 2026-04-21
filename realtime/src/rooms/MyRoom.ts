@@ -756,6 +756,7 @@ export class MyRoom extends BaseGameRoom<PlayerState> {
     player.moveY = 0;
       player.fireFieldCooldownEndsAt = 0;
       player.woodStaffStrikeCooldownEndsAt = 0;
+      player.woodStaffChainStrikeCooldownEndsAt = 0;
       player.woodStaffDashCooldownEndsAt = 0;
       player.woodStaffSlamCooldownEndsAt = 0;
       this.clearPlayerCastState(player);

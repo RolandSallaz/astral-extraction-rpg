@@ -132,6 +132,8 @@ export type CharacterVisual = {
   castItem: PhaserImage;
   burnEffect: PhaserImage;
   swingTrail: PhaserGraphics;
+  stormAura: PhaserGraphics;
+  voidFractureAura: PhaserGraphics;
   swingTrailPoints: Array<{ x: number; y: number; time: number }>;
   weaponEffects: Array<{
     image: PhaserImage;
@@ -185,6 +187,7 @@ export type CharacterVisual = {
   currentHealingEndsAt: number;
   currentHealingStartedAt: number;
   currentHealingDurationMs: number;
+  currentStormIncarnateEndsAt: number;
   currentCastingSkillId: string;
   currentCastStartedAt: number;
   currentCastEndsAt: number;

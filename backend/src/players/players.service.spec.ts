@@ -1,6 +1,7 @@
 import { PlayerInventoryService } from './player-inventory.service';
 import { PlayerRole } from './player-role.enum';
 import { PlayerSerializerService } from './player-serializer.service';
+import { PlayersService } from './players.service';
 import { parseInventoryItem, serializeInventoryItem } from '@mmorpg/shared';
 
 describe('Player inventory and serialization helpers', () => {
@@ -94,6 +95,61 @@ describe('Player inventory and serialization helpers', () => {
     expect(service.buildInventoryState(player as any)[3]).toBe('wood_staff');
   });
 
+  it('preserves wood staff progression above level 14 when serializing equipped items', () => {
+    const service = new PlayerSerializerService();
+    const player = {
+      items: [
+        {
+          equippedSlot: 'weapon',
+          inventorySlot: null,
+          parentItemId: null,
+          quantity: 1,
+          itemCode: 'wood_staff',
+          progressionLevel: 15,
+          selectedUpgradeIds: [
+            'wood_staff_range_2',
+            'wood_staff_cooldown_3',
+            'wood_staff_knockback_4',
+            'wood_staff_dash_5',
+            'wood_staff_rapid_6',
+            'wood_staff_mastery_7',
+            'wood_staff_echo_8',
+            'wood_staff_ruin_9',
+            'wood_staff_chain_10',
+            'wood_staff_chain_jump_11',
+            'wood_staff_chain_reach_12',
+            'wood_staff_chain_seek_13',
+            'wood_staff_chain_refund_14',
+            'wood_staff_fleet_15',
+          ],
+          socketedItems: [],
+        },
+      ],
+    };
+
+    expect(service.buildEquipmentItemProgressionState(player as any)).toEqual({
+      weapon: {
+        level: 15,
+        selectedUpgradeIds: [
+          'wood_staff_range_2',
+          'wood_staff_cooldown_3',
+          'wood_staff_knockback_4',
+          'wood_staff_dash_5',
+          'wood_staff_rapid_6',
+          'wood_staff_mastery_7',
+          'wood_staff_echo_8',
+          'wood_staff_ruin_9',
+          'wood_staff_chain_10',
+          'wood_staff_chain_jump_11',
+          'wood_staff_chain_reach_12',
+          'wood_staff_chain_seek_13',
+          'wood_staff_chain_refund_14',
+          'wood_staff_fleet_15',
+        ],
+      },
+    });
+  });
+
   it('does not sync disabled socket children into separate player items', async () => {
     const { service, playerItemsRepository, itemsService } = createInventoryService();
     const savedBaseItems = [
@@ -121,5 +177,51 @@ describe('Player inventory and serialization helpers', () => {
 
     expect(playerItemsRepository.delete).toHaveBeenCalledWith({ playerId: 'player-1' });
     expect(playerItemsRepository.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('syncs player items when only equipment progression changes', async () => {
+    const playersRepository = {
+      update: jest.fn(async () => undefined),
+    };
+    const playerInventoryService = {
+      syncPlayerItems: jest.fn(async () => undefined),
+    };
+    const playerSerializer = {
+      buildEquipmentState: jest.fn(() => ({ weapon: 'wood_staff' })),
+      buildEquipmentItemProgressionState: jest.fn(() => ({})),
+      buildInventoryState: jest.fn(() => []),
+    };
+    const service = new PlayersService(
+      playersRepository as any,
+      playerInventoryService as any,
+      playerSerializer as any,
+    );
+    const player = {
+      id: 'player-1',
+      items: [],
+    };
+    const findSpy = jest.spyOn(service, 'findPlayerById').mockResolvedValue(player as any);
+
+    await service.updatePlayer(player as any, {
+      equipmentItemProgression: {
+        weapon: {
+          level: 15,
+          selectedUpgradeIds: ['wood_staff_fleet_15'],
+        },
+      },
+    });
+
+    expect(playerInventoryService.syncPlayerItems).toHaveBeenCalledWith(
+      'player-1',
+      { weapon: 'wood_staff' },
+      {
+        weapon: {
+          level: 15,
+          selectedUpgradeIds: ['wood_staff_fleet_15'],
+        },
+      },
+      [],
+    );
+    expect(findSpy).toHaveBeenCalledWith('player-1');
   });
 });

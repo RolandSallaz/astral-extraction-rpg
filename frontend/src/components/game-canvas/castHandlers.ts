@@ -27,6 +27,9 @@ export type SkillCooldownState = {
   woodStaffDash: number;
   woodStaffSlam: number;
   woodStaffChainStrike: number;
+  woodStaffSpectralVolley: number;
+  woodStaffStormIncarnate: number;
+  woodStaffVoidFracture: number;
   fireball: number;
   fireNova: number;
   fireField: number;
@@ -140,7 +143,7 @@ export function castWoodStaffStrike(ctx: CastContext, targetX: number, targetY: 
   ctx.room.send('castSkill', castSkillMessage);
   if (localCharacter) {
     const castStartedAt = Date.now();
-    applyCastingToCharacterVisual(localCharacter, 'woodStaffChainStrike', castStartedAt, castStartedAt + WOOD_STAFF_STRIKE_LOCK_MS);
+    applyCastingToCharacterVisual(localCharacter, 'woodStaffStrike', castStartedAt, castStartedAt + WOOD_STAFF_STRIKE_LOCK_MS);
   }
 }
 
@@ -149,7 +152,7 @@ export function castWoodStaffChainStrike(ctx: CastContext, targetX: number, targ
   if (!getItemProgressionBonuses(ctx.equipment.weapon, ctx.equipmentItemProgression.weapon).grantsWoodStaffChainStrike) return;
   const localCharacter = ctx.localSessionId ? ctx.characters.get(ctx.localSessionId) : undefined;
   const now = Date.now();
-  if ((ctx.skillCooldowns.woodStaffStrike ?? 0) > now) return;
+  if ((ctx.skillCooldowns.woodStaffChainStrike ?? 0) > now) return;
   if (localCharacter && localCharacter.currentCastEndsAt > now) return;
   const castSkillMessage = createTimedCastSkillMessage(
     { skillId: 'woodStaffChainStrike', targetX, targetY },
@@ -158,7 +161,7 @@ export function castWoodStaffChainStrike(ctx: CastContext, targetX: number, targ
   ctx.room.send('castSkill', castSkillMessage);
   if (localCharacter) {
     const castStartedAt = Date.now();
-    applyCastingToCharacterVisual(localCharacter, 'woodStaffStrike', castStartedAt, castStartedAt + WOOD_STAFF_STRIKE_LOCK_MS);
+    applyCastingToCharacterVisual(localCharacter, 'woodStaffChainStrike', castStartedAt, castStartedAt + WOOD_STAFF_STRIKE_LOCK_MS);
   }
 }
 
@@ -180,11 +183,60 @@ export function castWoodStaffSlam(ctx: CastContext): void {
   }
 }
 
+export function castWoodStaffSpectralVolley(ctx: CastContext, targetX: number, targetY: number): void {
+  if (!ctx.room || !hasWoodStaffEquipped(ctx.equipment, ctx.castHelpersConfig)) return;
+  if (!getItemProgressionBonuses(ctx.equipment.weapon, ctx.equipmentItemProgression.weapon).grantsWoodStaffSpectralVolley) return;
+  const localCharacter = ctx.localSessionId ? ctx.characters.get(ctx.localSessionId) : undefined;
+  const now = Date.now();
+  if ((ctx.skillCooldowns.woodStaffSpectralVolley ?? 0) > now) return;
+  if (localCharacter && localCharacter.currentCastEndsAt > now) return;
+  const castSkillMessage = createTimedCastSkillMessage(
+    { skillId: 'woodStaffSpectralVolley', targetX, targetY },
+    ctx.estimatedOneWayLatencyMs,
+  );
+  ctx.room.send('castSkill', castSkillMessage);
+  if (localCharacter) {
+    const castStartedAt = Date.now();
+    applyCastingToCharacterVisual(localCharacter, 'woodStaffSpectralVolley', castStartedAt, castStartedAt + WOOD_STAFF_STRIKE_LOCK_MS);
+  }
+}
+
+export function castWoodStaffStormIncarnate(ctx: CastContext): void {
+  if (!ctx.room || !hasWoodStaffEquipped(ctx.equipment, ctx.castHelpersConfig)) return;
+  if (!getItemProgressionBonuses(ctx.equipment.weapon, ctx.equipmentItemProgression.weapon).grantsWoodStaffStormIncarnate) return;
+  const localCharacter = ctx.localSessionId ? ctx.characters.get(ctx.localSessionId) : undefined;
+  const now = Date.now();
+  if ((ctx.skillCooldowns.woodStaffStormIncarnate ?? 0) > now) return;
+  if (localCharacter && localCharacter.currentCastEndsAt > now) return;
+  const castSkillMessage = createTimedCastSkillMessage(
+    { skillId: 'woodStaffStormIncarnate' },
+    ctx.estimatedOneWayLatencyMs,
+  );
+  ctx.room.send('castSkill', castSkillMessage);
+}
+
+export function castWoodStaffVoidFracture(ctx: CastContext): void {
+  if (!ctx.room || !hasWoodStaffEquipped(ctx.equipment, ctx.castHelpersConfig)) return;
+  if (!getItemProgressionBonuses(ctx.equipment.weapon, ctx.equipmentItemProgression.weapon).grantsWoodStaffVoidFracture) return;
+  const localCharacter = ctx.localSessionId ? ctx.characters.get(ctx.localSessionId) : undefined;
+  const now = Date.now();
+  if ((ctx.skillCooldowns.woodStaffVoidFracture ?? 0) > now) return;
+  if (localCharacter && localCharacter.currentCastEndsAt > now) return;
+  const castSkillMessage = createTimedCastSkillMessage(
+    { skillId: 'woodStaffVoidFracture' },
+    ctx.estimatedOneWayLatencyMs,
+  );
+  ctx.room.send('castSkill', castSkillMessage);
+}
+
 export function castMouseBoundSkill(ctx: CastContext, skillId: SkillId, targetX: number, targetY: number): void {
   if (skillId === 'woodStaffStrike') { castWoodStaffStrike(ctx, targetX, targetY); return; }
   if (skillId === 'woodStaffChainStrike') { castWoodStaffChainStrike(ctx, targetX, targetY); return; }
   if (skillId === 'woodStaffDash') { castWoodStaffDash(ctx, targetX, targetY); return; }
   if (skillId === 'woodStaffSlam') { castWoodStaffSlam(ctx); return; }
+  if (skillId === 'woodStaffSpectralVolley') { castWoodStaffSpectralVolley(ctx, targetX, targetY); return; }
+  if (skillId === 'woodStaffStormIncarnate') { castWoodStaffStormIncarnate(ctx); return; }
+  if (skillId === 'woodStaffVoidFracture') { castWoodStaffVoidFracture(ctx); return; }
   if (skillId === 'fireball') { castFireball(ctx, targetX, targetY); return; }
   if (skillId === 'fireField') { castFireField(ctx, targetX, targetY); return; }
   castFireNova(ctx);

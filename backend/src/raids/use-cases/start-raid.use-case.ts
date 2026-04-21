@@ -84,7 +84,7 @@ export class StartRaidUseCase {
       maxPlayers: scaledTemplate.maxPlayers,
       width: scaledTemplate.width,
       height: scaledTemplate.height,
-      party: party ?? null,
+      partyId: party?.id ?? null,
     });
 
     const savedRun = await this.raidRunsRepository.save(run);
@@ -162,7 +162,7 @@ export class StartRaidUseCase {
         height: run.height,
         isActive: true,
       }),
-      partyId: run.party?.id ?? null,
+      partyId: run.partyId ?? null,
       generatedLayout: null,
       runtimeState: run.runtimeState ?? null,
       startedAt: run.startedAt?.toISOString() ?? null,
@@ -196,7 +196,6 @@ export class StartRaidUseCase {
 
     return this.raidRunsRepository
       .createQueryBuilder('run')
-      .leftJoinAndSelect('run.party', 'party')
       .where('run.templateCode = :templateCode', { templateCode: template.code })
       .andWhere('run.status IN (:...statuses)', { statuses: ['ready', 'forming', 'active', 'empty'] })
       .andWhere('run.finishedAt IS NULL')

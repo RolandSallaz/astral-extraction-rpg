@@ -51,6 +51,12 @@ import {
   performWoodStaffSlam as performWoodStaffSlamRuntime,
   type WoodStaffSlamContext,
 } from "./woodStaffSlamRuntime.js";
+import {
+  type WoodStaffStormIncarnateContext,
+} from "./woodStaffStormIncarnateRuntime.js";
+import {
+  type WoodStaffVoidFractureContext,
+} from "./woodStaffVoidFractureRuntime.js";
 
 type ProjectileTarget = { entity: BasePlayerState | MobState; distance: number } | null;
 
@@ -135,6 +141,8 @@ export interface BaseGameRoomRuntime {
   woodStaffChainStrikeContext(): WoodStaffChainStrikeContext;
   woodStaffDashContext(): WoodStaffDashContext;
   woodStaffSlamContext(): WoodStaffSlamContext;
+  woodStaffStormIncarnateContext(): WoodStaffStormIncarnateContext;
+  woodStaffVoidFractureContext(): WoodStaffVoidFractureContext;
   projectileContext(): ProjectileRuntimeContext;
   createFireField(player: BasePlayerState, targetX: number, targetY: number, now: number): void;
   createFireTrail(ownerId: string, tileX: number, tileY: number, now: number): void;
@@ -148,6 +156,7 @@ export interface BaseGameRoomRuntime {
     lifetime: number,
     damageScale?: number,
     sizeScale?: number,
+    serverDataOverrides?: Partial<ProjectileServerData>,
   ): void;
   deleteProjectile(projectileId: string): void;
   queueBurstSpawns(bursts: BurstSpawnRequest[]): void;
@@ -251,6 +260,31 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
   });
 
   const woodStaffSlamContext = (): WoodStaffSlamContext => ({
+    profile: bindings.getProfile(),
+    roomPlayers: bindings.getRoomPlayers(),
+    roomMobs: bindings.getRoomMobs(),
+    applyDamageToPlayer: (player, amount, damageType) => bindings.applyDamageToPlayer(player, amount, damageType),
+    handlePlayerKilled: (player) => bindings.handlePlayerKilled(player),
+    handleMobDeath: (mob) => bindings.handleMobDeath(mob),
+    awardExperience: (playerId, amount) => bindings.awardExperience(playerId, amount),
+    broadcastDamageText: (x, y, text, color) => broadcastDamageText(messageBroadcaster, x, y, text, color),
+    onCombatLog: (text) => bindings.onCombatLog(text),
+  });
+
+  const woodStaffStormIncarnateContext = (): WoodStaffStormIncarnateContext => ({
+    profile: bindings.getProfile(),
+    roomPlayers: bindings.getRoomPlayers(),
+    roomMobs: bindings.getRoomMobs(),
+    queryNearbyMobs: (x, y, radius) => bindings.queryNearbyMobs(x, y, radius),
+    applyDamageToPlayer: (player, amount, damageType) => bindings.applyDamageToPlayer(player, amount, damageType),
+    handlePlayerKilled: (player) => bindings.handlePlayerKilled(player),
+    handleMobDeath: (mob) => bindings.handleMobDeath(mob),
+    awardExperience: (playerId, amount) => bindings.awardExperience(playerId, amount),
+    broadcastDamageText: (x, y, text, color) => broadcastDamageText(messageBroadcaster, x, y, text, color),
+    onCombatLog: (text) => bindings.onCombatLog(text),
+  });
+
+  const woodStaffVoidFractureContext = (): WoodStaffVoidFractureContext => ({
     profile: bindings.getProfile(),
     roomPlayers: bindings.getRoomPlayers(),
     roomMobs: bindings.getRoomMobs(),
@@ -405,9 +439,16 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
         sessionId,
         candidate,
       ),
+    performWoodStaffStormIncarnate: () => {
+      // Overridden in BaseGameRoom.handleCastSkillMessage to store pending state
+    },
+    performWoodStaffVoidFracture: () => {
+      // Overridden in BaseGameRoom.handleCastSkillMessage to store pending state
+    },
+    woodStaffVoidFractureCooldownReductionMs: 0,
     getOwnerProjectileGemConfig: (ownerId, skillId) => bindings.getOwnerProjectileGemConfig(ownerId, skillId),
     hasSplitProjectileGem: (ownerId) => bindings.hasSplitProjectileGem(ownerId),
-    spawnProjectile: (ownerId, skillId, x, y, directionX, directionY, lifetime, damageScale, sizeScale) =>
+    spawnProjectile: (ownerId, skillId, x, y, directionX, directionY, lifetime, damageScale, sizeScale, serverDataOverrides) =>
       spawnProjectileRuntime(
         projectileContext(),
         ownerId,
@@ -419,6 +460,7 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
         lifetime,
         damageScale,
         sizeScale,
+        serverDataOverrides,
       ),
     queueBurstSpawns: (bursts) => bindings.getProjectileSystem().queueBurstSpawns(bursts),
     createFireField,
@@ -475,10 +517,12 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
     woodStaffChainStrikeContext,
     woodStaffDashContext,
     woodStaffSlamContext,
+    woodStaffStormIncarnateContext,
+    woodStaffVoidFractureContext,
     projectileContext,
     createFireField,
     createFireTrail,
-    spawnProjectile: (ownerId, skillId, x, y, directionX, directionY, lifetime, damageScale, sizeScale) =>
+    spawnProjectile: (ownerId, skillId, x, y, directionX, directionY, lifetime, damageScale, sizeScale, serverDataOverrides) =>
       spawnProjectileRuntime(
         projectileContext(),
         ownerId,
@@ -490,6 +534,7 @@ export function createBaseGameRoomRuntime(bindings: BaseGameRoomRuntimeBindings)
         lifetime,
         damageScale,
         sizeScale,
+        serverDataOverrides,
       ),
     deleteProjectile: (projectileId) => {
       deleteProjectileRuntime(projectileContext(), projectileId);

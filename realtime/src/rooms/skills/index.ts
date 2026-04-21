@@ -5,7 +5,10 @@ import { FireFieldHandler } from "./FireFieldHandler.js";
 import { WoodStaffStrikeHandler } from "./WoodStaffStrikeHandler.js";
 import { WoodStaffChainStrikeHandler } from "./WoodStaffChainStrikeHandler.js";
 import { WoodStaffDashHandler } from "./WoodStaffDashHandler.js";
+import { WoodStaffSpectralVolleyHandler } from "./WoodStaffSpectralVolleyHandler.js";
 import { WoodStaffSlamHandler } from "./WoodStaffSlamHandler.js";
+import { WoodStaffStormIncarnateHandler } from "./WoodStaffStormIncarnateHandler.js";
+import { WoodStaffVoidFractureHandler } from "./WoodStaffVoidFractureHandler.js";
 
 export type { SkillHandler, SkillCastContext } from "./SkillHandler.js";
 
@@ -13,7 +16,10 @@ const ALL_SKILL_HANDLERS: readonly SkillHandler[] = [
   WoodStaffStrikeHandler,
   WoodStaffChainStrikeHandler,
   WoodStaffDashHandler,
+  WoodStaffSpectralVolleyHandler,
   WoodStaffSlamHandler,
+  WoodStaffStormIncarnateHandler,
+  WoodStaffVoidFractureHandler,
   FireballHandler,
   FireNovaHandler,
   FireFieldHandler,

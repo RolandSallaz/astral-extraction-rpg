@@ -442,6 +442,17 @@ describe("raid room", () => {
       name: "Dash Raider",
       raidRunId: "raid-wood-staff-dash",
       weaponItem: "wood_staff",
+      equipmentItemProgression: {
+        weapon: {
+          level: 5,
+          selectedUpgradeIds: [
+            "wood_staff_range_2",
+            "wood_staff_cooldown_3",
+            "wood_staff_knockback_4",
+            "wood_staff_dash_5",
+          ],
+        },
+      },
     });
     const targetClient = await connectToRoom(colyseus, room, {
       name: "Dash Target",
@@ -449,6 +460,20 @@ describe("raid room", () => {
       weaponItem: "wood_staff",
     });
 
+    await room.waitForNextPatch();
+    client.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 5,
+          selectedUpgradeIds: [
+            "wood_staff_range_2",
+            "wood_staff_cooldown_3",
+            "wood_staff_knockback_4",
+            "wood_staff_dash_5",
+          ],
+        },
+      },
+    });
     await room.waitForNextPatch();
 
     const player = room.state.players.get(client.sessionId);

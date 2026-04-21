@@ -5,6 +5,7 @@ import {
   INVENTORY_SIZE,
   normalizeItemProgressionState,
   serializeInventoryItem,
+  type ItemProgressionState,
 } from '@mmorpg/shared';
 import type { CharacterProfile } from '@mmorpg/shared/player/contracts';
 import { PlayerEntity } from './entities/player.entity';
@@ -92,17 +93,8 @@ export class PlayerSerializerService {
           .map((socketedItem) => socketedItem.itemCode);
         inventory[item.inventorySlot] = serializeInventoryItem(canonicalItemCode, item.quantity, socketedCodes, {
           itemProgression: normalizeItemProgressionState(canonicalItemCode, {
-            level: (item.progressionLevel ?? 1) as 1 | 2 | 3 | 4 | 5,
-            selectedUpgradeIds: (item.selectedUpgradeIds ?? []) as Array<
-              | 'wood_staff_range_2'
-              | 'wood_staff_focus_2'
-              | 'wood_staff_cooldown_3'
-              | 'wood_staff_channel_3'
-              | 'wood_staff_knockback_4'
-              | 'wood_staff_force_4'
-              | 'wood_staff_dash_5'
-              | 'wood_staff_nova_5'
-            >,
+            level: (item.progressionLevel ?? 1) as ItemProgressionState['level'],
+            selectedUpgradeIds: (item.selectedUpgradeIds ?? []) as ItemProgressionState['selectedUpgradeIds'],
           }),
         });
       }
@@ -125,17 +117,8 @@ export class PlayerSerializerService {
       }
 
       const normalized = normalizeItemProgressionState(canonicalItemCode, {
-        level: (item.progressionLevel ?? 1) as 1 | 2 | 3 | 4 | 5,
-        selectedUpgradeIds: (item.selectedUpgradeIds ?? []) as Array<
-          | 'wood_staff_range_2'
-          | 'wood_staff_focus_2'
-          | 'wood_staff_cooldown_3'
-          | 'wood_staff_channel_3'
-          | 'wood_staff_knockback_4'
-          | 'wood_staff_force_4'
-          | 'wood_staff_dash_5'
-          | 'wood_staff_nova_5'
-        >,
+        level: (item.progressionLevel ?? 1) as ItemProgressionState['level'],
+        selectedUpgradeIds: (item.selectedUpgradeIds ?? []) as ItemProgressionState['selectedUpgradeIds'],
       });
       if (!normalized) {
         continue;

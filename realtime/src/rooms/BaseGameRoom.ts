@@ -71,6 +71,16 @@ import {
 } from "./runtime/woodStaffChainStrikeRuntime.js";
 import { performWoodStaffSlam as performWoodStaffSlamRuntime } from "./runtime/woodStaffSlamRuntime.js";
 import {
+  performWoodStaffStormIncarnate as performWoodStaffStormIncarnateRuntime,
+  updateStormIncarnate as updateStormIncarnateRuntime,
+  type PendingStormIncarnate,
+} from "./runtime/woodStaffStormIncarnateRuntime.js";
+import {
+  performWoodStaffVoidFracture as performWoodStaffVoidFractureRuntime,
+  executePendingVoidFracture as executePendingVoidFractureRuntime,
+  type PendingVoidFracture,
+} from "./runtime/woodStaffVoidFractureRuntime.js";
+import {
   updateRoomProjectiles,
   spawnProjectile as spawnProjectileRuntime,
   deleteProjectile as deleteProjectileRuntime,
@@ -229,6 +239,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
   protected readonly playerEquipmentItemProgression = new Map<string, EquipmentItemProgressionState>();
   protected readonly skillHandlers = createSkillHandlers();
   protected readonly pendingWoodStaffChainStrikes = new Map<string, PendingWoodStaffChainStrike>();
+  protected readonly pendingStormIncarnates = new Map<string, PendingStormIncarnate>();
+  protected readonly pendingVoidFractures = new Map<string, PendingVoidFracture>();
   private readonly pendingPublishes = new Set<Promise<void>>();
   private readonly lastPersistedProfileSnapshots = new Map<string, string>();
   private mobSpatialDirty = true;
@@ -388,6 +400,8 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       performTeleportScroll: (playerId, player) => this.performTeleportScroll(playerId, player),
     });
     this.updatePendingWoodStaffChainStrikes(now);
+    this.updatePendingStormIncarnates(now);
+    this.updatePendingVoidFractures(now);
     this.statusEffects.update(now, { includeMobBurns: options.includeMobBurns });
     this.projectileSystem.update(deltaSeconds, now);
   }
@@ -408,6 +422,25 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       }
 
       this.pendingWoodStaffChainStrikes.set(ownerId, nextPending);
+    }
+  }
+
+  private updatePendingStormIncarnates(now: number) {
+    for (const [ownerId, pending] of this.pendingStormIncarnates.entries()) {
+      const next = updateStormIncarnateRuntime(this.runtime.woodStaffStormIncarnateContext(), pending, now);
+      if (!next) {
+        this.pendingStormIncarnates.delete(ownerId);
+      } else {
+        this.pendingStormIncarnates.set(ownerId, next);
+      }
+    }
+  }
+
+  private updatePendingVoidFractures(now: number) {
+    for (const [ownerId, pending] of this.pendingVoidFractures.entries()) {
+      if (now < pending.fireAt) continue;
+      executePendingVoidFractureRuntime(this.runtime.woodStaffVoidFractureContext(), pending, now);
+      this.pendingVoidFractures.delete(ownerId);
     }
   }
 
@@ -473,6 +506,11 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
           candidate,
           weaponProgression,
         ),
+      performWoodStaffStormIncarnate: (candidate: BasePlayerState) =>
+        this.performWoodStaffStormIncarnate(sessionId, candidate, weaponProgression),
+      performWoodStaffVoidFracture: (candidate: BasePlayerState) =>
+        this.performWoodStaffVoidFracture(sessionId, candidate, weaponProgression),
+      woodStaffVoidFractureCooldownReductionMs: getItemProgressionBonuses(player.weaponItem, weaponProgression).woodStaffVoidFractureCooldownReductionMs,
     };
 
     const progressionBonuses = getItemProgressionBonuses(player.weaponItem, weaponProgression);
@@ -484,6 +522,15 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
       return;
     }
     if (skillId === "woodStaffChainStrike" && !progressionBonuses.grantsWoodStaffChainStrike) {
+      return;
+    }
+    if (skillId === "woodStaffSpectralVolley" && !progressionBonuses.grantsWoodStaffSpectralVolley) {
+      return;
+    }
+    if (skillId === "woodStaffStormIncarnate" && !progressionBonuses.grantsWoodStaffStormIncarnate) {
+      return;
+    }
+    if (skillId === "woodStaffVoidFracture" && !progressionBonuses.grantsWoodStaffVoidFracture) {
       return;
     }
 
@@ -670,6 +717,42 @@ export abstract class BaseGameRoom<TPlayer extends BasePlayerState = BasePlayerS
     );
     if (pending) {
       this.pendingWoodStaffChainStrikes.set(ownerId, pending);
+    }
+  }
+
+  protected performWoodStaffStormIncarnate(
+    ownerId: string,
+    player: BasePlayerState,
+    weaponProgression?: ItemProgressionState | null,
+  ) {
+    const now = Date.now();
+    const pending = performWoodStaffStormIncarnateRuntime(
+      this.runtime.woodStaffStormIncarnateContext(),
+      ownerId,
+      player,
+      weaponProgression ?? null,
+      now,
+    );
+    if (pending) {
+      this.pendingStormIncarnates.set(ownerId, pending);
+    }
+  }
+
+  protected performWoodStaffVoidFracture(
+    ownerId: string,
+    player: BasePlayerState,
+    weaponProgression?: ItemProgressionState | null,
+  ) {
+    const now = Date.now();
+    const pending = performWoodStaffVoidFractureRuntime(
+      this.runtime.woodStaffVoidFractureContext(),
+      ownerId,
+      player,
+      weaponProgression ?? null,
+      now,
+    );
+    if (pending) {
+      this.pendingVoidFractures.set(ownerId, pending);
     }
   }
 

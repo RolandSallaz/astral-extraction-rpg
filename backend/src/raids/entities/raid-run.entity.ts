@@ -1,5 +1,4 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
-import { PartyEntity } from '../../parties/entities/party.entity';
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 import type { RaidRuntimeState } from '@mmorpg/shared';
 
 @Entity('raid_runs')
@@ -59,11 +58,8 @@ export class RaidRunEntity {
   @Column({ type: 'int', default: 20 })
   height: number;
 
-  @ManyToOne(() => PartyEntity, {
-    nullable: true,
-    eager: true,
-  })
-  party: PartyEntity | null;
+  @Column({ type: 'uuid', nullable: true })
+  partyId: string | null;
 
   @CreateDateColumn()
   createdAt: Date;
