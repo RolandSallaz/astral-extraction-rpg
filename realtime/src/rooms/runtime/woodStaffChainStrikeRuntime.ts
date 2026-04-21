@@ -35,6 +35,7 @@ export interface WoodStaffChainStrikeContext {
 
 const CHAIN_STEP_DELAY_MS = 300;
 const CHAIN_HIT_VISUAL_LOCK_MS = 220;
+const CHAIN_STRIKE_DAMAGE_SCALE = 0.75;
 
 export type PendingWoodStaffChainStrike = {
   ownerId: string;
@@ -79,7 +80,7 @@ export function performWoodStaffChainStrike(
 
   const baseDamage = Math.max(1, ctx.profile.meleeStrikeDamage);
   const strengthBonus = Math.max(0, player.strength - 1) * 2;
-  const damage = resolveWoodStaffStrikeDamage(baseDamage + strengthBonus, bonuses);
+  const damage = resolveChainStrikeDamage(baseDamage + strengthBonus, bonuses);
   const didHit = executeChainStrikeHit(ctx, ownerId, player, primaryTarget, damage, bonuses);
   if (didHit) {
     const totalHitCount = getWoodStaffChainStrikeHitCount(bonuses);
@@ -132,7 +133,7 @@ export function continueWoodStaffChainStrike(
 
   const baseDamage = Math.max(1, ctx.profile.meleeStrikeDamage);
   const strengthBonus = Math.max(0, player.strength - 1) * 2;
-  const damage = resolveWoodStaffStrikeDamage(baseDamage + strengthBonus, bonuses);
+  const damage = resolveChainStrikeDamage(baseDamage + strengthBonus, bonuses);
   const didHit = executeChainStrikeHit(ctx, pending.ownerId, player, target, damage, bonuses);
   if (!didHit) {
     return null;
@@ -161,7 +162,14 @@ function getWoodStaffChainStrikeHitCount(bonuses: ReturnType<typeof getItemProgr
 }
 
 function getWoodStaffChainStrikeSafetyHitCount(totalHitCount: number) {
-  return Math.max(totalHitCount, totalHitCount + 6);
+  return Math.max(totalHitCount, totalHitCount + 3);
+}
+
+function resolveChainStrikeDamage(
+  baseDamage: number,
+  bonuses: ReturnType<typeof getItemProgressionBonuses>,
+) {
+  return Math.max(1, Math.round(resolveWoodStaffStrikeDamage(baseDamage, bonuses) * CHAIN_STRIKE_DAMAGE_SCALE));
 }
 
 function findPreviousChainTarget(

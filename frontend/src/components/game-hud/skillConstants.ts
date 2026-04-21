@@ -4,24 +4,32 @@ import type { SkillId } from '@/components/game-hud/types';
 
 export const SKILL_ICONS: Partial<Record<SkillId, { src: string; alt: string }>> = {
   woodStaffStrike: {
-    src: '/items/equipment/wood_staff.png',
+    src: '/ui/skills/wood-staff-strike-skill.png',
     alt: 'Wood Staff Strike',
   },
   woodStaffDash: {
-    src: '/items/equipment/wood_staff.png',
+    src: '/ui/skills/wood-staff-dash-skill.png',
     alt: 'Wood Staff Dash',
   },
   woodStaffSlam: {
-    src: '/items/equipment/wood_staff.png',
+    src: '/ui/skills/wood-staff-slam-skill.png',
     alt: 'Wood Staff Slam',
   },
   woodStaffChainStrike: {
-    src: '/items/equipment/wood_staff.png',
+    src: '/ui/skills/wood-staff-chain-strike-skill.png',
     alt: 'Chain Strike',
   },
   woodStaffSpectralVolley: {
-    src: '/items/equipment/wood_staff.png',
+    src: '/ui/skills/wood-staff-spectral-volley-skill.png',
     alt: 'Spectral Volley',
+  },
+  woodStaffStormIncarnate: {
+    src: '/ui/skills/wood-staff-storm-incarnate-skill.png',
+    alt: 'Storm Incarnate',
+  },
+  woodStaffVoidFracture: {
+    src: '/ui/skills/wood-staff-void-fracture-skill.png',
+    alt: 'Void Fracture',
   },
   fireball: {
     src: '/ui/skills/fireball-skill-16x16.png',
@@ -41,8 +49,10 @@ export const SKILL_COOLDOWN_MS: Record<SkillId, number> = {
   woodStaffStrike: 450,
   woodStaffDash: 2000,
   woodStaffSlam: 6000,
-  woodStaffChainStrike: 800,
+  woodStaffChainStrike: 1400,
   woodStaffSpectralVolley: 3000,
+  woodStaffStormIncarnate: 30000,
+  woodStaffVoidFracture: 25000,
   fireball: 1000,
   fireNova: 10000,
   fireField: 12000,
@@ -52,8 +62,10 @@ export const SKILL_TOOLTIP_STATS: Record<SkillId, string[]> = {
   woodStaffStrike: ['Close-range strike', 'Cooldown: 0.45s'],
   woodStaffDash: ['Dash like a skeleton', 'Physical hit on impact', 'Cooldown: 2s'],
   woodStaffSlam: ['Area hit around you', 'Physical damage', 'Cooldown: 6s'],
-  woodStaffChainStrike: ['Strike bounces between 3 enemies', 'Shares strike cooldown'],
+  woodStaffChainStrike: ['Strike bounces between 3 enemies', 'Cooldown: 1.4s'],
   woodStaffSpectralVolley: ['Fires 3 bolts in a spread', 'Cooldown: 3s'],
+  woodStaffStormIncarnate: ['Transform into a storm for 5s', 'Auto-strikes nearest enemy every 0.4s', 'Cooldown: 30s'],
+  woodStaffVoidFracture: ['AOE blast around you', 'Stuns all nearby enemies', 'Cooldown: 25s'],
   fireball: ['20 damage', 'Applies burning', 'Cooldown: 1s'],
   fireNova: ['12 projectiles around you', 'Applies burning', 'Cooldown: 10s'],
   fireField: ['3x3 burning ground', '10s duration', 'Cooldown: 12s'],

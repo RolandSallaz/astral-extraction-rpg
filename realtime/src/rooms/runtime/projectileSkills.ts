@@ -100,6 +100,13 @@ export function applyHealingMultiplier(amount: number, player: CombatGemPlayer |
 }
 
 export function shouldProjectileDealDirectDamage(skillId: string) {
+  return skillId === "fireball"
+    || skillId === FIREBALL_SPLIT_SKILL_ID
+    || skillId === "fireNova"
+    || skillId === "woodStaffSpectralVolley";
+}
+
+export function shouldProjectileApplyBurn(skillId: string) {
   return skillId === "fireball" || skillId === FIREBALL_SPLIT_SKILL_ID || skillId === "fireNova";
 }
 

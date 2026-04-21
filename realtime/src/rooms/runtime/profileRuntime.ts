@@ -22,8 +22,10 @@ type RoomProfilePlayer = BasePlayerState & {
   fireNovaCooldownEndsAt: number;
   fireFieldCooldownEndsAt: number;
   woodStaffStrikeCooldownEndsAt: number;
+  woodStaffChainStrikeCooldownEndsAt: number;
   woodStaffDashCooldownEndsAt: number;
   woodStaffSlamCooldownEndsAt: number;
+  woodStaffSpectralVolleyCooldownEndsAt: number;
   castingSkillId: string;
   castStartedAt: number;
   castEndsAt: number;
@@ -92,8 +94,10 @@ export function initializeRoomPlayerTransientState(player: RoomProfilePlayer) {
   player.fireNovaCooldownEndsAt = 0;
   player.fireFieldCooldownEndsAt = 0;
   player.woodStaffStrikeCooldownEndsAt = 0;
+  player.woodStaffChainStrikeCooldownEndsAt = 0;
   player.woodStaffDashCooldownEndsAt = 0;
   player.woodStaffSlamCooldownEndsAt = 0;
+  player.woodStaffSpectralVolleyCooldownEndsAt = 0;
   player.castingSkillId = "";
   player.castStartedAt = 0;
   player.castEndsAt = 0;

@@ -1,4 +1,4 @@
-import { getItemProgressionBonuses } from "@mmorpg/shared";
+import { WOOD_STAFF_CHAIN_STRIKE_COOLDOWN_MS } from "@mmorpg/shared";
 import type { BasePlayerState } from "../schema/BasePlayerState.js";
 import type { SkillCastContext, SkillHandler } from "./SkillHandler.js";
 
@@ -7,16 +7,15 @@ export const WoodStaffChainStrikeHandler: SkillHandler = {
   needsTarget: true,
 
   getCooldownEndsAt(player: BasePlayerState) {
-    return player.woodStaffStrikeCooldownEndsAt;
+    return player.woodStaffChainStrikeCooldownEndsAt;
   },
 
   setCooldownEndsAt(player: BasePlayerState, value: number) {
-    player.woodStaffStrikeCooldownEndsAt = value;
+    player.woodStaffChainStrikeCooldownEndsAt = value;
   },
 
-  getCooldownMs(ctx: SkillCastContext) {
-    const bonuses = getItemProgressionBonuses(ctx.player.weaponItem, ctx.weaponProgression);
-    return Math.max(0, ctx.profile.meleeStrikeCooldownMs + bonuses.meleeStrikeCooldownDeltaMs);
+  getCooldownMs() {
+    return WOOD_STAFF_CHAIN_STRIKE_COOLDOWN_MS;
   },
 
   getCastTimeMs() {

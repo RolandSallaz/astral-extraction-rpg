@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PlayerEntity } from '../players/entities/player.entity';
 import { PlayerSessionEntity } from './entities/player-session.entity';
+import { SessionActivityService } from './session-activity.service';
 
 @Injectable()
 export class PlayerSessionsService {
@@ -11,6 +12,7 @@ export class PlayerSessionsService {
     private readonly playerSessionsRepository: Repository<PlayerSessionEntity>,
     @InjectRepository(PlayerEntity)
     private readonly playersRepository: Repository<PlayerEntity>,
+    private readonly sessionActivityService: SessionActivityService,
   ) {}
 
   async replaceSession(playerId: string, token: string) {
@@ -21,6 +23,7 @@ export class PlayerSessionsService {
         token,
       }),
     );
+    this.sessionActivityService.replacePlayerSession(playerId, token);
   }
 
   async findPlayerByToken(token: string) {
@@ -39,5 +42,13 @@ export class PlayerSessionsService {
         },
       },
     });
+  }
+
+  touchPlayerActivity(playerId: string, token: string) {
+    this.sessionActivityService.touch(playerId, token);
+  }
+
+  isPlayerActive(playerId: string) {
+    return this.sessionActivityService.isPlayerActive(playerId);
   }
 }

@@ -96,6 +96,8 @@ export function createCharacterVisual(
     .setScale(1.75)
     .setAlpha(0.9)
     .setVisible(false);
+  const stormAura = scene.add.graphics().setVisible(false);
+  const voidFractureAura = scene.add.graphics().setVisible(false);
   const head = scene.add
     .image(0, 0, PLAYER_HEAD_TEXTURE_KEY, PLAYER_HEAD_DEFAULT_FRAME)
     .setDisplaySize(
@@ -146,6 +148,8 @@ export function createCharacterVisual(
   container.add(rightEye);
   container.add(castItem);
   container.add(burnEffect);
+  container.add(stormAura);
+  container.add(voidFractureAura);
 
   const nameplate = scene.add
     .text(x, y - 24, name, {
@@ -278,6 +282,8 @@ export function createCharacterVisual(
     castItem,
     burnEffect,
     swingTrail,
+    stormAura,
+    voidFractureAura,
     swingTrailPoints: [],
     weaponEffects: [],
     head,
@@ -333,6 +339,7 @@ export function createCharacterVisual(
     currentHealingEndsAt: 0,
     currentHealingStartedAt: 0,
     currentHealingDurationMs: 0,
+    currentStormIncarnateEndsAt: 0,
     currentCastingSkillId: '',
     currentCastStartedAt: 0,
     currentCastEndsAt: 0,

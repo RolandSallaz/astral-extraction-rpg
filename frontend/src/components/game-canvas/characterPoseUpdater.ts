@@ -368,6 +368,8 @@ export function updateCharacterPose(
 
   const trailPoints = character.swingTrailPoints;
   const swingTrail = character.swingTrail;
+  const stormAura = character.stormAura;
+  const voidFractureAura = character.voidFractureAura;
   if (!showWeapon) {
     trailPoints.length = 0;
     swingTrail.clear();
@@ -418,6 +420,167 @@ export function updateCharacterPose(
       swingTrail.clear();
       swingTrail.setVisible(false);
     }
+  }
+  if (character.currentStormIncarnateEndsAt > castNow) {
+    const remainingMs = Math.max(0, character.currentStormIncarnateEndsAt - castNow);
+    const normalized = Phaser.Math.Clamp(remainingMs / 5000, 0.2, 1);
+    const profile = isRaidScene ? RAID_GAMEPLAY_PROFILE : WORLD_GAMEPLAY_PROFILE;
+    const radius = profile.tileSize * profile.woodStaffStormIncarnateAutoRangeTiles;
+    const pulseRadius = radius * (0.95 + 0.04 * Math.sin(character.effectPhase * 2.1));
+    const outerRadius = pulseRadius * 1.02;
+    const innerRadius = pulseRadius * 0.72;
+    const eyeRadius = tileSize * 0.92;
+    const swirlOffset = character.effectPhase * 1.7;
+    const centerY = 0;
+    stormAura.clear();
+    stormAura.setVisible(true);
+    stormAura.fillStyle(0xb89963, 0.05 * normalized);
+    stormAura.fillCircle(0, centerY, outerRadius * 1.04);
+    stormAura.fillStyle(0xe6d7b7, 0.025 * normalized);
+    stormAura.fillCircle(0, centerY, eyeRadius * 1.08);
+
+    stormAura.lineStyle(18, 0xf6e7c6, 0.12 * normalized);
+    stormAura.strokeCircle(0, centerY, outerRadius);
+    stormAura.lineStyle(10, 0xc7ab74, 0.2 * normalized);
+    stormAura.strokeCircle(0, centerY, innerRadius);
+    stormAura.lineStyle(6, 0xffffff, 0.09 * normalized);
+    stormAura.strokeCircle(0, centerY, eyeRadius);
+
+    for (let ringIndex = 0; ringIndex < 3; ringIndex += 1) {
+      const ringRadius = pulseRadius * (0.42 + ringIndex * 0.19 + Math.sin(character.effectPhase * 2.4 + ringIndex) * 0.02);
+      stormAura.lineStyle(
+        4 + (2 - ringIndex) * 2,
+        ringIndex === 0 ? 0xf2dfb5 : ringIndex === 1 ? 0xd7c197 : 0xa98c5a,
+        (0.12 - ringIndex * 0.02) * normalized,
+      );
+      stormAura.beginPath();
+      stormAura.arc(0, centerY, ringRadius, swirlOffset * (1.1 + ringIndex * 0.22), swirlOffset * (1.1 + ringIndex * 0.22) + Math.PI * 1.32, false);
+      stormAura.strokePath();
+      stormAura.beginPath();
+      stormAura.arc(0, centerY, ringRadius * 0.92, -swirlOffset * (0.85 + ringIndex * 0.18), -swirlOffset * (0.85 + ringIndex * 0.18) + Math.PI * 0.88, false);
+      stormAura.strokePath();
+    }
+
+    for (let index = 0; index < 14; index += 1) {
+      const angle = swirlOffset * 1.25 + index * ((Math.PI * 2) / 14);
+      const startRadius = pulseRadius * (0.2 + (index % 3) * 0.08);
+      const midRadius = pulseRadius * (0.56 + (index % 2) * 0.08);
+      const endRadius = pulseRadius * (0.9 + (index % 4) * 0.02);
+      const bend = angle + (index % 2 === 0 ? 0.24 : -0.2);
+      const startX = Math.cos(angle) * startRadius;
+      const startY = centerY + Math.sin(angle) * startRadius;
+      const midX = Math.cos(bend) * midRadius;
+      const midY = centerY + Math.sin(bend) * midRadius;
+      const endX = Math.cos(angle + 0.14) * endRadius;
+      const endY = centerY + Math.sin(angle + 0.14) * endRadius;
+
+      stormAura.lineStyle(index % 3 === 0 ? 5 : 3, 0xe8d3aa, (0.08 + index * 0.006) * normalized);
+      stormAura.beginPath();
+      stormAura.moveTo(startX, startY);
+      stormAura.lineTo(midX, midY);
+      stormAura.lineTo(endX, endY);
+      stormAura.strokePath();
+    }
+
+    for (let index = 0; index < 6; index += 1) {
+      const angle = -swirlOffset * 0.86 + index * ((Math.PI * 2) / 6);
+      const boltStartRadius = pulseRadius * (0.74 + (index % 2) * 0.08);
+      const boltMidRadius = pulseRadius * (0.48 + (index % 3) * 0.05);
+      const startX = Math.cos(angle) * boltStartRadius;
+      const startY = centerY + Math.sin(angle) * boltStartRadius;
+      const midX = Math.cos(angle + 0.18) * boltMidRadius;
+      const midY = centerY + Math.sin(angle + 0.18) * boltMidRadius;
+      const endX = Math.cos(angle - 0.08) * eyeRadius * 0.8;
+      const endY = centerY + Math.sin(angle - 0.08) * eyeRadius * 0.8;
+
+      stormAura.lineStyle(index % 2 === 0 ? 4 : 3, 0xfff7e2, (0.12 + Math.sin(character.effectPhase * 6 + index) * 0.025) * normalized);
+      stormAura.beginPath();
+      stormAura.moveTo(startX, startY);
+      stormAura.lineTo(midX, midY);
+      stormAura.lineTo(endX, endY);
+      stormAura.strokePath();
+    }
+
+    for (let index = 0; index < 8; index += 1) {
+      const angle = swirlOffset * 0.72 + index * ((Math.PI * 2) / 8);
+      const gustX = Math.cos(angle) * pulseRadius * (0.78 + (index % 2) * 0.06);
+      const gustY = centerY + Math.sin(angle) * pulseRadius * (0.78 + (index % 2) * 0.06);
+      const gustR = tileSize * (0.12 + (index % 3) * 0.03);
+      stormAura.fillStyle(0xf3e7cb, 0.045 + (index % 3) * 0.01);
+      stormAura.fillCircle(gustX, gustY, gustR);
+    }
+  } else {
+    stormAura.clear();
+    stormAura.setVisible(false);
+  }
+  if (
+    character.currentCastingSkillId === 'woodStaffVoidFracture' &&
+    character.currentCastEndsAt > character.currentCastStartedAt &&
+    character.currentCastEndsAt > castNow
+  ) {
+    const castDuration = Math.max(1, character.currentCastEndsAt - character.currentCastStartedAt);
+    const castProgress = Phaser.Math.Clamp(
+      (castNow - character.currentCastStartedAt) / castDuration,
+      0,
+      1,
+    );
+    const profile = isRaidScene ? RAID_GAMEPLAY_PROFILE : WORLD_GAMEPLAY_PROFILE;
+    const fractureRadius = profile.tileSize * profile.woodStaffVoidFractureRadiusTiles;
+    const pulseRadius = fractureRadius * (0.95 + Math.sin(castProgress * Math.PI) * 0.06);
+    const dustAlpha = 0.18 + Math.sin(castProgress * Math.PI) * 0.16;
+    const crackAlpha = 0.14 + castProgress * 0.28;
+    const outerRadius = pulseRadius;
+    const innerRadius = pulseRadius * 0.72;
+    const phase = character.effectPhase * 1.9;
+
+    voidFractureAura.clear();
+    voidFractureAura.setVisible(true);
+    voidFractureAura.fillStyle(0xc5ae7a, 0.05 + dustAlpha * 0.35);
+    voidFractureAura.fillCircle(0, 0, outerRadius * 1.04);
+    voidFractureAura.lineStyle(14, 0xe3cf9b, dustAlpha);
+    voidFractureAura.strokeCircle(0, 0, outerRadius);
+    voidFractureAura.lineStyle(8, 0xb99662, dustAlpha * 0.95);
+    voidFractureAura.strokeCircle(0, 0, innerRadius);
+
+    for (let index = 0; index < 12; index += 1) {
+      const angle = phase + index * ((Math.PI * 2) / 12);
+      const startRadius = innerRadius * (0.3 + (index % 2) * 0.08);
+      const endRadius = pulseRadius * (0.9 + (index % 3) * 0.05);
+      const branchAngle = angle + (index % 2 === 0 ? 0.2 : -0.24);
+      const startX = Math.cos(angle) * startRadius;
+      const startY = Math.sin(angle) * startRadius;
+      const midX = Math.cos(angle) * (pulseRadius * 0.58);
+      const midY = Math.sin(angle) * (pulseRadius * 0.58);
+      const endX = Math.cos(angle) * endRadius;
+      const endY = Math.sin(angle) * endRadius;
+      const branchX = midX + Math.cos(branchAngle) * pulseRadius * 0.2;
+      const branchY = midY + Math.sin(branchAngle) * pulseRadius * 0.12;
+
+      voidFractureAura.lineStyle(index % 2 === 0 ? 4 : 3, 0x6e5331, crackAlpha);
+      voidFractureAura.beginPath();
+      voidFractureAura.moveTo(startX, startY);
+      voidFractureAura.lineTo(midX, midY);
+      voidFractureAura.lineTo(endX, endY);
+      voidFractureAura.strokePath();
+
+      voidFractureAura.lineStyle(2, 0x8d6d42, crackAlpha * 0.7);
+      voidFractureAura.beginPath();
+      voidFractureAura.moveTo(midX, midY);
+      voidFractureAura.lineTo(branchX, branchY);
+      voidFractureAura.strokePath();
+    }
+
+    for (let index = 0; index < 10; index += 1) {
+      const angle = -phase * 0.7 + index * ((Math.PI * 2) / 10);
+      const puffX = Math.cos(angle) * pulseRadius * (0.68 + (index % 2) * 0.08);
+      const puffY = Math.sin(angle) * pulseRadius * (0.68 + (index % 2) * 0.08);
+      const puffRadius = tileSize * (0.16 + (index % 3) * 0.04);
+      voidFractureAura.fillStyle(0xd8c08f, 0.06 + dustAlpha * 0.4);
+      voidFractureAura.fillCircle(puffX, puffY, puffRadius);
+    }
+  } else {
+    voidFractureAura.clear();
+    voidFractureAura.setVisible(false);
   }
   character.castItem.x = 10 + character.currentWeaponOffsetX;
   character.castItem.y = 2 + weaponBob + character.currentWeaponOffsetY;

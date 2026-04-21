@@ -6,6 +6,7 @@ import {
 } from '@/lib/itemBalance';
 import {
   getItemProgressionBonuses,
+  resolveWoodStaffStrikeCooldownMs,
   resolveWoodStaffStrikeDamage,
   SKILL_REGISTRY,
   WOOD_STAFF_CHAIN_STRIKE_BASE_BOUNCE_RADIUS_PX,
@@ -138,7 +139,7 @@ function getDynamicItemTooltipLines(
       const chainStrikeCooldownMs = SKILL_REGISTRY.woodStaffChainStrike.baseCooldownMs;
       const strikeDamage = resolveWoodStaffStrikeDamage(WORLD_GAMEPLAY_PROFILE.meleeStrikeDamage, bonuses);
       const strikeRangePx = WORLD_GAMEPLAY_PROFILE.meleeStrikeRange + bonuses.meleeStrikeRangeBonusPx;
-      const strikeCooldownMs = Math.max(0, WORLD_GAMEPLAY_PROFILE.meleeStrikeCooldownMs + bonuses.meleeStrikeCooldownDeltaMs);
+      const strikeCooldownMs = resolveWoodStaffStrikeCooldownMs(WORLD_GAMEPLAY_PROFILE.meleeStrikeCooldownMs, bonuses);
 
       const lines = [
         `Strike damage: ${strikeDamage}`,
@@ -159,7 +160,16 @@ function getDynamicItemTooltipLines(
       if (bonuses.woodStaffChainStrikeRangeBonusPx > 0) lines.push(`Chain start range: +${formatTilesFromPixels(bonuses.woodStaffChainStrikeRangeBonusPx)}`);
       if (bonuses.woodStaffChainStrikeBounceRadiusBonusPx > 0) lines.push(`Chain search radius: +${formatTilesFromPixels(bonuses.woodStaffChainStrikeBounceRadiusBonusPx)}`);
       if (bonuses.woodStaffChainStrikeRefundChance > 0) lines.push(`Chain bounce refund: ${Math.round(bonuses.woodStaffChainStrikeRefundChance * 100)}%`);
-      lines.push(`Spectral Volley: ${bonuses.grantsWoodStaffSpectralVolley ? 'unlocked (3.00s)' : 'locked'}`);
+      if (bonuses.grantsWoodStaffSpectralVolley) {
+        const boltCount = 3 + bonuses.woodStaffSpectralVolleyBonusBolts;
+        const volleyDesc = [`${boltCount} bolts`];
+        if (bonuses.woodStaffSpectralVolleySpreadBonusDeg > 0) volleyDesc.push(`+${bonuses.woodStaffSpectralVolleySpreadBonusDeg}° spread`);
+        if (bonuses.woodStaffSpectralVolleyPiercing) volleyDesc.push('piercing');
+        if (bonuses.woodStaffSpectralVolleyRefundChance > 0) volleyDesc.push(`${Math.round(bonuses.woodStaffSpectralVolleyRefundChance * 100)}% echo`);
+        lines.push(`Spectral Volley: ${volleyDesc.join(', ')} (3.00s)`);
+      } else {
+        lines.push('Spectral Volley: locked');
+      }
       return lines;
     }
     default:
@@ -180,7 +190,7 @@ export function getSkillTooltipLines(
   switch (skillId) {
     case 'woodStaffStrike': {
       const bonuses = getItemProgressionBonuses(weaponItemId, itemProgression);
-      const cooldownMs = Math.max(0, WORLD_GAMEPLAY_PROFILE.meleeStrikeCooldownMs + bonuses.meleeStrikeCooldownDeltaMs);
+      const cooldownMs = resolveWoodStaffStrikeCooldownMs(WORLD_GAMEPLAY_PROFILE.meleeStrikeCooldownMs, bonuses);
       return ['Close-range strike', `Cooldown: ${formatSeconds(cooldownMs)}`];
     }
     case 'woodStaffDash': {

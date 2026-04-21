@@ -56,6 +56,12 @@ export function getAvailableSkills(
     if (bonuses.grantsWoodStaffSpectralVolley) {
       availableSkills.push('woodStaffSpectralVolley');
     }
+    if (bonuses.grantsWoodStaffStormIncarnate) {
+      availableSkills.push('woodStaffStormIncarnate');
+    }
+    if (bonuses.grantsWoodStaffVoidFracture) {
+      availableSkills.push('woodStaffVoidFracture');
+    }
   }
 
   return availableSkills;
@@ -111,7 +117,7 @@ export function parseStoredActionBarBindings(
 
       if (
         binding.kind === 'skill' &&
-        ['woodStaffStrike', 'woodStaffChainStrike', 'woodStaffDash', 'woodStaffSlam', 'fireNova', 'fireField'].includes(binding.skillId)
+        ['woodStaffStrike', 'woodStaffChainStrike', 'woodStaffDash', 'woodStaffSlam', 'woodStaffSpectralVolley', 'woodStaffStormIncarnate', 'woodStaffVoidFracture', 'fireNova', 'fireField'].includes(binding.skillId)
       ) {
         nextBindings[key] = { kind: 'skill', skillId: binding.skillId as SkillId };
         return;

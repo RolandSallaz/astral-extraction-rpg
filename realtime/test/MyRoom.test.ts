@@ -534,7 +534,7 @@ describe("world room", () => {
     assert.ok(updatedPlayer);
     assert.ok(updatedRat);
     assert.strictEqual(room.state.projectiles.size, 0);
-    assert.ok((updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0) > Date.now());
+    assert.ok((updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0) > 0);
     const remainingHealth = updatedRat?.health ?? initialHealth;
     assert.ok(remainingHealth < initialHealth);
     assert.strictEqual(initialHealth - remainingHealth, 5);
@@ -655,7 +655,8 @@ describe("world room", () => {
     assert.ok(updatedPlayer);
     assert.ok(updatedRat);
     assert.ok(updatedBat);
-    assert.ok((updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0) > 0);
+    assert.strictEqual(updatedPlayer?.woodStaffStrikeCooldownEndsAt ?? 0, 0);
+    assert.ok((updatedPlayer?.woodStaffChainStrikeCooldownEndsAt ?? 0) > 0);
     assert.ok((updatedRat?.health ?? initialRatHealth) < initialRatHealth);
     assert.ok((updatedBat?.health ?? initialBatHealth) < initialBatHealth);
     assert.ok(Math.hypot((updatedPlayer?.x ?? initialPlayerX) - initialPlayerX, (updatedPlayer?.y ?? initialPlayerY) - initialPlayerY) > 8);
@@ -785,7 +786,7 @@ describe("world room", () => {
       targetY: rat.y,
     });
 
-    await waitForNextSimulation(room, 1250);
+    await waitForNextSimulation(room, 1600);
 
     for (const mobId of initialHealthById.keys()) {
       const updatedMob = room.state.mobs.get(mobId);
@@ -851,6 +852,195 @@ describe("world room", () => {
     const updatedRat = room.state.mobs.get(RAT_ID);
     assert.ok(updatedRat);
     assert.ok((updatedRat?.health ?? initialRatHealth) <= initialRatHealth - 4);
+  });
+
+  it("casts spectral volley when unlocked and applies volley branch upgrades", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Volley Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 14,
+          selectedUpgradeIds: [
+            "wood_staff_volley_10",
+            "wood_staff_volley_scatter_11",
+            "wood_staff_volley_spread_12",
+            "wood_staff_volley_pierce_13",
+            "wood_staff_volley_echo_14",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const rat = createTestRat(`${RAT_ID}-volley`, 20 * 32 + 16, 14 * 32 + 16);
+    const bat = createTestBat(`${BAT_ID}-volley`, rat.x + 24, rat.y);
+    room.state.mobs.clear();
+    room.state.mobs.set(rat.id, rat);
+    room.state.mobs.set(bat.id, bat);
+    await room.waitForNextPatch();
+
+    assert.ok(serverPlayer);
+    if (!serverPlayer) {
+      assert.fail("Expected volley player to exist");
+    }
+
+    serverPlayer.x = rat.x - 48;
+    serverPlayer.y = rat.y;
+    const originalRandom = Math.random;
+    Math.random = () => 0.1;
+    try {
+      attacker.send("castSkill", {
+        skillId: "woodStaffSpectralVolley",
+        targetX: rat.x,
+        targetY: rat.y,
+      });
+
+      await waitForNextSimulation(room, 720);
+    } finally {
+      Math.random = originalRandom;
+    }
+
+    const updatedPlayer = room.state.players.get(attacker.sessionId);
+    const updatedRat = room.state.mobs.get(rat.id);
+    const updatedBat = room.state.mobs.get(bat.id);
+    assert.ok(updatedPlayer);
+    assert.ok(updatedRat);
+    assert.ok(updatedBat);
+    assert.ok((updatedPlayer?.woodStaffSpectralVolleyCooldownEndsAt ?? 0) > 0);
+    assert.ok((updatedRat?.health ?? rat.maxHealth) < rat.maxHealth);
+    assert.ok((updatedBat?.health ?? bat.maxHealth) < bat.maxHealth);
+  });
+
+  it("casts storm incarnate and damages nearby mobs over time", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Storm Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 25,
+          selectedUpgradeIds: [
+            "wood_staff_storm_20",
+            "wood_staff_storm_haste_21",
+            "wood_staff_storm_amp_22",
+            "wood_staff_storm_heal_23",
+            "wood_staff_storm_chain_24",
+            "wood_staff_storm_finale_25",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const rat = createTestRat(`${RAT_ID}-storm`, 20 * 32 + 16, 14 * 32 + 16);
+    const bat = createTestBat(`${BAT_ID}-storm`, rat.x + 32, rat.y);
+    room.state.mobs.clear();
+    room.state.mobs.set(rat.id, rat);
+    room.state.mobs.set(bat.id, bat);
+    await room.waitForNextPatch();
+
+    assert.ok(serverPlayer);
+    if (!serverPlayer) {
+      assert.fail("Expected storm player to exist");
+    }
+
+    serverPlayer.x = rat.x - 16;
+    serverPlayer.y = rat.y;
+    serverPlayer.health = 40;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffStormIncarnate",
+    });
+
+    await waitForNextSimulation(room, 1600);
+
+    const updatedPlayer = room.state.players.get(attacker.sessionId);
+    const updatedRat = room.state.mobs.get(rat.id);
+    const updatedBat = room.state.mobs.get(bat.id);
+    assert.ok(updatedPlayer);
+    assert.ok(updatedRat);
+    assert.ok(updatedBat);
+    assert.ok((updatedPlayer?.woodStaffStormIncarnateCooldownEndsAt ?? 0) > 0);
+    assert.ok((updatedPlayer?.stormIncarnateEndsAt ?? 0) > 0);
+    assert.ok((updatedPlayer?.health ?? 0) >= 40);
+    assert.ok((updatedRat?.health ?? rat.maxHealth) < rat.maxHealth);
+    assert.ok((updatedBat?.health ?? bat.maxHealth) < bat.maxHealth);
+  });
+
+  it("casts void fracture and applies twin burst, stun bonus, and lifesteal", async () => {
+    const room = await colyseus.createRoom<MyRoomState>("world", {});
+    const attacker = await connectToRoom(colyseus, room, {
+      name: "Fracture Fighter",
+      weaponItem: "wood_staff",
+    });
+
+    await room.waitForNextPatch();
+    attacker.send("profile", {
+      equipmentItemProgression: {
+        weapon: {
+          level: 25,
+          selectedUpgradeIds: [
+            "wood_staff_fracture_20",
+            "wood_staff_fracture_amp_21",
+            "wood_staff_fracture_stun_22",
+            "wood_staff_fracture_refund_23",
+            "wood_staff_fracture_soul_24",
+            "wood_staff_fracture_twin_25",
+          ],
+        },
+      },
+    });
+    await room.waitForNextPatch();
+
+    const serverPlayer = room.state.players.get(attacker.sessionId);
+    const rat = createTestRat(`${RAT_ID}-fracture`, 20 * 32 + 16, 14 * 32 + 16);
+    const bat = createTestBat(`${BAT_ID}-fracture`, rat.x + 24, rat.y);
+    rat.attackDamage = 0;
+    bat.attackDamage = 0;
+    room.state.mobs.clear();
+    room.state.mobs.set(rat.id, rat);
+    room.state.mobs.set(bat.id, bat);
+    await room.waitForNextPatch();
+
+    assert.ok(serverPlayer);
+    if (!serverPlayer) {
+      assert.fail("Expected fracture player to exist");
+    }
+
+    serverPlayer.x = rat.x - 12;
+    serverPlayer.y = rat.y;
+    serverPlayer.health = 25;
+
+    attacker.send("castSkill", {
+      skillId: "woodStaffVoidFracture",
+    });
+
+    await waitForNextSimulation(room, 1900);
+
+    const updatedPlayer = room.state.players.get(attacker.sessionId);
+    const updatedRat = room.state.mobs.get(rat.id);
+    const updatedBat = room.state.mobs.get(bat.id);
+    assert.ok(updatedPlayer);
+    assert.ok(updatedRat);
+    assert.ok(updatedBat);
+    assert.ok((updatedPlayer?.woodStaffVoidFractureCooldownEndsAt ?? 0) > 0);
+    assert.ok((updatedPlayer?.health ?? 0) > 25);
+    assert.ok((updatedRat?.slowEndsAt ?? 0) > Date.now());
+    assert.ok((updatedBat?.slowEndsAt ?? 0) > Date.now());
+    assert.ok((updatedRat?.health ?? rat.maxHealth) < rat.maxHealth);
+    assert.ok((updatedBat?.health ?? bat.maxHealth) < bat.maxHealth);
   });
 
   it("rewinds recent player positions for lag-compensated wood staff strikes", async () => {

@@ -82,7 +82,7 @@ function createRun(
     maxPlayers: scaledTemplate.maxPlayers,
     width: scaledTemplate.width,
     height: scaledTemplate.height,
-    party: null,
+    partyId: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -132,7 +132,6 @@ describe('StartRaidUseCase', () => {
       startedAt: new Date(Date.now() - 20_000),
     });
     const queryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -174,7 +173,6 @@ describe('StartRaidUseCase', () => {
       startedAt: new Date(Date.now() - 35_000),
     });
     const queryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -217,7 +215,6 @@ describe('StartRaidUseCase', () => {
       members: [{ id: 'leader' }, { id: 'member-2' }],
     };
     const queryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
@@ -271,7 +268,6 @@ describe('StartRaidUseCase', () => {
     });
     const scaledTemplate = scaleTemplate(template);
     const queryBuilder = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),

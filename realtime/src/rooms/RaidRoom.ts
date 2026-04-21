@@ -1133,6 +1133,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       player.fireNovaCooldownEndsAt = 0;
       player.fireFieldCooldownEndsAt = 0;
       player.woodStaffStrikeCooldownEndsAt = 0;
+      player.woodStaffChainStrikeCooldownEndsAt = 0;
       player.woodStaffDashCooldownEndsAt = 0;
       player.woodStaffSlamCooldownEndsAt = 0;
       this.clearPlayerCastState(player);
@@ -1174,6 +1175,7 @@ export class RaidRoom extends BaseGameRoom<RaidPlayerState> {
       player.fireNovaCooldownEndsAt = 0;
       player.fireFieldCooldownEndsAt = 0;
       player.woodStaffStrikeCooldownEndsAt = 0;
+      player.woodStaffChainStrikeCooldownEndsAt = 0;
       player.woodStaffDashCooldownEndsAt = 0;
       player.woodStaffSlamCooldownEndsAt = 0;
       this.clearPlayerCastState(player);

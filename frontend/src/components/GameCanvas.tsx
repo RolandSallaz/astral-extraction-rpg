@@ -406,6 +406,9 @@ export function GameCanvas({
   woodStaffChainStrikeCastNonce,
   woodStaffDashCastNonce,
   woodStaffSlamCastNonce,
+  woodStaffSpectralVolleyCastNonce,
+  woodStaffStormIncarnateCastNonce,
+  woodStaffVoidFractureCastNonce,
   useConsumableRequest = null,
   containerStates,
   onContainersStateChange,
@@ -472,6 +475,9 @@ export function GameCanvas({
     woodStaffChainStrike: number;
     woodStaffDash: number;
     woodStaffSlam: number;
+    woodStaffSpectralVolley: number;
+    woodStaffStormIncarnate: number;
+    woodStaffVoidFracture: number;
     fireball: number;
     fireNova: number;
     fireField: number;
@@ -494,6 +500,9 @@ export function GameCanvas({
   woodStaffChainStrikeCastNonce: number;
   woodStaffDashCastNonce: number;
   woodStaffSlamCastNonce: number;
+  woodStaffSpectralVolleyCastNonce: number;
+  woodStaffStormIncarnateCastNonce: number;
+  woodStaffVoidFractureCastNonce: number;
   useConsumableRequest?: {
     source: 'inventory' | 'container';
     slotIndex: number;
@@ -559,6 +568,9 @@ export function GameCanvas({
     woodStaffChainStrike: 0,
     woodStaffDash: 0,
     woodStaffSlam: 0,
+    woodStaffSpectralVolley: 0,
+    woodStaffStormIncarnate: 0,
+    woodStaffVoidFracture: 0,
     fireball: 0,
     fireNova: 0,
     fireField: 0,
@@ -808,6 +820,9 @@ export function GameCanvas({
       woodStaffChainStrikeCastNonce,
       woodStaffDashCastNonce,
       woodStaffSlamCastNonce,
+      woodStaffSpectralVolleyCastNonce,
+      woodStaffStormIncarnateCastNonce,
+      woodStaffVoidFractureCastNonce,
       sessionTokenRef,
       contentVersionRef,
       estimatedOneWayLatencyMsRef,

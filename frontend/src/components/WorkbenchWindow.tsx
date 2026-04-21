@@ -98,9 +98,9 @@ const NODE_STYLE: Record<
 const LINE_ACTIVE   = { stroke: '#5a9035', sw: 2 };
 const LINE_INACTIVE = { stroke: '#1c3010', sw: 1 };
 
-// SVG layout constants — 10 tiers, 70px spacing
+// SVG layout constants — 25 tiers, 70px spacing
 const W = 296;
-const H = 996;
+const H = 1796;
 const CX = W / 2;           // 148
 const BASE_R = 25;
 const NODE_R = 19;
@@ -121,14 +121,32 @@ const TIER_Y: Record<number, number> = {
   12: 812,
   13: 882,
   14: 952,
+  15: 1022,
+  16: 1092,
+  17: 1162,
+  18: 1232,
+  19: 1302,
+  20: 1372,
+  21: 1442,
+  22: 1512,
+  23: 1582,
+  24: 1652,
+  25: 1722,
 };
-const TIERS: ItemProgressionTier[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
+const TIERS: ItemProgressionTier[] = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25];
 
 // Junction (diamond) nodes sit at the midpoint between tiers.
-// JY[0] = between Base and T2 (always active)
-// JY[n] = between T(n+1) and T(n+2), active when weapon.level >= n+1
+// JY[0]  = between T1 and T2  (always active)
+// JY[n]  = between T(n+1) and T(n+2), active when weapon.level >= n+1
+// JY[9]–JY[12]  are SKIPPED (tiers 10–14 use column lines instead)
+// JY[13]–JY[18] = tiers 14–19 neutral section junctions
+// JY[19]–JY[23] are SKIPPED (tiers 20–25 use column lines instead)
 const JUNCTION_R = 4;
-const JY = [80, 147, 217, 287, 357, 427, 497, 567, 637, 707, 777, 847, 917] as const; // y-coords for junctions 0-12
+const JY = [
+  80, 147, 217, 287, 357, 427, 497, 567, 637, // 0–8: T1-T2 … T9-T10
+  707, 777, 847, 917,                          // 9–12: T10-T11 … T13-T14 (column section, not rendered)
+  987, 1057, 1127, 1197, 1267, 1337,           // 13–18: T14-T15 … T19-T20 (neutral section)
+] as const;
 
 function UpgradeTreeSvg({
   weapon,
@@ -147,7 +165,7 @@ function UpgradeTreeSvg({
     const sel = selectedUpgradeByLevel.get(tier);
     if (sel?.id === choiceId) return 'selected';
     if (sel) return 'other-path';
-    if (weapon.nextChoices.some((c) => c.level === tier)) return 'available';
+    if (weapon.nextChoices.some((c) => c.id === choiceId)) return 'available';
     return 'locked';
   };
 
@@ -165,30 +183,87 @@ function UpgradeTreeSvg({
   lineSegments.push({ x1: CX, y1: JY[0] + JUNCTION_R, x2: LEFT_X,  y2: TIER_Y[2] - NODE_R, active: true });
   lineSegments.push({ x1: CX, y1: JY[0] + JUNCTION_R, x2: RIGHT_X, y2: TIER_Y[2] - NODE_R, active: true });
 
-  // Inter-tier junctions: T2->J1->T3, ..., T13->J12->T14
-  ([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13] as const).forEach((tier, i) => {
+  // Inter-tier junctions: T2->J1->T3, ..., T9->J8->T10
+  ([2, 3, 4, 5, 6, 7, 8, 9] as const).forEach((tier, i) => {
     const jIdx = i + 1;
     const jY = JY[jIdx];
     const nextTier = (tier + 1) as ItemProgressionTier;
     const tierChoices = weapon.allTierChoices.find((tc) => tc.tier === tier)?.choices ?? [];
-    const selId   = selectedUpgradeByLevel.get(tier)?.id;
-    // Line from tier node to junction: only active for the chosen branch
+    const selId = selectedUpgradeByLevel.get(tier)?.id;
     tierChoices.forEach((choice, idx) => {
       const choiceX = idx === 0 ? LEFT_X : RIGHT_X;
       lineSegments.push({
-        x1: choiceX,
-        y1: TIER_Y[tier] + NODE_R,
-        x2: CX,
-        y2: jY - JUNCTION_R,
+        x1: choiceX, y1: TIER_Y[tier] + NODE_R,
+        x2: CX, y2: jY - JUNCTION_R,
         active: choice.id === selId && Boolean(selId),
       });
     });
-    // Lines from junction to next tier: active once the tier above is complete (junction conducts)
     const jActive = weapon.level >= tier;
     const nextTierChoices = weapon.allTierChoices.find((tc) => tc.tier === nextTier)?.choices ?? [];
     nextTierChoices.forEach((_choice, idx) => {
       const choiceX = idx === 0 ? LEFT_X : RIGHT_X;
       lineSegments.push({ x1: CX, y1: jY + JUNCTION_R, x2: choiceX, y2: TIER_Y[nextTier] - NODE_R, active: jActive });
+    });
+  });
+
+  // Path commitment columns: T10->T14 use direct vertical lines per column (no center junction)
+  // Column 0 (LEFT_X) = chain path, Column 1 (RIGHT_X) = volley path
+  const tier10Choices = weapon.allTierChoices.find((tc) => tc.tier === 10)?.choices ?? [];
+  const tier10SelectedIdx = tier10Choices.findIndex((c) => c.id === selectedUpgradeByLevel.get(10)?.id);
+
+  ([10, 11, 12, 13] as const).forEach((tier) => {
+    const nextTier = (tier + 1) as ItemProgressionTier;
+    const tierChoices = weapon.allTierChoices.find((tc) => tc.tier === tier)?.choices ?? [];
+    tierChoices.forEach((_choice, idx) => {
+      const colX = idx === 0 ? LEFT_X : RIGHT_X;
+      const active = tier10SelectedIdx === idx && weapon.level >= tier;
+      lineSegments.push({
+        x1: colX, y1: TIER_Y[tier] + NODE_R,
+        x2: colX, y2: TIER_Y[nextTier] - NODE_R,
+        active,
+      });
+    });
+  });
+
+  // Neutral mastery section: T14->T19 converge back to center junctions (JY[13]–JY[18])
+  ([14, 15, 16, 17, 18, 19] as const).forEach((tier, i) => {
+    const jIdx = 13 + i;
+    const jY = JY[jIdx];
+    const nextTier = (tier + 1) as ItemProgressionTier;
+    const tierChoices = weapon.allTierChoices.find((tc) => tc.tier === tier)?.choices ?? [];
+    const selId = selectedUpgradeByLevel.get(tier)?.id;
+    tierChoices.forEach((choice, idx) => {
+      const choiceX = idx === 0 ? LEFT_X : RIGHT_X;
+      lineSegments.push({
+        x1: choiceX, y1: TIER_Y[tier] + NODE_R,
+        x2: CX, y2: jY - JUNCTION_R,
+        active: choice.id === selId && Boolean(selId),
+      });
+    });
+    const jActive = weapon.level >= tier;
+    const nextTierChoices = weapon.allTierChoices.find((tc) => tc.tier === nextTier)?.choices ?? [];
+    nextTierChoices.forEach((_choice, idx) => {
+      const choiceX = idx === 0 ? LEFT_X : RIGHT_X;
+      lineSegments.push({ x1: CX, y1: jY + JUNCTION_R, x2: choiceX, y2: TIER_Y[nextTier] - NODE_R, active: jActive });
+    });
+  });
+
+  // Ultimate path columns: T20->T25 use direct vertical lines per column (no center junction)
+  // Column 0 (LEFT_X) = Storm Incarnate path, Column 1 (RIGHT_X) = Void Fracture path
+  const tier20Choices = weapon.allTierChoices.find((tc) => tc.tier === 20)?.choices ?? [];
+  const tier20SelectedIdx = tier20Choices.findIndex((c) => c.id === selectedUpgradeByLevel.get(20)?.id);
+
+  ([20, 21, 22, 23, 24] as const).forEach((tier) => {
+    const nextTier = (tier + 1) as ItemProgressionTier;
+    const tierChoices = weapon.allTierChoices.find((tc) => tc.tier === tier)?.choices ?? [];
+    tierChoices.forEach((_choice, idx) => {
+      const colX = idx === 0 ? LEFT_X : RIGHT_X;
+      const active = tier20SelectedIdx === idx && weapon.level >= tier;
+      lineSegments.push({
+        x1: colX, y1: TIER_Y[tier] + NODE_R,
+        x2: colX, y2: TIER_Y[nextTier] - NODE_R,
+        active,
+      });
     });
   });
 
@@ -377,9 +452,10 @@ function UpgradeTreeSvg({
           />
         ))}
 
-        {/* ── junction diamonds ── */}
-        {JY.map((jY, jIdx) => {
-          // JY[0] always active; JY[n] active when weapon.level >= n+1
+        {/* ── junction diamonds: T1-T10 and T14-T20; column sections skip junctions ── */}
+        {(JY as unknown as number[]).filter((_, idx) => idx < 9 || (idx >= 13 && idx <= 18)).map((jY, renderIdx) => {
+          // Map renderIdx back to original jIdx to compute active state correctly
+          const jIdx = renderIdx < 9 ? renderIdx : renderIdx - 9 + 13;
           const active = weapon.level >= jIdx + 1;
           return (
             <rect
